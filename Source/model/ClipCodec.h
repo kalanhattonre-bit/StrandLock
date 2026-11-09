@@ -63,7 +63,7 @@ namespace sl::model
 
     /** The clip a payload holds. Refused whole (nothing, with the reason): a payload above kMaxClipBytes,
         more than kMaxClipNotes notes, more than kMaxLanesPerNote lanes in a note, a record or a count that
-        runs past the bytes holding it. Never reads outside [data, data + size), and validates every count
+        runs past the bytes holding it, and a clip that would encode to more than kMaxClipBytes. Never reads outside [data, data + size), and validates every count
         against the bytes left before it allocates for it. */
     DecodeResult decodeClip (const std::uint8_t* data, std::size_t size);
     DecodeResult decodeClip (const std::vector<std::uint8_t>& bytes);

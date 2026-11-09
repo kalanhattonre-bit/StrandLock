@@ -2,9 +2,9 @@
 // unchanged and shares every note it did not make new; and the mode lock (PROMPT 14.5): 1,000 seeded
 // setLaneNodes calls change that one lane of that one note and nothing else.
 //
-// The plan compares "the codec encoding" byte for byte. The clip codec is M1 part 3's, so until it exists
-// these tests compare every field of every note as bit patterns (modelfx::bitIdentical: -0 is not 0) plus the
-// clip settings and the extras pointer; part 3 adds the encoding comparison.
+// Both compare the clip codec's encoding byte for byte, as the plan says, and also every field of every note as bit
+// patterns (modelfx::bitIdentical: -0 is not 0) plus the clip settings and the extras pointer, which the encoding
+// does not show (an object replaced by an equal one).
 
 #include "ModelFixture.h"
 #include "ToolOps.h"
@@ -12,6 +12,7 @@
 #include "core/JsonLite.h"
 #include "core/Lanes.h"
 #include "core/Seeds.h"
+#include "model/ClipCodec.h"
 #include "model/Node.h"
 #include "model/NoteSettings.h"
 #include "model/Presets.h"
@@ -20,6 +21,7 @@
 #include "support/TestRegistry.h"
 
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -44,15 +46,20 @@ namespace
     /** A copy of every note's content, to tell later whether the clip was changed in place. */
     struct Snapshot
     {
-        explicit Snapshot (const model::Clip& c) : clip (c)
+        explicit Snapshot (const model::Clip& c) : clip (c), bytes (model::encodeClip (c))
         {
             for (const auto& n : c.notes)
                 content.push_back (*n);
         }
 
-        /** The clip still holds the same note objects with the same content. */
+        /** The clip still encodes to the same bytes, and holds the same note objects with the same content. */
         bool unchanged (const model::Clip& now, std::string& why) const
         {
+            if (model::encodeClip (now) != bytes)
+            {
+                why = "the encoding changed";
+                return false;
+            }
             if (! sameSettings (now, clip))
             {
                 why = "the clip settings changed";
@@ -77,6 +84,7 @@ namespace
         }
 
         model::Clip clip;                  // the settings and the note pointers as they were
+        std::vector<std::uint8_t> bytes;   // the codec encoding as it was
         std::vector<model::Note> content;  // every note's content as it was
     };
 }
@@ -146,7 +154,8 @@ SL_TEST ("model", immutabilityTools)
     if (! firstProblem.empty())
         note ("first problem: " + firstProblem);
     check (ran == static_cast<int> (cases.size()), fmt ("every case of tools.json ran (%d of %d)", ran, static_cast<int> (cases.size())));
-    check (unchanged == ran, fmt ("the input clip is unchanged after every operation (%d of %d), field by field as bit patterns", unchanged, ran));
+    check (unchanged == ran, fmt ("the input clip is unchanged after every operation (%d of %d): its codec encoding byte-identical, and field by "
+                                  "field as bit patterns", unchanged, ran));
     check (sharing == ran, fmt ("every note an operation did not make new is shared with the input (%d of %d)", sharing, ran));
 }
 
@@ -207,6 +216,7 @@ SL_TEST ("model", modeLock)
 
         std::string why;
         bool ok = before.unchanged (clip, why) && sameSettings (out, clip) && out.notes.size() == clip.notes.size();
+        model::Clip expectedClip = clip;   // the input with only that lane of that note replaced
         if (! ok && why.empty())
             why = "the result's settings or note count differ";
         for (std::size_t j = 0; ok && j < clip.notes.size(); ++j)
@@ -223,6 +233,7 @@ SL_TEST ("model", modeLock)
             }
             model::Note expected = *was;
             expected.lane (lane) = model::normalizeNodes (raw, core::laneDef (lane));
+            expectedClip.notes[j] = std::make_shared<const model::Note> (expected);
             if (out.notes[j] == was)
             {
                 ok = false;
@@ -233,6 +244,11 @@ SL_TEST ("model", modeLock)
                 ok = false;
                 why = "lane " + std::string (core::kLanes[static_cast<int> (lane)].code) + ": " + why;
             }
+        }
+        if (ok && model::encodeClip (out) != model::encodeClip (expectedClip))
+        {
+            ok = false;
+            why = "the codec encoding differs from the input's with only that lane changed";
         }
         if (ok)
             ++locked;
@@ -246,5 +262,5 @@ SL_TEST ("model", modeLock)
         note ("first problem: " + firstProblem);
     check (calls == 1000 && locked == calls,
            fmt ("every call changed only that lane of that note: start, length, pitch, the other 9 lanes, the generators, the settings and "
-                "the extras bit-identical, every other note shared (%d of %d; field by field until the codec exists)", locked, calls));
+                "the extras byte-identical in the codec encoding and bit-identical field by field, every other note shared (%d of %d)", locked, calls));
 }

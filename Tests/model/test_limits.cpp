@@ -1,18 +1,26 @@
 // Edit caps (PLUGIN-PLAN 3 "one table of limits", 4 M1): a Chop that would pass 1024 notes, and Duplicate,
 // Paste and addNote past 4096 notes, are refused with the count and leave the clip unchanged; one note fewer is
 // accepted. Chop's own maxNotes never lets a clip pass 4096. Also the note paste and the prototype's Copy /
-// Paste lanes, which no fixture covers. (The 32 MiB encoded-size cap needs the clip codec: M1 part 3.)
+// Paste lanes, which no fixture covers. And the 32 MiB encoded-size cap (limitEdit, with the running size that
+// ClipDocument keeps): the largest editable clip (4096 notes one byte under 32 MiB) encodes and decodes, one more
+// node or note is refused with the clip unchanged, and so is a Duplicate or Paste under 4096 notes that would
+// pass 32 MiB.
 
 #include "ModelFixture.h"
 
 #include "core/Lanes.h"
 #include "core/Rates.h"
+#include "model/ClipCodec.h"
 #include "model/ClipEdit.h"
 #include "model/Generators.h"
+#include "model/NoteSettings.h"
 #include "model/Tools.h"
 #include "support/Check.h"
 #include "support/TestRegistry.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <set>
 #include <string>
@@ -158,4 +166,115 @@ SL_TEST ("model", pasteAndLanes)
     check (model::sameNodes (pa.lane (core::LaneId::vib), clip.notes[0]->lane (core::LaneId::vib)) && pa.l == 1 && px.l == 1
                && onto.notes.size() == clip.notes.size() && onto.notes[1] == clip.notes[1] && onto.notes[2] == clip.notes[2],
            "lanes outside the mask, lengths and the other notes are untouched; Paste lanes adds no note");
+}
+
+namespace
+{
+    /** A note whose lanes hold `extra` nodes more than flat (2 per lane), filled lane by lane up to 128. Every
+        list is already what normalizeNodes makes of it, so a decoded copy is the same note bit for bit. */
+    model::Note heavyNote (int i, int extra, const std::string& id)
+    {
+        model::Note n = model::mkNote (36 + i % 48, (i % 256) * 1.0, 1.0, id);
+        for (int lane = 0; lane < core::kNumLanes && extra > 0; ++lane)
+        {
+            const int more = std::min (extra, model::kMaxNodes - 2);
+            const int count = 2 + more;
+            model::NodeList nodes;
+            for (int j = 0; j < count; ++j)
+                nodes.push_back (model::mkNode (static_cast<double> (j) / (count - 1), static_cast<double> ((j + i) % 10) / 10.0, model::NodeShape::linear));
+            n.lane (static_cast<core::LaneId> (lane)) = nodes;
+            extra -= more;
+        }
+        return n;
+    }
+
+    std::string heavyId (int i) { return "L" + std::to_string (10000 + i); }
+
+    /** count notes whose encoded sizes add up to `total` bytes (with the header), each about total / count. */
+    model::Clip clipOfSize (int count, std::size_t total)
+    {
+        model::Clip c = model::newClip (64);
+        const std::size_t header = model::encodedHeaderSize (c);
+        const std::size_t plain = model::encodedNoteSize (heavyNote (0, 0, heavyId (0)));   // every id is 6 bytes
+        const std::size_t perNote = (total - header) / static_cast<std::size_t> (count);
+        const std::size_t extra = (perNote - plain) / 25;                                     // 25 bytes per node
+        std::size_t left = total - header - static_cast<std::size_t> (count) * (plain + 25 * extra);
+        const std::size_t moreNodes = left / 25;                                              // one more on the first notes
+        left -= moreNodes * 25;                                                               // under 25 bytes: the first id grows
+        c.notes.reserve (static_cast<std::size_t> (count));
+        for (int i = 0; i < count; ++i)
+        {
+            std::string id = heavyId (i);
+            if (i == 0)
+                id += std::string (left, 'x');
+            const int nodes = static_cast<int> (extra) + (static_cast<std::size_t> (i) < moreNodes ? 1 : 0);
+            c.notes.push_back (std::make_shared<const model::Note> (heavyNote (i, nodes, id)));
+        }
+        return c;
+    }
+
+    bool sameNotes (const model::Clip& a, const model::Clip& b)
+    {
+        bool same = a.notes.size() == b.notes.size();
+        for (std::size_t i = 0; same && i < a.notes.size(); ++i)
+            same = a.notes[i] == b.notes[i];
+        return same;
+    }
+}
+
+SL_TEST ("model", editCapBytes)
+{
+    section ("The 32 MiB cap: the largest editable clip encodes and decodes; one more node or note, or a Duplicate past 32 MiB, is refused");
+
+    const std::size_t cap = model::kMaxClipBytes;
+    const model::Clip largest = clipOfSize (model::kMaxClipNotes, cap - 1);
+    model::ClipSizer sizer;
+    const std::size_t size = sizer.measure (largest);
+    check (largest.notes.size() == 4096 && size == cap - 1 && model::encodedClipSize (largest) == size,
+           fmt ("the largest editable clip: 4096 notes of about 8 KB, %d bytes (one under 32 MiB)", static_cast<int> (size)));
+    {
+        const std::vector<std::uint8_t> bytes = model::encodeClip (largest);
+        const model::DecodeResult d = model::decodeClip (bytes);
+        bool same = d.clip.has_value() && d.clip->notes.size() == largest.notes.size();
+        std::string why;
+        for (std::size_t i = 0; same && i < largest.notes.size(); ++i)
+            same = modelfx::bitIdentical (*d.clip->notes[i], *largest.notes[i], why);
+        check (bytes.size() == size && same, "it encodes and decodes, every note bit for bit " + why);
+        check (d.clip.has_value() && model::encodeClip (*d.clip) == bytes, "and encodes again to the same bytes");
+    }
+
+    // one more node: the Refresh lane (flat, 2 nodes, in every heavy note) of note 5 gets 3
+    const std::string id5 = largest.notes[5]->id;
+    const model::NodeList three { model::mkNode (0, 0.2), model::mkNode (0.5, 0.7), model::mkNode (1, 0.4) };
+    const auto oneMore = model::limitEdit (largest, model::setLaneNodes (largest, id5, core::LaneId::refresh, three), sizer);
+    check (oneMore.refused && oneMore.bytes == cap + 24 && sameNotes (oneMore.clip, largest) && oneMore.ids.empty(),
+           fmt ("one more node is refused at %d bytes, the clip unchanged (every note shared)", static_cast<int> (oneMore.bytes)));
+    const auto addOne = model::limitEdit (largest, model::addNote (largest, 60, 0, 1), sizer);
+    check (addOne.refused && addOne.count == 4097 && sameNotes (addOne.clip, largest), "one more note is refused (4097 notes), the clip unchanged");
+    const model::NodeList two { model::mkNode (0, 0.5), model::mkNode (1, 0.5) };
+    const std::size_t pitch = static_cast<std::size_t> (core::LaneId::pitch);
+    const std::size_t dropped = (largest.notes[5]->c[pitch].size() - 2) * 25;
+    const auto fewer = model::limitEdit (largest, model::setLaneNodes (largest, id5, core::LaneId::pitch, two), sizer);
+    check (! fewer.refused && fewer.bytes == cap - 1 - dropped && fewer.clip.notes[5] != largest.notes[5] && fewer.clip.notes[4] == largest.notes[4],
+           fmt ("an edit that makes the clip smaller is accepted, with its size (%d bytes)", static_cast<int> (fewer.bytes)));
+    check (sizer.cachedNotes() == 4096, "the sizer keeps the sizes of the last clip's 4096 notes only");
+
+    // under the note cap but past 32 MiB: 2048 notes of about 16 KB
+    const model::Clip half = clipOfSize (2048, cap - 16000);
+    model::ClipSizer halfSizer;
+    check (halfSizer.measure (half) == cap - 16000, "(2048 notes of about 16 KB, 16,000 bytes under the cap)");
+    const auto dup = model::limitEdit (half, model::duplicateNotes (half, model::Ids (half.notes[7]->id), 64.0), halfSizer);
+    check (dup.refused && dup.count == 2049 && dup.bytes > cap && sameNotes (dup.clip, half),
+           fmt ("a Duplicate to 2049 notes that would encode to %d bytes is refused, the clip unchanged", static_cast<int> (dup.bytes)));
+    const auto paste = model::limitEdit (half, model::pasteNotes (half, { half.notes[1], half.notes[2] }, 100.0), halfSizer);
+    check (paste.refused && paste.count == 2050 && sameNotes (paste.clip, half), "a Paste past 32 MiB is refused, the clip unchanged");
+    const auto plainNote = model::limitEdit (half, model::addNote (half, 60, 0, 1), halfSizer);
+    check (! plainNote.refused && plainNote.clip.notes.size() == 2049 && plainNote.bytes < cap, "a plain note still fits beside them");
+
+    // the decoder refuses what no edit may make: the largest clip's payload with 2 bytes more
+    std::vector<std::uint8_t> over = model::encodeClip (largest);
+    over.push_back (0);
+    over.push_back (0);
+    const auto refusedLoad = model::decodeClip (over);
+    check (! refusedLoad.clip.has_value(), "a payload of 32 MiB + 1 byte is refused by the decoder (" + refusedLoad.error + ")");
 }

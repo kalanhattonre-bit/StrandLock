@@ -850,6 +850,13 @@ namespace sl::model
             raw.extras = clipExtras;
 
         Clip clip = normalizeClip (raw);   // the same notes in the same order, each rebuilt by normalizeNote
+        if (encodedClipSize (clip) > kMaxClipBytes)
+        {
+            // possible when a payload near the cap leaves out lanes the encoder always writes: refused, so a
+            // clip that loads can always be saved again
+            result.error = "the clip would encode to more than 32 MiB";
+            return result;
+        }
         for (std::size_t i = 0; i < clip.notes.size(); ++i)
         {
             NoteExtras* x = extras[i].get();
