@@ -36,6 +36,10 @@ namespace sl::ui
         /** The height the controls need when the panel is this wide. */
         int heightFor (int width) const;
 
+        /** Where each row of controls ends (with the padding below it) when the panel is this wide. A pane cut at
+            one of these never shows half a control. */
+        std::vector<int> rowEnds (int width) const;
+
         void resized() override;
 
         /** Every knob on the panel (for the tests). */

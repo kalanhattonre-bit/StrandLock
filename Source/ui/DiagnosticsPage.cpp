@@ -218,9 +218,9 @@ namespace sl::ui
                     what << juce::String (d.bytes) << " bytes, not a sound file StrandLock can read";
                 else
                     what << "not found";
-                c.rows.push_back ({ name, what });
+                c.rows.push_back ({ "File", name + ": " + what });
                 if (folder.isNotEmpty())
-                    c.rows.push_back ({ "", "in " + folder });
+                    c.rows.push_back ({ "Folder", folder });
             }
             next.push_back (std::move (c));
         }
@@ -242,9 +242,18 @@ namespace sl::ui
         return juce::jlimit (1, 3, (int) std::ceil (w / (float) juce::jmax (40, valueWidth - 4)));
     }
 
+    int DiagnosticsPage::labelWidthFor (const Card& card, int cardWidth)
+    {
+        // The card's longest label, but never more than about half the card.
+        float widest = 40.0f;
+        for (const auto& row : card.rows)
+            widest = juce::jmax (widest, Theme::textWidth (labelFont(), row.label));
+        return juce::jmin ((int) std::ceil (widest) + 12, (cardWidth - 2 * kPad) / 2);
+    }
+
     int DiagnosticsPage::cardHeight (const Card& card, int width) const
     {
-        const int valueWidth = width - 2 * kPad - labelWidth;
+        const int valueWidth = width - 2 * kPad - labelWidthFor (card, width);
         int h = kPad + 18;
         for (const auto& row : card.rows)
             h += rowLines (row, valueWidth) * lineHeight;
@@ -311,6 +320,7 @@ namespace sl::ui
             g.setFont (titleFont());
             g.drawText (card.title.toUpperCase(), area.removeFromTop (18), juce::Justification::centredLeft, true);
 
+            const int labelWidth = labelWidthFor (card, p.bounds.getWidth());
             const int valueWidth = area.getWidth() - labelWidth;
             for (const auto& row : card.rows)
             {

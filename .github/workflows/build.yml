@@ -161,9 +161,11 @@ jobs:
         if: ${{ !cancelled() }}
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSTRANDLOCK_BUILD_PLUGIN=OFF -DSTRANDLOCK_BUILD_TESTS=ON
 
+      # make's -j with no number starts every compile at once; with the UI files that ran the runner out of
+      # memory under the sanitizers (CI runs 42665736084 and 42667851604), so the jobs follow the cores.
       - name: Build
         if: ${{ !cancelled() }}
-        run: cmake --build build --parallel
+        run: cmake --build build --parallel "$(nproc)"
 
       # CPU figures are printed here and gated on Windows only.
       - name: Run tests
@@ -180,7 +182,7 @@ jobs:
 
       - name: Build (sanitizers)
         if: ${{ !cancelled() }}
-        run: cmake --build build-san --parallel --target StrandLockTests
+        run: cmake --build build-san --parallel "$(nproc)" --target StrandLockTests
 
       - name: Run the contract, model and engine groups (sanitizers)
         if: ${{ !cancelled() }}

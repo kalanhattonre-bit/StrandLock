@@ -77,7 +77,8 @@ namespace sl::ui
         juce::String header;
         juce::Rectangle<int> waveArea;
 
-        FlatButton soundBox, browse, presets, zoomOut, zoomIn, showAll;
+        juce::ComboBox soundMenu;   // the starter menu, shown but not usable until M2
+        FlatButton browse, presets, zoomOut, zoomIn, showAll;
         std::unique_ptr<ChoiceBox> atEnd;
     };
 

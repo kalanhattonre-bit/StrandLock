@@ -63,6 +63,7 @@ namespace sl::ui
         std::vector<Placed> placeCards (int width, int& totalHeight) const;
         int cardHeight (const Card& card, int width) const;
         static int rowLines (const Row& row, int valueWidth);
+        static int labelWidthFor (const Card& card, int cardWidth);
 
         const Theme& theme;
         StrandLockProcessor& processor;
@@ -72,7 +73,6 @@ namespace sl::ui
 
         static constexpr int headerHeight = 40;
         static constexpr int cardGap = 8;
-        static constexpr int labelWidth = 128;
         static constexpr int lineHeight = 16;
     };
 }

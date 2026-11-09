@@ -19,7 +19,7 @@ namespace sl::ui
         constexpr int kSideMargin = 12, kTopMargin = 8;
         constexpr int kTopBarHeight = 40, kBannerHeight = 28, kSelRowHeight = 36, kTabsHeight = 30;
         constexpr int kStripHeight = 104, kHintHeight = 30;
-        constexpr int kBarPadX = 8, kItemHeight = 26, kGap = 5;
+        constexpr int kBarPadX = 8, kItemHeight = 26, kGap = 5, kModeGap = 4;
         constexpr int kPeakBuckets = 2048;
 
         const char* const kTabNames[] = { "Sample", "Macros", "Note settings", "Slides", "Copy / Paste", "Mod wheels", "Sound", "Diagnostics" };
@@ -38,7 +38,7 @@ namespace sl::ui
         };
 
         const char* const kModeHints[] = {
-            "BUILD (1): the piano roll arrives in M4 (new notes, moving and stretching them, slides). Until then StrandLock plays the starter Saw on every note Cubase sends it.",
+            "BUILD (1): the piano roll (new notes, moving and stretching them) arrives in M4. For now every note plays the starter Saw.",
             "PITCH (2): drawing a note's pitch line arrives in M4.",
             "VOLUME (3): drawing a note's volume line arrives in M4.",
             "VIBRATO (4): drawing a note's vibrato arrives in M4.",
@@ -116,7 +116,7 @@ namespace sl::ui
 
         const int modeNumber;
         FlatButton lane, arrow;
-        static constexpr int arrowWidth = 22;
+        static constexpr int arrowWidth = 20;
     };
 
     /** The tab row's "Hide" / "Show" at its right end (shell.html's .tab.fold). */
@@ -289,19 +289,23 @@ namespace sl::ui
     StripView::StripView (const Theme& t, StrandLockProcessor& p)
         : theme (t),
           processor (p),
-          soundBox (t, "Saw", FlatButton::Icon::chevronDown),
           browse (t, "Browse...", FlatButton::Icon::folder),
           presets (t, "Sound presets", FlatButton::Icon::notes),
           zoomOut (t, "-"),
           zoomIn (t, "+"),
           showAll (t, "Show all")
     {
-        for (auto* b : { &soundBox, &browse, &presets, &zoomOut, &zoomIn, &showAll })
+        for (int i = 0; i < sounds::kNumStarters; ++i)
+            soundMenu.addItem (sounds::kStarterList[i].name, i + 1);
+        soundMenu.setEnabled (false);
+        soundMenu.setTooltip ("The starter sound menu arrives in M2");
+        addAndMakeVisible (soundMenu);
+
+        for (auto* b : { &browse, &presets, &zoomOut, &zoomIn, &showAll })
         {
             b->setEnabled (false);
             addAndMakeVisible (*b);
         }
-        soundBox.setTooltip ("The starter sound menu arrives in M2");
         browse.setTooltip ("Loading your own sound files arrives in M2");
         presets.setTooltip ("Sound presets arrive in M8");
 
@@ -358,8 +362,10 @@ namespace sl::ui
         root = rootNow;
 
         const auto& info = sounds::starterInfo (sound != nullptr ? sound->id : sounds::kDefaultStarter);
-        soundBox.setButtonText (info.name);
-        header = juce::String (info.name) + " | " + juce::String (sound != nullptr ? sound->seconds() : 0.0, 2) + " s | root "
+        for (int i = 0; i < sounds::kNumStarters; ++i)
+            if (sounds::kStarterList[i].id == info.id)
+                soundMenu.setSelectedId (i + 1, juce::dontSendNotification);
+        header = juce::String (info.name) + " - " + juce::String (sound != nullptr ? sound->seconds() : 0.0, 2) + " s - root "
                  + juce::String (core::noteName (root)) + " (built-in)";
         repaint();
     }
@@ -369,7 +375,7 @@ namespace sl::ui
         auto r = getLocalBounds();
         auto column = r.removeFromLeft (columnWidth).reduced (8, 6);
         const int h = juce::jmin (kItemHeight, (column.getHeight() - 8) / 3);
-        soundBox.setBounds (column.removeFromTop (h));
+        soundMenu.setBounds (column.removeFromTop (h));
         column.removeFromTop (4);
         browse.setBounds (column.removeFromTop (h));
         column.removeFromTop (4);
@@ -849,9 +855,9 @@ namespace sl::ui
         // Mode bar: wraps onto a second row when the window is narrow (as shell.html's flex-wrap does).
         {
             const int inner = area.getWidth() - 2 * kBarPadX;
-            const int h = flowLayout (modeItems, { 0, 0, inner, 1000 }, kGap, kGap, false);
+            const int h = flowLayout (modeItems, { 0, 0, inner, 1000 }, kModeGap, kGap, false);
             modeBarArea = area.removeFromTop (h + 14);
-            flowLayout (modeItems, modeBarArea.reduced (kBarPadX, 7), kGap, kGap, true);
+            flowLayout (modeItems, modeBarArea.reduced (kBarPadX, 7), kModeGap, kGap, true);
         }
 
         selRowArea = area.removeFromTop (kSelRowHeight);
@@ -892,11 +898,28 @@ namespace sl::ui
             int paneHeight = 0;
             if (! folded)
             {
-                int wanted = 32;
+                paneHeight = 32;
                 if (auto* tp = dynamic_cast<TabPanel*> (panels[(std::size_t) openTabIndex].get()))
-                    wanted = tp->heightFor (area.getWidth());
-                const int most = juce::jmax (80, area.getHeight() * 2 / 5);
-                paneHeight = juce::jmin (wanted, most);
+                {
+                    // The pane takes up to 2/5 of the room, cut between two rows of controls, never through one:
+                    // the first row end past that share while the roll keeps 110 px, else the last one before it.
+                    const int most = juce::jmax (80, area.getHeight() * 2 / 5);
+                    auto ends = tp->rowEnds (area.getWidth());
+                    paneHeight = ends.empty() ? 32 : ends.back();
+                    if (paneHeight > most)
+                    {
+                        ends = tp->rowEnds (area.getWidth() - paneViewport.getScrollBarThickness());
+                        int up = 0, down = ends.empty() ? most : ends.front();
+                        for (int e : ends)
+                        {
+                            if (e >= most && up == 0)
+                                up = e;
+                            if (e <= most)
+                                down = e;
+                        }
+                        paneHeight = up > 0 && area.getHeight() - up >= 110 ? up : down;
+                    }
+                }
             }
             paneArea = area.removeFromTop (paneHeight);
             paneViewport.setBounds (paneArea);
@@ -976,7 +999,7 @@ namespace sl::ui
                     continue;
                 ++seen;
                 const auto* before = seen == 1 ? static_cast<juce::Component*> (&buildButton) : static_cast<juce::Component*> (subChips.back().get());
-                g.fillRect (before->getRight() + (kGap - 1) / 2 + 1, before->getBounds().getCentreY() - 11, 1, 22);
+                g.fillRect (before->getRight() + kModeGap, before->getBounds().getCentreY() - 11, 1, 22);
             }
         }
 

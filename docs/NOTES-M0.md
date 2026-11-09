@@ -197,3 +197,15 @@ Builder notes for M0 (PLUGIN-PLAN section 4 and 7). Append only: one bullet per 
 - A drop opens the Diagnostics tab and shows a short message, so checklist step 6 shows its result at once.
 - The Diagnostics page takes the pane and the roll's room. Its cards name the checklist step they answer.
 - The mode bar wraps onto a second row at 1100 px wide, as the prototype's flex-wrap does at that width.
+- The Linux job builds with `--parallel "$(nproc)"`. CMake's `--parallel` with no number gives make an unlimited
+  `-j`; with the UI files added, the sanitizer build ran the runner out of memory and was killed ("Terminated",
+  CI runs 42665736084 and 42667851604).
+- A tab's pane takes up to 2/5 of the room between the tabs and the strip, and it is cut between two rows of
+  controls, never through one (`TabPanel::rowEnds`); the rest scrolls.
+
+### Progress (update)
+
+- Done: CI run 42667851604 green on Windows (Release tests 415 checks in 48 tests, snapshots, Debug CRT run,
+  pluginval); Linux tests green, its sanitizer build killed for memory (fixed above). Snapshots looked at; fixed
+  the mode bar's wrap at 1100 px, half-cut tab rows, the Diagnostics labels and the drop rows.
+- Next: the CI round for these fixes, then rebase on origin/main and merge.

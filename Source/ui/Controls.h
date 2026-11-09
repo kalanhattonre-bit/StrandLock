@@ -290,6 +290,7 @@ namespace sl::ui
 
     /** Places items left to right (gap apart), starting a new row (rowGap below) when the next one would not
         fit; each item is centred in its row's height. Returns the height used. With place false nothing moves
-        (to measure). */
-    int flowLayout (const std::vector<FlowItem>& items, juce::Rectangle<int> area, int gap, int rowGap, bool place);
+        (to measure). rowBottoms, when given, receives where each row ends, from the top of area. */
+    int flowLayout (const std::vector<FlowItem>& items, juce::Rectangle<int> area, int gap, int rowGap, bool place,
+                    std::vector<int>* rowBottoms = nullptr);
 }

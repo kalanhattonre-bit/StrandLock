@@ -90,6 +90,16 @@ namespace sl::ui
         return flowLayout (items, area, gap, rowGap, false) + 2 * padY;
     }
 
+    std::vector<int> TabPanel::rowEnds (int width) const
+    {
+        const auto area = juce::Rectangle<int> (0, 0, juce::jmax (1, width), 100000).reduced (padX, padY);
+        std::vector<int> ends;
+        flowLayout (items, area, gap, rowGap, false, &ends);
+        for (auto& e : ends)
+            e += 2 * padY;
+        return ends;
+    }
+
     void TabPanel::resized()
     {
         flowLayout (items, getLocalBounds().reduced (padX, padY), gap, rowGap, true);

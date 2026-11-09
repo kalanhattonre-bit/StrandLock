@@ -7,7 +7,7 @@ namespace sl::ui
     namespace
     {
         // shell.html's button: padding 3px 7px at this window height, font 12px, weight 600, radius 7px.
-        constexpr float kPadX = 8.0f;
+        constexpr float kPadX = 7.0f;
         constexpr float kChipLeft = 5.0f;
         constexpr float kIconSize = 12.0f;
         constexpr float kDisabledAlpha = 0.45f;   // button:disabled{opacity:.45}
@@ -136,7 +136,7 @@ namespace sl::ui
         if (icon != Icon::none)
             w += kIconSize + (label.isNotEmpty() ? 5.0f : 0.0f);
         if (keyChip.isNotEmpty())
-            w += Theme::textWidth (chipFont(), keyChip) + 6.0f + 6.0f;
+            w += Theme::textWidth (chipFont(), keyChip) + 6.0f + 4.0f;
         if (lane.has_value())
             w += 2.0f;
         return (int) std::ceil (w);
@@ -190,7 +190,7 @@ namespace sl::ui
             g.setColour (fade (ink));
             g.setFont (chipFont());
             g.drawText (keyChip, chip, juce::Justification::centred, false);
-            content = content.withLeft (chip.getRight() + 6.0f);
+            content = content.withLeft (chip.getRight() + 5.0f);
         }
 
         const auto label = getButtonText();
@@ -730,8 +730,11 @@ namespace sl::ui
     }
 
     //==============================================================================================
-    int flowLayout (const std::vector<FlowItem>& items, juce::Rectangle<int> area, int gap, int rowGap, bool place)
+    int flowLayout (const std::vector<FlowItem>& items, juce::Rectangle<int> area, int gap, int rowGap, bool place,
+                    std::vector<int>* rowBottoms)
     {
+        if (rowBottoms != nullptr)
+            rowBottoms->clear();
         // First split the items into rows, then place each row centred on its own height.
         struct Row { std::size_t first = 0, last = 0; int height = 0; };
         std::vector<Row> rows;
@@ -767,6 +770,8 @@ namespace sl::ui
                     rx += w + gap;
                 }
             }
+            if (rowBottoms != nullptr)
+                rowBottoms->push_back (y + row.height - area.getY());
             y += row.height + (r + 1 < rows.size() ? rowGap : 0);
         }
         return y - area.getY();
