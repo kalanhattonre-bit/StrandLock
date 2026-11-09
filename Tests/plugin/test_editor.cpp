@@ -13,6 +13,7 @@
 
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
+#include "core/Version.h"
 #include "params/ParamIds.h"
 #include "support/Check.h"
 #include "support/Harness.h"

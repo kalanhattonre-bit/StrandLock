@@ -163,3 +163,37 @@ Builder notes for M0 (PLUGIN-PLAN section 4 and 7). Append only: one bullet per 
   and Sound tabs, `DiagnosticsPage`, the editor (UI Scale, window limits, Keys, drops), `Tests/plugin/test_theme.cpp`
   and the rewritten `Tests/plugin/test_editor.cpp` with the snapshot writers.
 - Next: CI green, look at the snapshots, `docs/CUBASE-CHECKLIST.md`, rebase on main, merge.
+
+### Decisions and deviations (part 2)
+
+- The theme keeps every token as shell.html's CSS text (`ui::kTokens`) and reads it into colours once per theme
+  (`ui::palette`). The test compares the text with `ui/theme.json` string for string, so a typo cannot hide in a
+  parsed colour. Components hold a reference to the editor's `ui::Theme` and ask it for a token while they paint;
+  a switch is `Theme::set`, `StrandLookAndFeel::refreshColours`, `sendLookAndFeelChange` and a repaint.
+- The plan's contrast figures use the WCAG ratio (sRGB linearised). The snapshots' "mean luminance" is not
+  defined in the plan; the test uses the Rec. 709 weights on the sRGB values (not linearised), 0 to 1.
+- The UI Scale is a transform on `MainView` (as AudioProcessorEditor::setScaleFactor applies the host's scale to
+  the editor). The layout is in logical pixels; the window is the logical size times the scale, and its limits
+  are 900 x 560 to 2400 x 1600 logical times the scale (675 x 420 to 1800 x 1200 at 75 %). Any shape is allowed
+  (no fixed aspect ratio). The per-user UI Scale wins; the UIST copy is used when there is none (the part 1
+  suggestion). The logical size is kept in UIST, so a project reopens at the size it was left.
+- Keys OFF: no component wants keyboard focus, and the editor and the host's top-level window for it do not grab
+  focus on a click. JUCE's Windows peer answers WM_MOUSEACTIVATE with MA_NOACTIVATE when its top-level component
+  does not grab focus on a click, so a click on StrandLock leaves the keyboard with Cubase. Keys ON: the editor
+  wants focus and takes it on a click (its controls pass the click up, since none of them wants focus). Every key
+  that reaches the editor is recorded; Space is never kept, so JUCE forwards it to the host window. The Keys
+  switch also sets `keysDefault`, so the next window starts the same.
+- Every tab's panel stays in the component tree (hidden unless open), so a theme switch reaches its drop-downs and
+  the focus rules cover them; swapping panels in and out of the Viewport would leave stale label colours.
+- The Sample tab shows all three grain knobs (Voice, Cloud, Lock) and the Region knobs: M0's tab is plain knobs
+  for every parameter; M6 makes it the prototype's tab (one Grain knob for the engine, faded settings). Auto slide
+  and Slide time (glideMode, glideTime) have no control in M0: they belong to the Slides tab (M5).
+- At the end has a control twice, in the Sample tab and on the strip, as the prototype has it.
+- The waveform strip is a small `StripView` inside `MainView.*`, not `ui/strip/WaveStrip.*` (M2's file). It
+  draws the loaded starter's mid channel (min and max per column) and the Region band from the regionStart and
+  regionEnd parameters. The toast and the drop overlay are also small parts of `MainView` until M4's `ui/Toast`.
+- The roll placeholder draws the host's playhead while Cubase plays (folded onto its 4 bars), so checklist step 7
+  shows the position on screen as well as on the Diagnostics page.
+- A drop opens the Diagnostics tab and shows a short message, so checklist step 6 shows its result at once.
+- The Diagnostics page takes the pane and the roll's room. Its cards name the checklist step they answer.
+- The mode bar wraps onto a second row at 1100 px wide, as the prototype's flex-wrap does at that width.

@@ -116,8 +116,8 @@ namespace sl::ui
     }
 
     //==============================================================================================
-    FlatButton::FlatButton (const Theme& t, const juce::String& text, Icon i)
-        : juce::Button (text), theme (t), icon (i)
+    FlatButton::FlatButton (const Theme& t, const juce::String& buttonText, Icon i)
+        : juce::Button (buttonText), theme (t), icon (i)
     {
     }
 
@@ -130,11 +130,11 @@ namespace sl::ui
     int FlatButton::preferredWidth() const
     {
         float w = 2.0f * kPadX;
-        const auto text = getButtonText();
-        if (text.isNotEmpty())
-            w += Theme::textWidth (Theme::px (fontPx, true), text);
+        const auto label = getButtonText();
+        if (label.isNotEmpty())
+            w += Theme::textWidth (Theme::px (fontPx, true), label);
         if (icon != Icon::none)
-            w += kIconSize + (text.isNotEmpty() ? 5.0f : 0.0f);
+            w += kIconSize + (label.isNotEmpty() ? 5.0f : 0.0f);
         if (keyChip.isNotEmpty())
             w += Theme::textWidth (chipFont(), keyChip) + 6.0f + 6.0f;
         if (lane.has_value())
@@ -193,10 +193,10 @@ namespace sl::ui
             content = content.withLeft (chip.getRight() + 6.0f);
         }
 
-        const auto text = getButtonText();
+        const auto label = getButtonText();
         const auto font = Theme::px (fontPx, true);
-        const float textW = text.isNotEmpty() ? Theme::textWidth (font, text) : 0.0f;
-        const float iconW = icon != Icon::none ? kIconSize + (text.isNotEmpty() ? 5.0f : 0.0f) : 0.0f;
+        const float textW = label.isNotEmpty() ? Theme::textWidth (font, label) : 0.0f;
+        const float iconW = icon != Icon::none ? kIconSize + (label.isNotEmpty() ? 5.0f : 0.0f) : 0.0f;
         const float total = textW + iconW;
         float x = keyChip.isNotEmpty() ? content.getX() : content.getCentreX() - total * 0.5f;
 
@@ -206,11 +206,11 @@ namespace sl::ui
             x += iconW;
         }
 
-        if (text.isNotEmpty())
+        if (label.isNotEmpty())
         {
             g.setColour (fade (ink));
             g.setFont (font);
-            g.drawText (text, juce::Rectangle<float> (x, r.getY(), juce::jmax (textW + 2.0f, content.getRight() - x), r.getHeight()),
+            g.drawText (label, juce::Rectangle<float> (x, r.getY(), juce::jmax (textW + 2.0f, content.getRight() - x), r.getHeight()),
                         juce::Justification::centredLeft, true);
         }
     }
@@ -318,8 +318,8 @@ namespace sl::ui
     }
 
     //==============================================================================================
-    ParamToggle::ParamToggle (const Theme& t, juce::AudioProcessorValueTreeState& state, const juce::String& parameterId, const juce::String& text)
-        : FlatButton (t, text)
+    ParamToggle::ParamToggle (const Theme& t, juce::AudioProcessorValueTreeState& state, const juce::String& parameterId, const juce::String& buttonText)
+        : FlatButton (t, buttonText)
     {
         setClickingTogglesState (true);
         attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, parameterId, *this);

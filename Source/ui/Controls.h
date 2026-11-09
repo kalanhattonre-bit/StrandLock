@@ -73,7 +73,7 @@ namespace sl::ui
     public:
         enum class Icon { none, sun, moon, keys, folder, notes, nodes, chevronDown, chevronUp, copy };
 
-        FlatButton (const Theme&, const juce::String& text, Icon icon = Icon::none);
+        FlatButton (const Theme&, const juce::String& buttonText, Icon icon = Icon::none);
 
         void setKeyChip (const juce::String& keyText);
         void setLaneColour (std::optional<Tok> laneColour);
@@ -106,7 +106,7 @@ namespace sl::ui
     class ParamToggle final : public FlatButton
     {
     public:
-        ParamToggle (const Theme&, juce::AudioProcessorValueTreeState&, const juce::String& parameterId, const juce::String& text);
+        ParamToggle (const Theme&, juce::AudioProcessorValueTreeState&, const juce::String& parameterId, const juce::String& buttonText);
 
     private:
         std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> attachment;

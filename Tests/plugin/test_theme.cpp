@@ -9,6 +9,8 @@
 #include "support/TestRegistry.h"
 #include "ui/Theme.h"
 
+#include <algorithm>
+#include <cmath>
 #include <map>
 #include <set>
 #include <string>
