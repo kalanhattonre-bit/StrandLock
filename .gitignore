@@ -10,3 +10,9 @@ cmake-build-*/
 prototype-v4/dist/
 node_modules/
 .playwright-mcp/
+# CI scratch (local builds use the same names)
+build-*/
+CMakeUserPresets.json
+ui-snapshots/
+pluginval/
+pluginval-logs/
