@@ -1468,6 +1468,58 @@ One test file per area, self-registered; one fixture module and folder per area;
 already; a builder who needs a change in another milestone's file writes it in their `docs/NOTES-<milestone>.md` and
 works around it; the architect folds agreed changes into this plan.
 
+### 7.4 M2: who builds what, and the architect's decisions (2026-11-09)
+
+**Order.** Contract (one builder; merges to main) -> the engine chain (E1, E2) and the plugin chain (P1, P2) in
+parallel, each on its own branch -> integration (I) on main once both have merged -> review -> fix. E2 merges the
+engine to main when green and P2 merges the plugin chain when green; until I, the processor's audio path stays
+ProbeSynth, so main always builds and plays. I swaps ProbeSynth for the Engine. Each part writes its own section in
+`docs/NOTES-M2.md` (Contract, E1, E2, P1, P2, Integration, Fix) with a Progress list.
+
+**Ownership.**
+- **Contract:** `rt/VersionExchange.h`, `rt/LatestSlot.h`, `rt/StableSort.h` (complete, with unit tests in
+  `Tests/engine/test_rt.cpp`); `engine/EngineConfig.h`, `engine/SampleData.h`, `engine/DisplayFrame.h` (with
+  `DisplaySlot` on `LatestSlot`); `engine/Engine.h` with the whole public API of 1.2 (`prepare`, `setSample`,
+  `setInst`, `setSnapshot`, `setTransport`, `noteOn`, `noteOff`, `allNotesOff`, `setController`, `releaseController`,
+  `process`, `fillDisplay`, `stats`, `resetStats`, `minEpochInUse`), and a stub `Engine.cpp` that renders silence;
+  `doc/CommandQueue.h`; `Tests/support/TestSignals.*` (from `support/signals.json`).
+- **Engine chain (E1, E2):** everything else in `Source/engine/` except `VoiceGrains.cpp` and `VoiceLock.cpp` (M3).
+  E adds private members and helpers freely but keeps the contract's public API; an addition to it goes in NOTES-M2.
+  Tests: `Tests/engine/test_parity`, `test_tuning_tape`, `test_chase_cost`, `test_determinism`, `test_seams`,
+  `test_live`, `test_alloc_engine`, `test_stability`, `test_cpu` (engine level: a test drives `Engine` directly).
+  `tools/fixtures/engine.js` and `Tests/fixtures/engine/**` (append-only; `--check` stays green).
+- **Plugin chain (P1, P2):** `doc/**` (except `CommandQueue.h`), `host/HostSync.*`, `host/MidiRouter.*`,
+  `params/**`, `state/**`, `diag/**`, `ui/**`, `PluginEditor.*`, and `PluginProcessor.*` for everything except the
+  audio path. Tests: `Tests/plugin/**`, `Tests/ui/**` (including `test_state_clip.cpp` and HostSync / MidiRouter unit
+  tests against a recording fake engine).
+- **Integration (I):** the processor's audio path (MidiRouter + HostSync + Engine, `DisplaySlot`, `setInUse` /
+  `collect`), deleting `Source/probe/` and its tests, `Tests/engine/test_hostsync.cpp`, `test_exchange.cpp`, the
+  processor-level live, edits-while-playing, determinism (`setNonRealtime`) and allocation rows, and an M2 section in
+  `docs/CUBASE-CHECKLIST.md`. Once E and P have merged, I may touch any file to integrate.
+
+**Decisions.**
+1. **Host parameter changes never allocate, with the editor open or not.** M0's fix pass measured JUCE's
+   `ParameterAttachment` posting a message from the audio thread (NOTES-M0). From M2 the editor binds no control
+   through `ParameterAttachment` or the APVTS attachments: a control writes its parameter on the message thread
+   (`beginChangeGesture`, `setValueNotifyingHost`, `endChangeGesture`), and the editor's 30 Hz timer reads each bound
+   parameter and moves its control when the value changed (never while the user is dragging it).
+   `alloc/hostChangesWithEditorOpen` then gates 0 allocations on every platform. (P2)
+2. **Light theme colours** per question 9.1. (P2)
+3. **Loading a state that names another sound.** `setStateInformation` hands the sound to the SampleManager and waits
+   on its own thread for the worker (the worker never needs the message thread, so this cannot deadlock), up to 10 s,
+   so the first block after a load, or an offline export started right after it, plays the loaded sound. If the sound
+   is not ready in time, clip notes are silent until it arrives and the diagnostics count those blocks. The worker keeps
+   the last 4 starter sounds it made, keyed by (id, seed), so a project that uses the current or a recent starter does
+   not make it again. The 50 ms load and 60 ms `sawopen` targets stay, printed per the timing rule. (P1)
+4. **Files in M2.** Browse and drop decode through `AudioFormatManager::registerBasicFormats()` on the worker. A file
+   longer than 10 minutes loads its first 10 minutes and the toast says so (question 9.3). SMPL's file record (kind 1)
+   is written from M2 (path, size, SHA-256, rate, channels, frames, the loaded range, display name; the analysis cache
+   empty) and a project reload decodes the path again. When the file is missing the default starter plays, the toast
+   says which file is missing, and the SMPL record is kept verbatim so a save does not lose it. The Locate banner and
+   embedding stay M7. (P1)
+5. **ProbeSynth goes.** I deletes `Source/probe/` and replaces the probe tuning test with Tape tuning; every other M0
+   test that still applies keeps running.
+
 ---
 
 ## 8. Deviations
@@ -1577,6 +1629,20 @@ works around it; the architect folds agreed changes into this plan.
 9. **Pressing Play inside long held notes.** To stop Cubase from crackling when you press Play in the middle of long
    notes, StrandLock catches those notes up in small steps. Notes held for many bars can come in up to about a third
    of a second after Play. Is that all right, or would you rather they start at once and risk a crackle?
+
+**Kalan's answers (2026-11-09): "Defaults".** So:
+1. **Light theme:** in the light theme the Tone and Sample lane colours and the playhead are darkened (same hue) to at
+   least 3:1 against the background the M0 contrast test uses. The prototype keeps its colours; `ui/theme.json` stays
+   the prototype's, and the theme test checks these tokens for >= 3:1 instead of equality. M2 (7.4).
+2. **Recording loops:** a loop pass while Rec is on adds to the notes already there (overdub). M8.
+3. **Long songs:** 10 minutes per file is enough; above it StrandLock offers to load a part (M7). Until M7 a longer
+   file loads its first 10 minutes and says so (7.4).
+4. **Mod wheels** move only the keys played live, as in the prototype.
+5. **Engines:** Tape / Voice / Cloud is fixed at the first release; a fourth engine would come as a separate switch.
+6. **Tape far up:** decided after M3 measures how harsh it is; the architect brings Kalan the figure.
+7. **Quick Controls:** a one-time README step is fine if Cubase does not pick the macros up by itself. M9.
+8. **Lock at 96 kHz:** keep the prototype's thinning (the newest Lock note plays 4 of its 8 heads at B = 96).
+9. **Play inside long notes:** keep the bounded chase (1.8); such notes may come in up to about 0.35 s after Play.
 
 ---
 
