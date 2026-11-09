@@ -86,6 +86,7 @@ namespace sl::model
         bool refused = false;
         double count = 0.0;              // how many notes the clip would hold (Chop: as the prototype counts it)
         std::vector<std::string> ids;    // the notes the edit made, in order (addNote: one; Chop: none)
+        std::size_t bytes = 0;           // the CLIP payload the result encodes to (limitEdit fills it; 0 = not measured)
     };
 
     /** SLModel.uniqueId: 'n' + base 36 of hash32 (idHash (base), k | 0, salt), the salt counting up from 0

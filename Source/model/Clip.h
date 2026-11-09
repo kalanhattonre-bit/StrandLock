@@ -34,6 +34,10 @@ namespace sl::model
     inline constexpr int kMaxLanesPerNote = 64;     // lane records per note in the CLIP chunk
     inline constexpr int kMaxChopNotes = 1024;      // chop's default maxNotes
     inline constexpr int kMinBars = 1, kMaxBars = 64;
+    inline constexpr int kMinBeatsPerBar = 1, kMaxBeatsPerBar = 64;   // the clip setting (8.2 #13); normalizeClip clamps it
+
+    /** The longest id, link or generator key the CLIP chunk holds (str8: 255 UTF-8 bytes; PLUGIN-PLAN 3, 8.2 #27). */
+    inline constexpr std::size_t kMaxIdBytes = 255;
 
     /** The shortest note the tools make: a 1/64 note, in beats (MIN_LEN). */
     inline constexpr double kMinLen = 0.0625;
@@ -164,10 +168,12 @@ namespace sl::model
         std::vector<std::vector<std::uint8_t>> unknownLanes; // lane records whose id is not one of the 10, verbatim, in order
     };
 
-    /** The clip settings record's bytes past the fields this version reads. */
+    /** The clip settings record's bytes past the fields this version reads, and any bytes a newer CLIP chunk
+        wrote after the last note record (the 1.0 layout has none there; they are kept all the same). */
     struct ClipExtras
     {
         std::vector<std::uint8_t> settingsTrailing;
+        std::vector<std::uint8_t> payloadTrailing;
     };
 
     //==============================================================================================

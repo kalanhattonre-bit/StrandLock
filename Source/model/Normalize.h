@@ -47,13 +47,17 @@ namespace sl::model
     /** SLModel.normalizeNote (n, i) on a typed note: p 0..127 (60), s at least 0 (0), l at least 1e-3 (1), vel
         0..1 (0.8), glide at least 0 (a NaN glide reads 0), gc -1..1 (0), every lane normalizeNodes (lane
         default), every generator normalizeGen, the sample normalizeSample. An empty id is made from the index
-        and position: 'n' + base 36 of hash32 (i, round (p * 100), round (s * 1e6), round (l * 1e6)). The link
-        is kept as it is (normalizeClip drops a dangling one). A new Note (a fresh serial); extras are shared. */
+        and position: 'n' + base 36 of hash32 (i, round (p * 100), round (s * 1e6), round (l * 1e6)). An id of
+        more than 255 UTF-8 bytes, which the CLIP chunk cannot hold, is made the same way, and a link that long
+        is dropped (PLUGIN-PLAN 8.2 #27). Otherwise the link is kept as it is (normalizeClip drops a dangling
+        one). A new Note (a fresh serial); extras are shared. */
     Note normalizeNote (const Note& n, int index);
 
     /** SLModel.normalizeClip on a typed clip: bars 1..64, every note normalizeNote (n, its index), a repeated
-        id renamed id~1, id~2, ..., and a link to a missing note or to itself dropped. The clip settings
-        (beatsPerBar, offsetBeats, loop, tieAcrossLoop, extras) are kept. Every note is a new Note. */
+        id renamed id~1, id~2, ... (when that would pass 255 bytes, the missing-id rule's id, renamed the same
+        way if it is taken), and a link to a missing note or to itself dropped. The clip settings are kept,
+        with beatsPerBar clamped 1..64 and a non-finite offsetBeats read as 0 (the prototype has neither
+        setting); the extras are shared. Every note is a new Note. */
     Clip normalizeClip (const Clip& clip);
 
     /** SLModel.normalizeNote on JSON (any note-like object, v3 notes too): a string id, or a number's

@@ -27,6 +27,8 @@ namespace sl::model
         g.amount = clamp (num (g.amount, 0.5), 0.0, 1.0);
         g.smooth = clamp (num (g.smooth, 0.0), 0.0, 1.0);
         g.perNote = g.perNote == PerNote::different ? PerNote::different : PerNote::same;
+        if (g.key.size() > kMaxIdBytes)   // the CLIP chunk holds at most 255 bytes (8.2 #27): the note's own id
+            g.key.clear();
         return g;   // seed is an int32 already (Math.trunc (x) | 0); invert and key need nothing
     }
 
@@ -153,8 +155,11 @@ namespace sl::model
     std::vector<float> laneTable (const Note& note, core::LaneId lane, double res)
     {
         const double r = jsMax (1.0, num (res, 256.0));
-        const double N = tableLength (note.l, r);
+        return laneTableOfLength (note, lane, tableLength (note.l, r));
+    }
 
+    std::vector<float> laneTableOfLength (const Note& note, core::LaneId lane, double N)
+    {
         // sampleNodes takes N | 0, as in JavaScript (the same as N for every real note length).
         std::vector<float> out = sampleNodes (noteLane (note, lane), core::toInt32 (N));
         const auto& g0 = note.genOf (lane);

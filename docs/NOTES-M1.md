@@ -186,3 +186,14 @@ with the input (copy-on-write); nothing changes a note behind a NotePtr.
   decoder rebuilds notes through model::normalizeNote"); `clipFromJson` is the entry for prototype JSON.
 - History (`VersionHistory`), the clip codec and the snapshot compiler are untouched. The compiler needs all three
   glide modes: call `computeGlides` on copies of the inst with `glideMode` off, legato and always.
+
+## M1 part 3
+
+What part 3 builds: the snapshot compiler, undo (`VersionHistory`), the clip codec and the limits table.
+
+### Progress
+
+- Done: `core/Snapshot.h` (+ `Snapshot.cpp`: `core::resolve`), `model/SnapshotCompiler`, `model/History`,
+  `model/ClipCodec` (encode, decode, `ClipSizer`, `limitEdit`), plan 8.2 #27 in `normalizeNote` / `normalizeClip`.
+- In progress: the tests (snapshot, history, codec, codec_compat, limits, immutability on the codec).
+- Next: CI green, the M1 summary, rebase on main, fast-forward main.

@@ -7,6 +7,7 @@
 #include "core/Rates.h"
 #include "core/Seeds.h"
 
+#include <algorithm>
 #include <cmath>
 #include <iterator>
 #include <limits>
@@ -164,13 +165,17 @@ namespace sl::model
         out.p = clamp (num (n.p, 60.0), 0.0, 127.0);
         out.s = jsMax (0.0, num (n.s, 0.0));
         out.l = jsMax (1e-3, num (n.l, 1.0));
-        if (out.id.empty())
+        // PLUGIN-PLAN 8.2 #27: an id the CLIP chunk cannot hold (str8, at most 255 UTF-8 bytes) is made the way a
+        // missing one is; a link that long cannot name a note that keeps its id, so it is dropped
+        if (out.id.empty() || out.id.size() > kMaxIdBytes)
             out.id = "n" + core::toBase36 (core::hash32 (index, core::jsRound (out.p * 100.0), core::jsRound (out.s * 1e6),
                                                          core::jsRound (out.l * 1e6)));
         out.vel = clamp (num (n.vel, 0.8), 0.0, 1.0);
         if (n.glide.has_value())
             out.glide = jsMax (0.0, num (*n.glide, 0.0));
         out.gc = clamp (num (n.gc, 0.0), -1.0, 1.0);
+        if (out.glideTo.size() > kMaxIdBytes)
+            out.glideTo.clear();
         for (int i = 0; i < core::kNumLanes; ++i)
         {
             const auto lane = static_cast<core::LaneId> (i);
@@ -193,10 +198,23 @@ namespace sl::model
             auto q = std::make_shared<Note> (normalizeNote (*clip.notes[i], static_cast<int> (i)));
             if (seen.count (q->id) != 0)
             {
-                int k = 1;
-                while (seen.count (q->id + "~" + std::to_string (k)) != 0)
-                    ++k;
-                q->id = q->id + "~" + std::to_string (k);
+                auto renamed = [&seen] (const std::string& base)
+                {
+                    int k = 1;
+                    while (seen.count (base + "~" + std::to_string (k)) != 0)
+                        ++k;
+                    return base + "~" + std::to_string (k);
+                };
+                std::string id = renamed (q->id);
+                if (id.size() > kMaxIdBytes)
+                {
+                    // too long for the CLIP chunk (8.2 #27): start again from the missing-id rule
+                    id = "n" + core::toBase36 (core::hash32 (static_cast<int> (i), core::jsRound (q->p * 100.0), core::jsRound (q->s * 1e6),
+                                                             core::jsRound (q->l * 1e6)));
+                    if (seen.count (id) != 0)
+                        id = renamed (id);
+                }
+                q->id = id;
             }
             seen.insert (q->id);
             notes.push_back (std::move (q));
@@ -207,8 +225,8 @@ namespace sl::model
 
         Clip out;
         out.bars = static_cast<int> (clamp (static_cast<double> (clip.bars), static_cast<double> (kMinBars), static_cast<double> (kMaxBars)));
-        out.beatsPerBar = clip.beatsPerBar;
-        out.offsetBeats = clip.offsetBeats;
+        out.beatsPerBar = std::clamp (clip.beatsPerBar, kMinBeatsPerBar, kMaxBeatsPerBar);
+        out.offsetBeats = std::isfinite (clip.offsetBeats) ? clip.offsetBeats : 0.0;
         out.loop = clip.loop;
         out.tieAcrossLoop = clip.tieAcrossLoop;
         out.extras = clip.extras;

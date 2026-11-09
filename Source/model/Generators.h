@@ -88,6 +88,9 @@ namespace sl::model
         res below 1 reads 1; a non-finite res reads 256. */
     std::vector<float> laneTable (const Note& note, core::LaneId lane, double res = 256.0);
 
+    /** laneTable with its length given: N | 0 values at t = j / (N - 1) (the snapshot compiler caps N). */
+    std::vector<float> laneTableOfLength (const Note& note, core::LaneId lane, double N);
+
     /** SLModel.setGen: a copy of the normalized generator on the lane of every note in ids (nullopt clears it). */
     Clip setGen (const Clip& clip, const Ids& ids, core::LaneId lane, const std::optional<Gen>& gen);
 
