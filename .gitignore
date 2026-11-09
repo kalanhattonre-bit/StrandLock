@@ -14,5 +14,8 @@ node_modules/
 build-*/
 CMakeUserPresets.json
 ui-snapshots/
+debug-snapshots/
+fingerprints/
+state-fixtures/
 pluginval/
 pluginval-logs/
