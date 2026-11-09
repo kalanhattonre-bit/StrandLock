@@ -99,10 +99,90 @@ lane readouts, with their fixture tests. Parts 2 and 3 only add functions (and t
 
 ## M1 part 2
 
+What part 2 built: the editing tools. Every function returns a new clip and shares every note it did not act on
+with the input (copy-on-write); nothing changes a note behind a NotePtr.
+
 ### Progress
 
-- Done: ClipEdit (uniqueId, addNote, removeNotes, updateNotes, duplicateNotes, pasteNotes, copyLanes, pasteLanes),
-  NoteSettings, Tools, Glides, Recipes, Presets, typed and JSON normalizeNote / normalizeClip; tests for tools.json,
-  glides.json, presets.json, normalize.json's clip cases, immutability, mode lock and edit caps.
-- In progress: first CI run of part 2.
-- Next: fix what CI shows, then the hand-off below.
+- Done: everything below. CI was green on m1-model at 18637a2 (run 42658506386): Windows 244 checks in 42 tests,
+  Linux 245 in 42, Linux sanitizers 185 in 34, Debug CRT allocation 15 in 2, pluginval strictness 10 SUCCESS.
+- Next (part 3): History, the clip codec, the snapshot compiler, and the items under "For part 3".
+
+### Where each JS function landed
+
+- `model/ClipEdit`: `uniqueId`, `addNote`, `removeNotes`, `updateNotes` (the value form; the function form is
+  `editNotes`), `duplicateNotes`, plus `pasteNotes`, `copyLanes` and `pasteLanes` (below). The edits that can be
+  refused return `EditResult { clip, refused, count, ids }`.
+- `model/NoteSettings`: `applyNotePatch` (`SamplePatch`; `Choice<T>` = not given / null / a value), `setNoteSample`,
+  `getMixed` (`MixedSettings`, each field a `Mixed<T>`; nothing when no note is selected), `setLaneNodes`,
+  `setLaneNodesMany`.
+- `model/Tools`: `connect` (`ConnectMode` nearest / furthest / random), `disconnect`, `walk` (`WalkField`), `chop` (a
+  RateId or a number of beats; `ChopStart` for the prototype's stepStart number or `true`), `reverseLane`, `flipLane`,
+  `scaleLane` (More / Less), `selectSimilar` (`SimilarKind`), `humanize` (`HumanizeAmounts`; the prototype's
+  `lanes: number` is `volumeAndTone`), `strum` (`StrumDir`), `legato`. `laneEdit` is private to Tools.cpp.
+- `model/Glides`: `startSemis`, `endSemis`, `glideD`, `computeGlides` (returns a `GlideMap`, insertion-ordered like a
+  JavaScript Map: a second `set` keeps the key's place), `buildChains` (`Chains` = lists of ids).
+- `model/Recipes`: `straightPatch` (STRAIGHT as an `InstPatch`), `recipes` (RECIPES; each `RecipeLane` is reset, shape or
+  generator, in the prototype's key order), `applyRecipe`, `kDiceFields`, `dice` (pins as a list of names).
+- `model/Presets`: `soundPresets`, `soundBase`, `applySoundPreset`, `strandDemo`, `clipPresets` (CLIP_PRESETS, built
+  once on first use), `loadClipPreset`. `presetBuilder` is the private `Builder` in Presets.cpp.
+- `model/Normalize`: `normalizeSample`, `normalizeNote` and `normalizeClip` on typed notes, and `noteFromJson` /
+  `clipFromJson` (SLModel.normalizeNote / normalizeClip on JSON). The plan's test list names `normalize`: the 12 clip
+  cases of normalize.json are in `Tests/model/test_normalize.cpp`.
+- Tests: `test_tools`, `test_glides`, `test_presets`, `test_normalize`, `test_immutability` (immutability and mode
+  lock), `test_limits` (edit caps, paste). `Tests/model/ToolOps.*` runs one tools.json case (shared by two tests).
+  `ModelFixture` gained `notesClose`, `clipNotesClose`, `bitIdentical`, `idsFrom`, `stringsFrom` and `jsonSame` (moved
+  from test_inst.cpp).
+
+### Results (CI)
+
+- Bit for bit on Windows: tools.json 132 of 132, glides.json 78 of 78, presets.json 105 of 105, normalize.json's clip
+  cases 12 of 12. On Linux presets.json is 98 of 105 bit for bit, all within tolerance: the 7 cases hold Strand
+  Demo's chord notes, whose tone lane is `patternNodes` with `acc 0.6`, and `Math.pow (x, 1 / (1 + acc))` is glibc's
+  pow there (one ulp, as NOTES-M0 and part 1 say).
+- Immutability: 132 operations, the input unchanged after each, 268 result notes checked to be the input's own.
+  Mode lock: 1,000 calls (20 with an id the clip does not hold) on the 12 presets and a clip of unnormalized lanes.
+
+### Decisions and deviations
+
+- **Paste notes is new.** The prototype has only Copy / Paste lanes (sl-ui.js), which never adds a note, yet the plan
+  caps "Paste" at 4096 notes. `pasteNotes (clip, notes, at)` adds copies of clipboard notes, the earliest at `at`,
+  links inside the group kept, ids `uniqueId (taken, 'paste:' + id + ':' + at, k)`, refused past 4096. The prototype's
+  Copy / Paste lanes moved from sl-ui.js into ClipEdit as `copyLanes` / `pasteLanes`, so M5 can call them.
+- **The note cap lives in the model functions.** `addNote`, `duplicateNotes` and `pasteNotes` take `maxNotes` (default
+  and ceiling `kMaxClipNotes`) and refuse with the count, the clip unchanged. `chop` keeps its 1024 default, but its
+  `maxNotes` is capped at 4096, so no tool can make a clip the decoder would refuse. The prototype has no such cap.
+- `chop` with a step that is not a positive finite number reads 1/16 (rateBeats' rule). In the prototype a NaN step
+  makes NaN piece counts and silently drops the chopped notes.
+- `selectSimilar` "bar" uses the clip's `beatsPerBar` (the prototype's BEATS_PER_BAR is always 4, which every fixture
+  clip has). "invert" reads `Ids::all ()` as the prototype's null (no selection), so it gives every note.
+- `strum` steps over a note whose start is NaN; the prototype would loop for ever there. Normalized clips hold none.
+- Where the prototype throws (an unknown recipe, sound preset or clip preset) the C++ returns nothing. Unknown lane
+  ids, modes and kinds cannot be written in C++ (typed enums).
+- A `SamplePatch` cannot hold the values applyNotePatch ignores ('mixed', an engine name that does not exist, 'yes' for
+  tape); whoever builds a patch from text leaves those fields unset, as `Tests/model/ToolOps.cpp` does.
+- `updateNotes` writes glide, gc and glideTo as given, as the prototype does (it can make a self link). The UI should
+  not pass one; `normalizeClip` drops it at the next load.
+- `normalizeClip` on a typed clip keeps beatsPerBar, offsetBeats, loop, tieAcrossLoop and the clip extras (the
+  prototype's clips have none of them). `loadClipPreset` normalizes the preset's notes directly instead of a
+  `JSON.parse (JSON.stringify ())` copy: that copy only turns -0 into 0, and no preset holds a -0.
+- `computeGlides` normalizes the instrument it is given, as the prototype does. `buildChains (clip)` with no glides
+  uses the default instrument (the prototype's `computeGlides (clip)` with no inst).
+- Tolerances: tools.json names p, s, l and node values but no other number; vel, glide, gc, the Start position and
+  generator depths are held to the node values' 1e-12 (all are bit for bit on both platforms). presets.json holds
+  every value exact except node values (1e-12); normalize.json holds everything exact.
+- **Immutability and mode lock compare fields, not the encoding.** The plan says "byte-identical in the codec
+  encoding"; the codec is part 3's. Until then both tests compare every field of every note as bit patterns
+  (`modelfx::bitIdentical`: -0 differs from 0, and the extras pointer must be the same), plus the clip settings.
+
+### For part 3
+
+- Switch `test_immutability`'s two tests to compare the codec encoding (keep the field comparison too), and add the
+  32 MiB encoded-size cap to the edit-cap test (`ClipDocument` keeps a running size, plan 3; the model functions
+  only know note counts).
+- Plan 8.2 #27 (an id over 255 UTF-8 bytes is renamed by the missing-id rule) is not in `normalizeNote` yet: it
+  belongs where the codec and the prototype import call it.
+- The codec should rebuild decoded notes through the typed `normalizeNote` / `normalizeClip` (plan 3: "The clip
+  decoder rebuilds notes through model::normalizeNote"); `clipFromJson` is the entry for prototype JSON.
+- History (`VersionHistory`), the clip codec and the snapshot compiler are untouched. The compiler needs all three
+  glide modes: call `computeGlides` on copies of the inst with `glideMode` off, legato and always.
