@@ -213,6 +213,7 @@ namespace sl::state
             Bytes atLoad;              // written: this version's payload for that part right after the load
             std::uint16_t version = 0, flags = 0;
             bool unreadable = false;   // kept because it could not be read (bad CRC, past a limit, damaged, undecodable)
+            bool truncated = false;    // the cut end of the container: always written last, so it frames nothing after it
         };
 
         std::vector<Slot> slots;

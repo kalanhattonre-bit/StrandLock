@@ -372,6 +372,7 @@ namespace sl::state
             s.raw.assign (c.raw, c.raw + c.rawLength);
             s.version = c.version;
             s.flags = c.flags;
+            s.truncated = c.truncated;
             if (isWrittenTag (c.tag) && seen.insert (c.tag).second)
             {
                 s.written = true;
@@ -396,20 +397,31 @@ namespace sl::state
             return fresh == blobAtLoad ? blob : fresh;
         }
 
+        // A cut end (bytes that hold no whole chunk) is kept too, but written after everything else: in the
+        // middle, its header would claim the chunks that follow it as its payload.
         Bytes chunks;
+        const Bytes* cutEnd = nullptr;
         std::set<std::uint32_t> emitted;
         for (const Slot& s : slots)
         {
             if (! s.written)
             {
-                chunks.insert (chunks.end(), s.raw.begin(), s.raw.end());
+                if (s.truncated)
+                    cutEnd = &s.raw;
+                else
+                    chunks.insert (chunks.end(), s.raw.begin(), s.raw.end());
                 continue;
             }
 
             emitted.insert (s.tag);
             const Bytes& payload = payloadOf (now, s.tag);
             if (payload == s.atLoad)
-                chunks.insert (chunks.end(), s.raw.begin(), s.raw.end());
+            {
+                if (s.truncated)
+                    cutEnd = &s.raw;
+                else
+                    chunks.insert (chunks.end(), s.raw.begin(), s.raw.end());
+            }
             else if (s.decoded)
                 appendChunk (chunks, s.tag, std::max (s.version, writtenVersion (s.tag)), s.flags, payload);
             else
@@ -418,6 +430,8 @@ namespace sl::state
         for (const auto tag : kWrittenTags)
             if (emitted.count (tag) == 0)
                 appendChunk (chunks, tag, writtenVersion (tag), 0, payloadOf (now, tag));
+        if (cutEnd != nullptr)
+            chunks.insert (chunks.end(), cutEnd->begin(), cutEnd->end());
         return makeContainer (chunks);
     }
 

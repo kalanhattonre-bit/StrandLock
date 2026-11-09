@@ -1,13 +1,17 @@
-// processBlock never allocates or frees, with notes, bends and controllers arriving.
-// (Moved from the skeleton's inline TestMain; M0 owns this file.) --alloc-minutes sets the length.
+// processBlock never allocates or frees (PLUGIN-PLAN 4 M0): the probe playing chords, with bends, controllers,
+// a moving and cycling host position, parameter changes and the diagnostics fed, for --alloc-minutes of audio
+// (10 by default, the Release run; the Debug-CRT run passes 3, and there malloc is counted too).
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "PluginProcessor.h"
+#include "params/ParameterLayout.h"
 #include "support/AllocCounter.h"
 #include "support/Check.h"
+#include "support/Harness.h"
 #include "support/TestRegistry.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -19,11 +23,13 @@ namespace
 SL_TEST ("alloc", processBlockAllocatesNothing)
 {
     const double minutes = options().allocMinutes;
-    section (fmt ("%.1f minutes at 48 kHz / 64-sample blocks with MIDI: no allocation or free on the audio thread", minutes));
+    section (fmt ("%.1f minutes at 48 kHz / 64-sample blocks, the probe playing: no allocation or free on the audio thread", minutes));
 
     const double rate = 48000.0;
     const int block = 64;
     StrandLockProcessor proc;
+    harness::FakePlayHead head;
+    proc.setPlayHead (&head);
     proc.setPlayConfigDetails (0, 2, rate, block);
     proc.prepareToPlay (rate, block);
 
@@ -33,9 +39,11 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
     juce::Random rng (99);
 
     const auto totalBlocks = (juce::int64) (minutes * 60.0 * rate / block);
-    std::array<int, 16> held {};
+    std::array<int, 24> held {};
     int numHeld = 0;
-    bool silentAndFinite = true;
+    bool finite = true;
+    double peak = 0.0;
+    double ppq = 0.0;
 
     alloc::reset();
     const auto startMs = juce::Time::getMillisecondCounterHiRes();
@@ -48,6 +56,20 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
             auto* d = buffer.getWritePointer (ch);
             for (int i = 0; i < block; ++i)
                 d[i] = (rng.nextFloat() * 2.0f - 1.0f) * 0.4f;
+        }
+
+        // The host position: playing a 4-bar cycle at 120 bpm for 50 s, then stopped for 10 s, and so on.
+        const bool playing = (b * block / (juce::int64) rate) % 60 < 50;
+        head.info.setIsPlaying (playing);
+        head.info.setIsLooping (true);
+        head.info.setBpm (120.0);
+        head.info.setLoopPoints (juce::AudioPlayHead::LoopPoints { 0.0, 16.0 });
+        head.info.setPpqPosition (ppq);
+        if (playing)
+        {
+            ppq += block * 2.0 / rate;
+            if (ppq >= 16.0)
+                ppq -= 16.0;
         }
 
         midi.clear();
@@ -83,6 +105,15 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
             midi.addEvent (pressure, 2, block - 1);
         }
 
+        // Now and then the host moves a parameter (Output Gain ramps, the root and the voice count change).
+        if (rng.nextInt (500) == 0)
+        {
+            const int which = rng.nextInt (3);
+            auto& p = proc.getParam (which == 0 ? sl::params::P::outGain : which == 1 ? sl::params::P::rootNote : sl::params::P::polyphony);
+            p.setValueNotifyingHost (rng.nextFloat());
+        }
+        proc.setNonRealtime (rng.nextInt (2000) == 0);
+
         {
             const alloc::Scope counting;
             proc.processBlock (buffer, midi);
@@ -91,8 +122,14 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
         const float* l = buffer.getReadPointer (0);
         const float* r = buffer.getReadPointer (1);
         for (int i = 0; i < block; ++i)
-            silentAndFinite = silentAndFinite && std::isfinite (l[i]) && std::isfinite (r[i])
-                                  && juce::exactlyEqual (l[i], 0.0f) && juce::exactlyEqual (r[i], 0.0f);
+        {
+            finite = finite && std::isfinite (l[i]) && std::isfinite (r[i]);
+            peak = std::max (peak, (double) std::max (std::abs (l[i]), std::abs (r[i])));
+        }
+
+        // The editor's timer drains the diagnostics on the message thread (outside the counted scope).
+        if (b % 1500 == 0)
+            proc.getDiag().snapshot();
     }
 
     const double seconds = (juce::Time::getMillisecondCounterHiRes() - startMs) / 1000.0;
@@ -100,7 +137,7 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
     note (fmt ("%.1f minutes of audio (%lld blocks) in %.1f s; counting %s", minutes, (long long) totalBlocks, seconds, alloc::coverage()));
 
     check (totalBlocks > 0, fmt ("the run covered %lld blocks", (long long) totalBlocks));
-    check (silentAndFinite, "notes, bends and controllers: silent and finite throughout (the scaffold plays nothing)");
+    check (finite && peak > 0.01 && peak <= 0.98, fmt ("the probe played (peak %.3f, at most 0.98) and every sample was finite", peak));
     check (c.news == 0 && c.deletes == 0,
            fmt ("allocations inside processBlock: %lld, frees: %lld (largest request %zu bytes)", c.news, c.deletes, c.largest));
 }
