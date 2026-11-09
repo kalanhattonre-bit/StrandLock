@@ -34,6 +34,19 @@ jobs:
       - name: Run tests (Release)
         run: build/StrandLockTests_artefacts/Release/StrandLockTests.exe
 
+      # The golden fixtures must be what the prototype produces today, and docs/parameters.json must agree
+      # with SLModel (PLUGIN-PLAN 1.11, 5). This runs on Windows with the exact Node release the files were
+      # made with: V8's Math.pow calls the C library's pow, and glibc rounds a few near-tie values the other
+      # way from Windows, so the Linux job cannot reproduce them byte for byte (docs/NOTES-M0.md).
+      - uses: actions/setup-node@v7
+        if: ${{ !cancelled() }}
+        with:
+          node-version: 24.16.0
+
+      - name: Check the golden fixtures
+        if: ${{ !cancelled() }}
+        run: node tools/make-fixtures.js --check
+
       # The writers run even when a test failed, so a red build still shows what it draws and writes.
       - name: Render UI snapshots
         if: ${{ !cancelled() }}
@@ -129,21 +142,11 @@ jobs:
         run: gh release create "${{ github.ref_name }}" "StrandLock-${{ github.ref_name }}-Windows-x64.zip" --title "StrandLock ${{ github.ref_name }}" --generate-notes
 
   linux-tests:
-    name: Linux (tests, sanitizers, fixtures)
+    name: Linux (tests, sanitizers)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
-
-      # Node 24 is the major the fixtures were made with; make-fixtures.js prints a note on any other.
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-
-      # The committed fixtures must be what the prototype produces today, and docs/parameters.json must
-      # agree with SLModel (PLUGIN-PLAN 1.11, 5).
-      - name: Check the golden fixtures
-        run: node tools/make-fixtures.js --check
 
       - name: Install JUCE dependencies
         if: ${{ !cancelled() }}

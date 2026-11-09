@@ -19,7 +19,7 @@ namespace
 
     struct alignas (64) Wide
     {
-        char bytes[200];
+        char bytes[256];   // a whole number of 64-byte lines, so nothing is padded
     };
 
     std::string describe (const alloc::Counts& c)

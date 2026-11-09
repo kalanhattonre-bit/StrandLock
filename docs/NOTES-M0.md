@@ -52,3 +52,14 @@ Builder notes for M0 (PLUGIN-PLAN section 4 and 7). Append only: one bullet per 
 - The scaffold's editor keeps the skeleton's 75 % to 200 % limits (825 x 510 to 2200 x 1360, fixed aspect ratio).
   M0's own criteria (UI Scale 75-200 %, a window from 900 x 560 to 2400 x 1600) replace them.
 - `.gitattributes` is GrainLock's, plus `binary` for `*.wav`, `*.bin` (the release state fixtures) and `*.zip`.
+- `node tools/make-fixtures.js --check` runs in the Windows job with Node 24.16.0, not in the Linux job with
+  Node 24 as plan 1.11 says. On the first scaffold run (CI run 42570049264, ubuntu, Node 24.22.2) six files differed
+  (model/seeds, nodes, presets, ui/sample-rules, state/prototype-v4-demo, state/import). V8's `Math.pow` calls the C
+  library's `pow`, and glibc's pow is accurate to about 0.52 ulp, not always correctly rounded. The first difference
+  is seeds.json line 751, `travelSpeed (0.8358960531186312)`, whose exact value lies 0.0007 ulp from a rounding tie.
+  Windows' pow (where the fixtures were made) rounds all 249 travelSpeed inputs correctly (checked with BigInt).
+  So the fixtures can only be reproduced byte for byte on Windows, and the check runs there with the exact Node
+  release the files were made with.
+- For M1 and M2: the same holds for the C++. `std::pow` on Linux (glibc) can be one ulp from the fixture where
+  Windows matches it, at inputs like the one above. The plan's tolerances absorb one ulp; if a discrete decision
+  ever flips on such a value, that is plan 1.6 rule 9's fdlibm case.
