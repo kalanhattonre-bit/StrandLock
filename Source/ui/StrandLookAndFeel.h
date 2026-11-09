@@ -4,13 +4,21 @@
 
 namespace sl::ui
 {
-    /** Draws every standard JUCE widget StrandLock uses. No bitmaps: all vector drawing.
-        Copied from GrainLock's GrainLookAndFeel, so the suite's controls look the same everywhere. */
+    /** Draws every standard JUCE widget StrandLock uses, in the editor's theme. No bitmaps: all vector drawing.
+        Built from GrainLock's GrainLookAndFeel; the knob is the prototype's dial (sl-ui-sample.js). After the
+        theme changes, call refreshColours() and repaint. */
     class StrandLookAndFeel final : public juce::LookAndFeel_V4
     {
     public:
-        StrandLookAndFeel();
+        explicit StrandLookAndFeel (const Theme& theme);
 
+        /** Sets the JUCE colour ids from the theme (after a theme switch). */
+        void refreshColours();
+
+        const Theme& getTheme() const noexcept { return theme; }
+
+        /** A knob's colour: slider.getProperties()["tok"] holds the Tok of its value arc (the accent when absent);
+            "bipolar" draws the arc from twelve o'clock. */
         void drawRotarySlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos,
                                float rotaryStartAngle, float rotaryEndAngle, juce::Slider&) override;
 
@@ -23,5 +31,15 @@ namespace sl::ui
 
         juce::Font getPopupMenuFont() override;
         void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
+
+        void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int width, int height,
+                            bool isScrollbarVertical, int thumbStartPosition, int thumbSize,
+                            bool isMouseOver, bool isMouseDown) override;
+        int getDefaultScrollbarWidth() override { return 8; }
+
+        void drawTooltip (juce::Graphics&, const juce::String& text, int width, int height) override;
+
+    private:
+        const Theme& theme;
     };
 }

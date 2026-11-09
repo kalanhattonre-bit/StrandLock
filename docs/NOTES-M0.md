@@ -153,3 +153,13 @@ Builder notes for M0 (PLUGIN-PLAN section 4 and 7). Append only: one bullet per 
   M2 or M6 adds it when sound loads, presets and undo need it.
 - Starter sounds are made on the message thread when a state load names one (tens of milliseconds). The plan's
   SampleManager worker thread comes with M2.
+
+## M0 part 2 (the editor)
+
+### Progress
+
+- Done (first CI round pending): `ui/Theme` (77 tokens, both palettes), `StrandLookAndFeel`, `Logo`, `Controls`,
+  `MainView` (top bar, mode bar, selection row, tabs, roll placeholder, waveform strip, hint bar), the Macros, Sample
+  and Sound tabs, `DiagnosticsPage`, the editor (UI Scale, window limits, Keys, drops), `Tests/plugin/test_theme.cpp`
+  and the rewritten `Tests/plugin/test_editor.cpp` with the snapshot writers.
+- Next: CI green, look at the snapshots, `docs/CUBASE-CHECKLIST.md`, rebase on main, merge.
