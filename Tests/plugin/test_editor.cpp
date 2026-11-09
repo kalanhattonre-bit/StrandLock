@@ -15,6 +15,7 @@
 #include "PluginProcessor.h"
 #include "core/Version.h"
 #include "params/ParamIds.h"
+#include "state/Crc32.h"
 #include "support/Check.h"
 #include "support/Harness.h"
 #include "support/TestRegistry.h"
@@ -332,8 +333,13 @@ SL_TEST ("ui", editorLayout)
     const auto loaded = proc.getLoadedSound();
     check (view.getStrip().shownSound() == loaded.get() && view.getStrip().headerText().startsWith ("Saw"),
            fmt ("the strip shows the loaded sound (\"%s\")", view.getStrip().headerText().toRawUTF8()));
-    const int wavePixels = countNear (image, strip, dark[Tok::wave], 24);
-    check (wavePixels > 3000, fmt ("the waveform is drawn in the wave colour (%d pixels)", wavePixels));
+    // The prototype draws the wave at 80 % over the strip's background (sl-ui.js renderWave: globalAlpha 0.8).
+    const auto blended = dark[Tok::stripBg].interpolatedWith (dark[Tok::wave], ui::StripView::waveAlpha);
+    const int wavePixels = countNear (image, strip, blended, 3);
+    const int fullWave = countNear (image, strip, dark[Tok::wave], 3);
+    check (wavePixels > 3000 && fullWave < 100,
+           fmt ("the waveform is drawn in the wave colour at 80 %% over the strip, #%s (%d pixels; %d at full opacity)",
+                blended.toDisplayString (false).toRawUTF8(), wavePixels, fullWave));
 
     // The host's tempo, read only: none before the host plays.
     check (view.getTempoText() == "-", fmt ("tempo before the host plays: \"%s\"", view.getTempoText().toRawUTF8()));
@@ -405,6 +411,24 @@ SL_TEST ("ui", editorTabsBoundToParameters)
            fmt ("all %d knobs move their own parameter from 0 to 1 (%d did)%s%s", total, moved,
                 firstFailure.isEmpty() ? "" : "; first that did not: ", firstFailure.toRawUTF8()));
 
+    // A bipolar knob lights its arc from twelve o'clock, so its default must sit there; otherwise the knob shows
+    // a lit arc at its default (sl-ui-sample.js starts the arc at the default).
+    int bipolar = 0;
+    juce::String offCentre;
+    for (auto* tab : { macros, sample, sound })
+        for (auto* knob : tab->getKnobs())
+            if ((bool) knob->getSlider().getProperties()["bipolar"])
+            {
+                ++bipolar;
+                auto& param = knob->getParameter();
+                const double at = knob->getSlider().valueToProportionOfLength (param.convertFrom0to1 (param.getDefaultValue()));
+                if (std::abs (at - 0.5) > 1.0e-4)
+                    offCentre << param.getParameterID() << " (" << juce::String (at, 3) << ") ";
+            }
+    check (bipolar == 15 && offCentre.isEmpty(),
+           fmt ("the 15 bipolar knobs (8 macros, 5 offsets, Pitch, Cents) have their default at twelve o'clock (%d bipolar; off centre: %s)",
+                bipolar, offCentre.isEmpty() ? "none" : offCentre.toRawUTF8()));
+
     // A knob shows the parameter's own readout.
     auto* speedKnob = sample->getKnobs().empty() ? nullptr : sample->getKnobs().front();
     check (speedKnob != nullptr && speedKnob->getParameter().getParameterID() == "speed"
@@ -424,6 +448,15 @@ SL_TEST ("ui", editorTabsBoundToParameters)
     {
         StrandLockEditor again (proc);
         check (again.getView().getOpenTab() == MainView::soundTab, "a new window opens on the same tab");
+        again.getView().setFolded (true);
+    }
+    {
+        StrandLockEditor third (proc);
+        check (third.getView().isFolded() && third.getView().getOpenTab() == MainView::soundTab && proc.getUiState().folded == 1,
+               fmt ("folded there, the next window opens folded on that tab and UIST keeps it (folded %s, UIST %d)",
+                    third.getView().isFolded() ? "yes" : "no", (int) proc.getUiState().folded));
+        third.getView().getTabStrip().onClick (MainView::soundTab);
+        check (! third.getView().isFolded() && proc.getUiState().folded == 0, "a click on the tab unfolds it again");
     }
 }
 
@@ -567,6 +600,64 @@ SL_TEST ("ui", editorStateBanner)
     StrandLockEditor quiet (clean);
     quiet.refreshNow();
     check (quiet.getView().getBannerText().isEmpty(), "a readable state shows none");
+}
+
+SL_TEST ("ui", editorKeepsUnreadableState)
+{
+    section ("Editor: opening the window and using it never replaces a state this version cannot read (PLUGIN-PLAN 3 (e))");
+
+    // A project saved by a newer StrandLock: format version 2, header CRC good.
+    StrandLockProcessor proc;
+    resetUserSettings (proc);
+    juce::MemoryBlock block;
+    proc.getStateInformation (block);
+    auto* bytes = static_cast<std::uint8_t*> (block.getData());
+    bytes[4] = (std::uint8_t) (core::kStateFormatVersion + 1);
+    const auto crc = state::crc32 (bytes, 12);
+    for (int i = 0; i < 4; ++i)
+        bytes[12 + i] = (std::uint8_t) ((crc >> (8 * i)) & 0xffu);
+    const juce::MemoryBlock newer (block);
+    proc.setStateInformation (newer.getData(), (int) newer.getSize());
+
+    const auto savesNewer = [&proc, &newer]
+    {
+        juce::MemoryBlock now;
+        proc.getStateInformation (now);
+        return now == newer;
+    };
+    check (savesNewer() && proc.getStateBanner().isNotEmpty(), "it loads nothing, is kept and shows the banner");
+
+    {
+        StrandLockEditor editor (proc);   // opening writes the window's state (UIST)
+        auto& view = editor.getView();
+        const bool afterOpen = savesNewer();
+        view.getTabStrip().onClick (MainView::macrosTab);
+        view.getTabStrip().onClick (MainView::diagTab);
+        view.getTabStrip().onClick (MainView::diagTab);   // folds the pane
+        view.getModeButton (3).onClick();
+        view.getThemeButton().onClick();
+        editor.setUiScalePercent (125);
+        editor.setSize (1300, 800);
+        editor.refreshNow();
+        check (afterOpen && savesNewer() && proc.getStateBanner().isNotEmpty() && view.getBannerText().isNotEmpty(),
+               fmt ("after opening the window, two tabs, folding, mode 3, the theme, 125 %% and a resize: still saved byte for byte "
+                    "(after opening %s, at the end %s), banner shown", afterOpen ? "yes" : "NO", savesNewer() ? "yes" : "NO"));
+    }
+    {
+        StrandLockEditor again (proc);
+        check (savesNewer(), "closing the window and opening it again keeps it too");
+
+        auto& gain = proc.getParam (params::P::outGain);
+        gain.setValueNotifyingHost (0.3f);
+        juce::MemoryBlock after;
+        proc.getStateInformation (after);
+        for (int i = 0; i < 8; ++i)
+            again.refreshNow();   // the view looks at the banner on every 8th tick
+        check (after != newer && state::parseContainer (after.getData(), after.getSize()).status == state::HeaderStatus::ok
+                   && proc.getStateBanner().isEmpty() && again.getView().getBannerText().isEmpty(),
+               "a parameter edit replaces it with this version's state, and the banner goes");
+    }
+    resetUserSettings (proc);
 }
 
 SL_TEST ("ui", uiSnapshotsLuminance)

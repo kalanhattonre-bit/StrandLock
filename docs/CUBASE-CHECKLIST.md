@@ -72,7 +72,8 @@ the text from the **Copy report** button.
 
 7. **Playing with Cubase.** Press Play. In the POSITION AND TEMPO box, **Transport** says playing and
    **Position (ppq)** counts quarter notes from the start of the project (bar 1 is 0.0000, bar 2 is 4.0000 in
-   4/4). Does it start at bar 1? An orange line also moves across the empty roll. Set a 4-bar cycle and let it
+   4/4). Does it start at bar 1? Click any other tab (for example Sample): an orange line moves across the empty
+   roll while Cubase plays. Then click Diagnostics again. Set a 4-bar cycle and let it
    go round 3 times: does **Cycle wraps** go up? **Last wraps** shows the position just before and after each
    wrap: does the "before" look like 16.0000 or slightly off (for example 15.9970)? Does **Wraps inside a block**
    go up, and does it go up more with ASIO-Guard on? Add a tempo change on the tempo track: do **Tempo** and the

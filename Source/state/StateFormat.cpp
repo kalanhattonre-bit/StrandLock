@@ -349,14 +349,29 @@ namespace sl::state
         return makeContainer (chunks);
     }
 
+    bool KeptLayout::isProjectContent (std::uint32_t tag) noexcept
+    {
+        return tag != kTagUist;
+    }
+
     KeptLayout KeptLayout::unreadable (const void* data, std::size_t size, const Payloads& atLoad)
     {
         KeptLayout k;
         k.wholeBlob = true;
         const auto* b = static_cast<const std::uint8_t*> (data);
         k.blob.assign (b, b + size);
-        k.blobAtLoad = standardContainer (atLoad);
+        for (const auto tag : kWrittenTags)
+            if (isProjectContent (tag))
+                k.contentAtLoad[tag] = payloadOf (atLoad, tag);
         return k;
+    }
+
+    bool KeptLayout::contentUnchanged (const Payloads& now) const
+    {
+        for (const auto tag : kWrittenTags)
+            if (isProjectContent (tag) && payloadOf (now, tag) != payloadOf (contentAtLoad, tag))
+                return false;
+        return true;
     }
 
     KeptLayout KeptLayout::fromContainer (const ParsedContainer& parsed, const std::vector<bool>& decoded, const Payloads& atLoad)
@@ -391,11 +406,9 @@ namespace sl::state
 
     Bytes KeptLayout::write (const Payloads& now) const
     {
+        // UIST is the window's own state (tab, mode, fold, size, theme): a click there is not an edit.
         if (wholeBlob)
-        {
-            Bytes fresh = standardContainer (now);
-            return fresh == blobAtLoad ? blob : fresh;
-        }
+            return contentUnchanged (now) ? blob : standardContainer (now);
 
         // A cut end (bytes that hold no whole chunk) is kept too, but written after everything else: in the
         // middle, its header would claim the chunks that follow it as its payload.
@@ -438,7 +451,7 @@ namespace sl::state
     bool KeptLayout::keepsUnreadable (const Payloads& now) const
     {
         if (wholeBlob)
-            return standardContainer (now) == blobAtLoad;
+            return contentUnchanged (now);
         for (const Slot& s : slots)
             if (s.unreadable && (! s.written || payloadOf (now, s.tag) == s.atLoad))
                 return true;

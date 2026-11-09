@@ -297,3 +297,14 @@ What M1 leaves for later milestones:
   SnapshotPublisher keeps a `SnapshotCache` between compiles and should bound a snapshot's memory (see the table cap).
 - Section 3's case (a) (an unknown chunk) and (e) (unreadable blobs) are chunk-level: M0 and M2.
 - Rec and import refusals past the caps (plan 3) belong to M8 and M2.
+
+## Fix pass after review (branch m01-fixes)
+
+- **Correction to part 2's "chop with a step that is not a positive finite number reads 1/16".** That is not a
+  deviation. The prototype's `rateBeats` also reads a NaN, zero, negative or infinite step as 0.25 (1/16), so its
+  chop makes the same pieces as the C++ (a reviewer's run: rates NaN, 0, -1 and Infinity all give 4 pieces of
+  0.25 beats). The part 2 bullet that says the prototype drops the notes is wrong; parity is exact.
+- **The clip settings record now keeps its original bytes too** when its loop or tieAcrossLoop byte is above 1,
+  as the note-level records do for their flags. They read as on. The record is written back byte for byte while
+  bars, beatsPerBar, offsetBeats, loop and tieAcrossLoop still equal what it decoded to (`ClipExtras::settingsOriginal`
+  and the decoded values); after an edit it is written from its values. Test: `codecCompatClipSettingsFlags`.

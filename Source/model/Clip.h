@@ -174,6 +174,13 @@ namespace sl::model
     {
         std::vector<std::uint8_t> settingsTrailing;
         std::vector<std::uint8_t> payloadTrailing;
+
+        /** The whole clip settings record (with its length) when it held an unknown value (a loop or tie byte
+            above 1), and what it decoded to: written back while those five settings are unchanged. */
+        std::vector<std::uint8_t> settingsOriginal;
+        int decodedBars = 0, decodedBeatsPerBar = 0;
+        double decodedOffsetBeats = 0.0;
+        bool decodedLoop = false, decodedTieAcrossLoop = false;
     };
 
     //==============================================================================================

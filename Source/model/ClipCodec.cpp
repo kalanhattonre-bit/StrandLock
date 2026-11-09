@@ -295,15 +295,24 @@ namespace sl::model
 
         void writeHeader (Out& o, const Clip& c)
         {
-            const std::size_t at = o.begin32();
-            o.i32 (c.bars);
-            o.i32 (c.beatsPerBar);
-            o.f64 (c.offsetBeats);
-            o.u8 (c.loop ? 1 : 0);
-            o.u8 (c.tieAcrossLoop ? 1 : 0);
-            if (c.extras != nullptr)
-                o.bytes (c.extras->settingsTrailing);
-            o.end32 (at);
+            const ClipExtras* x = c.extras.get();
+            if (x != nullptr && ! x->settingsOriginal.empty() && c.bars == x->decodedBars && c.beatsPerBar == x->decodedBeatsPerBar
+                && sameBits (c.offsetBeats, x->decodedOffsetBeats) && c.loop == x->decodedLoop && c.tieAcrossLoop == x->decodedTieAcrossLoop)
+            {
+                o.bytes (x->settingsOriginal);   // it held an unknown value and is unedited
+            }
+            else
+            {
+                const std::size_t at = o.begin32();
+                o.i32 (c.bars);
+                o.i32 (c.beatsPerBar);
+                o.f64 (c.offsetBeats);
+                o.u8 (c.loop ? 1 : 0);
+                o.u8 (c.tieAcrossLoop ? 1 : 0);
+                if (x != nullptr)
+                    o.bytes (x->settingsTrailing);
+                o.end32 (at);
+            }
             o.u32 (static_cast<std::uint32_t> (c.notes.size()));
         }
 
@@ -782,6 +791,7 @@ namespace sl::model
         raw.beatsPerBar = kDefaultBeatsPerBar;
         auto clipExtras = std::make_shared<ClipExtras>();
         {
+            const std::uint8_t* begin = in.pos();
             std::uint32_t length = 0;
             In q;
             if (! in.u32 (length) || ! in.sub (length, q))
@@ -789,7 +799,7 @@ namespace sl::model
                 result.error = "the clip settings record is cut short";
                 return result;
             }
-            bool complete = false;
+            bool unknown = false, complete = false;
             do
             {
                 std::int32_t bars = 0, beatsPerBar = 0;
@@ -804,14 +814,16 @@ namespace sl::model
                     break;
                 if (! q.u8 (loop))
                     break;
-                raw.loop = loop != 0;
+                raw.loop = flagFrom (loop, unknown);
                 if (! q.u8 (tie))
                     break;
-                raw.tieAcrossLoop = tie != 0;
+                raw.tieAcrossLoop = flagFrom (tie, unknown);
                 complete = true;
             } while (false);
             if (complete)
                 keepBytes (clipExtras->settingsTrailing, q.pos(), q.stop());
+            if (unknown)
+                keepBytes (clipExtras->settingsOriginal, begin, in.pos());   // a flag byte above 1, as a note's records keep theirs
         }
 
         std::uint32_t noteCount = 0;
@@ -846,10 +858,15 @@ namespace sl::model
             raw.notes.push_back (std::make_shared<const Note> (std::move (b.note)));
         }
         keepBytes (clipExtras->payloadTrailing, in.pos(), in.stop());
-        if (! clipExtras->settingsTrailing.empty() || ! clipExtras->payloadTrailing.empty())
+        if (! clipExtras->settingsTrailing.empty() || ! clipExtras->payloadTrailing.empty() || ! clipExtras->settingsOriginal.empty())
             raw.extras = clipExtras;
 
         Clip clip = normalizeClip (raw);   // the same notes in the same order, each rebuilt by normalizeNote
+        clipExtras->decodedBars = clip.bars;
+        clipExtras->decodedBeatsPerBar = clip.beatsPerBar;
+        clipExtras->decodedOffsetBeats = clip.offsetBeats;
+        clipExtras->decodedLoop = clip.loop;
+        clipExtras->decodedTieAcrossLoop = clip.tieAcrossLoop;
         if (encodedClipSize (clip) > kMaxClipBytes)
         {
             // possible when a payload near the cap leaves out lanes the encoder always writes: refused, so a

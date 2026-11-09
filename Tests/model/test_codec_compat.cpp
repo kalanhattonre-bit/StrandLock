@@ -240,3 +240,41 @@ SL_TEST ("model", codecCompatUnknownValues)
     check (codecspec::find (after, "warble") == std::string::npos && after == codecspec::write (model::setNoteSample (base, model::Ids (n.id), patch), shapeOnly),
            "after choosing Freeze the sample record is written from its value; the lane with shape 9 is still written as it was");
 }
+
+SL_TEST ("model", codecCompatClipSettingsFlags)
+{
+    section ("Forward compatibility: a loop or tie byte above 1 in the clip settings keeps the record's original bytes");
+
+    const model::Clip base = baseClip();
+    const Bytes plain = model::encodeClip (base);
+
+    // The clip settings record: u32 length, i32 bars, i32 beatsPerBar, f64 offsetBeats, u8 loop, u8 tieAcrossLoop.
+    constexpr std::size_t loopAt = 4 + 4 + 4 + 8, tieAt = loopAt + 1;
+    struct FlagCase { const char* what; std::size_t at; std::uint8_t value; };
+    const FlagCase cases[] = { { "a loop byte of 2", loopAt, 2 }, { "a tieAcrossLoop byte of 7", tieAt, 7 } };
+
+    for (const auto& fc : cases)
+    {
+        Bytes newer = plain;
+        newer[fc.at] = fc.value;
+        const auto d = model::decodeClip (newer);
+        check (d.clip.has_value(), std::string (fc.what) + ": the clip loads " + d.error);
+        if (! d.clip.has_value())
+            continue;
+
+        const bool readsOn = fc.at == loopAt ? d.clip->loop : d.clip->tieAcrossLoop;
+        check (readsOn && d.clip->extras != nullptr && ! d.clip->extras->settingsOriginal.empty() && model::encodeClip (*d.clip) == newer,
+               std::string (fc.what) + ": it reads as on, the record's bytes are kept, and the clip re-saves byte-identically");
+
+        // After an edit of the settings the record is written from its values: the byte is 1 now.
+        model::Clip edited = *d.clip;
+        edited.bars = d.clip->bars == 8 ? 4 : 8;
+        model::Clip expected = base;
+        expected.bars = edited.bars;
+        expected.loop = d.clip->loop;
+        expected.tieAcrossLoop = d.clip->tieAcrossLoop;
+        const Bytes after = model::encodeClip (edited);
+        check (after == model::encodeClip (expected) && after.size() > fc.at && after[fc.at] == 1,
+               std::string (fc.what) + fmt (": after a bars edit (%d) the record is written from its values", edited.bars));
+    }
+}

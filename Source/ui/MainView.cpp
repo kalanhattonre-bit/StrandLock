@@ -449,7 +449,7 @@ namespace sl::ui
                 const float top = mid - hi * amp, bottom = mid - lo * amp;
                 columns.addWithoutMerging ({ body.getX() + (float) x, top, 1.0f, juce::jmax (1.0f, bottom - top) });
             }
-            g.setColour (theme (Tok::wave));
+            g.setColour (theme (Tok::wave).withMultipliedAlpha (waveAlpha));
             g.fillRectList (columns);
         }
 
@@ -566,16 +566,15 @@ namespace sl::ui
         for (int i = 0; i < numTabs; ++i)
             if (ui.tab == kTabIds[i])
                 openTabIndex = i;
-        folded = ui.folded != 0;
+        // openTab unfolds the pane (and saves that), so the saved fold is kept aside and put back after it.
+        const bool startFolded = ui.folded != 0;
         tabStrip.setSelected (openTabIndex);
-        tabStrip.setFolded (folded);
-        foldButton->setToggleState (folded, juce::dontSendNotification);
 
         themeChanged();
         paintModes();
         updateHint();
         openTab (openTabIndex);
-        if (folded)
+        if (startFolded)
             setFolded (true);
     }
 

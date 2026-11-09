@@ -550,7 +550,7 @@ SL_TEST ("state", newerChunkFieldsKept)
 
 SL_TEST ("state", unreadableBlobsKept)
 {
-    section ("State: what cannot be read loads nothing, is written back unchanged until an edit, and shows the banner (PLUGIN-PLAN 3 (e))");
+    section ("State: what cannot be read loads nothing, is written back unchanged until an edit (a UIST change is none), and shows the banner (PLUGIN-PLAN 3 (e))");
 
     auto values = defaults();
     values[(std::size_t) params::index (params::P::drift)] = 0.4f;
@@ -595,13 +595,25 @@ SL_TEST ("state", unreadableBlobsKept)
         const bool nothing = parametersAre (p, defaults());
         const bool kept = saveOf (p) == c.data;
         const bool banner = p.getStateBanner().isNotEmpty();
+
+        // What the window writes (UIST: tab, mode, fold, size, scale, theme) is not an edit of the project.
+        auto ui = p.getUiState();
+        ui.tab = "diag";
+        ui.mode = 3;
+        ui.folded = 1;
+        ui.theme = 1;
+        ui.uiScalePercent = 150;
+        ui.logicalWidth = 1300;
+        p.setUiState (ui);
+        const bool keptThroughUi = saveOf (p) == c.data && p.getStateBanner().isNotEmpty();
+
         params::setPlainValue (p.getParam (params::P::pitch), params::index (params::P::pitch), 5.0f);
         const Bytes after = saveOf (p);
         const bool replaced = after != c.data && state::parseContainer (after.data(), after.size()).status == state::HeaderStatus::ok;
-        check (nothing && kept && banner && replaced && p.getStateBanner().isEmpty(),
-               fmt ("%s: loads nothing %s, re-saved unchanged %s, banner %s; after an edit replaced %s, banner gone %s", c.what,
-                    nothing ? "yes" : "NO", kept ? "yes" : "NO", banner ? "yes" : "NO", replaced ? "yes" : "NO",
-                    p.getStateBanner().isEmpty() ? "yes" : "NO"));
+        check (nothing && kept && banner && keptThroughUi && replaced && p.getStateBanner().isEmpty(),
+               fmt ("%s: loads nothing %s, re-saved unchanged %s, banner %s; still kept after UIST changes %s; after an edit replaced %s, banner gone %s",
+                    c.what, nothing ? "yes" : "NO", kept ? "yes" : "NO", banner ? "yes" : "NO", keptThroughUi ? "yes" : "NO",
+                    replaced ? "yes" : "NO", p.getStateBanner().isEmpty() ? "yes" : "NO"));
     }
 
     // A known chunk with a bad CRC is skipped on its own; the others load.
@@ -823,7 +835,9 @@ SL_TEST ("state", corruptionFuzz)
         check (t->overAlloc == 0 && t->overLive == 0,
                fmt ("%s: largest single allocation %zu bytes (limit 51 MiB), most live %lld bytes (limit 2 x blob + 64 MiB)",
                     what, t->largest, t->peakLive));
-        note (fmt ("%s: slowest load %.2f ms", what, t->worstMs));
+        // A load that changes the starter makes it again on this thread (tens of ms): a missed target goes to NOTES-M0.
+        note (fmt ("%s: slowest load %.2f ms (target 50 ms, gate 250 ms)", what, t->worstMs));
+        check (t->worstMs <= 250.0, fmt ("%s: no load slower than 250 ms (%.2f ms)", what, t->worstMs));
     }
     check (fixedReadable > 9000, fmt ("most fixed-up mutations still read as a container, so the chunk decoders saw them (%d of 10000)", fixedReadable));
     note (fmt ("allocation sizes are counted %s", alloc::coverage()));

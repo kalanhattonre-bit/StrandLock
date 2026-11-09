@@ -209,3 +209,42 @@ Builder notes for M0 (PLUGIN-PLAN section 4 and 7). Append only: one bullet per 
   pluginval); Linux tests green, its sanitizer build killed for memory (fixed above). Snapshots looked at; fixed
   the mode bar's wrap at 1100 px, half-cut tab rows, the Diagnostics labels and the drop rows.
 - Next: the CI round for these fixes, then rebase on origin/main and merge.
+
+## Fix pass after review (branch m01-fixes)
+
+### Progress
+
+- Done: all eleven review findings checked in the code; all are real. Fixed: the kept unreadable blob, the folded
+  pane, the allocation test, the corruption load gate, the Output knob, the wave's opacity, checklist step 7, and
+  in M1 the clip settings flags. NOTES bullets below.
+- In progress: the CI round for these fixes.
+- Next: rebase on origin/main if it moved, CI green, fast-forward main.
+
+### Decisions and deviations
+
+- **A blob that could not be read is kept until the project's content changes, not the window's.** It used to be
+  compared through every chunk this version writes, UIST included, so opening the editor, a tab click, the theme,
+  folding, the UI Scale or a resize threw it away, and the next save (or Cubase's auto-save) wrote defaults over a
+  newer project. Now `KeptLayout` compares only PARM, INST and SMPL (later CLIP and SAUD): every written chunk but
+  UIST. A UI change made while the blob is kept is not saved; the theme and the UI Scale are kept per user anyway.
+  Tested in `unreadableBlobsKept` (UIST changes) and `editorKeepsUnreadableState` (a real editor).
+- **The folded pane is restored.** MainView's constructor read UIST `folded`, then `openTab` unfolded it and saved
+  folded = 0. It now keeps the saved value aside and folds after `openTab`.
+- **Host parameter changes are counted on the audio thread.** Cubase sends automation and Quick Controls inside
+  process(), before processBlock (JUCE's VST3 wrapper calls `setValueNotifyingHost` there), so the allocation test
+  now moves parameters inside the counted scope. A second test does it with the editor open, from a thread of its
+  own (the test thread is the message thread, and a change made there updates the knobs at once).
+- **Corrupted-state loads miss the 50 ms target.** Main's CI run 42676366984: single-byte mutations 74.67 ms and
+  mutations with CRCs fixed up 72.18 ms on Windows; 56.10 and 56.35 ms on Linux; 79.01 ms under ASan. The slow ones
+  are mutations of the SMPL seed: `setStateInformation` makes that starter again on the calling thread (one
+  2.1 MB sound). They are gated at 250 ms now, as the truncation loads are. In M2 the SampleManager makes
+  starter sounds on its worker thread (plan 1.3), which should bring these loads under target.
+- **`sawopen` made synchronously misses its 60 ms target**: 82.3 ms on Windows and 69.4 ms on Linux (run
+  42676366984). The JS takes 88 ms. It is gated at 5 x the target (300 ms) by the timing rule. M2 opens on
+  `sawopen` (D9); its SampleManager worker thread (plan 1.3) keeps that time off the message thread.
+- **The Output knob is not bipolar.** Its range is skewed (centre -12 dB), so twelve o'clock is -12 dB and a
+  bipolar arc was lit at the 0 dB default. A test now holds every bipolar knob to a default at twelve o'clock.
+- **The waveform is drawn at 80 % opacity** over the strip's background, as sl-ui.js renderWave does
+  (globalAlpha 0.8): #52D2AE dark, #53AC94 light.
+- **Checklist step 7**: the Diagnostics tab hides the roll, so the step now says to click another tab to see the
+  orange playhead, then come back.

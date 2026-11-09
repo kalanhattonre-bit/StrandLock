@@ -14,7 +14,8 @@
 // original bytes in their order, and writes a chunk's original bytes again while the part of the state it
 // holds is unchanged since the load (compared through its encoding). An unknown chunk is always written back.
 // A blob that could not be read at all (newer formatVersion, wrong magic, bad header CRC, totalLength past the
-// end) is written back whole while the state is unchanged.
+// end) is written back whole while the project's content is unchanged: every chunk but UIST. UIST is the
+// window's own state (tab, mode, fold, size, theme), so opening the editor or clicking a tab is not an edit.
 
 #include <cstddef>
 #include <cstdint>
@@ -219,8 +220,14 @@ namespace sl::state
         std::vector<Slot> slots;
         bool wholeBlob = false;
         Bytes blob;
-        Bytes blobAtLoad;   // the container this version would have written right after the load
+        Payloads contentAtLoad;   // whole blob: this version's payloads right after the load, UIST left out
 
         static Bytes standardContainer (const Payloads& now);
+
+        /** Whether a chunk holds the project's content (PARM, INST, SMPL; later CLIP and SAUD), not UIST. */
+        static bool isProjectContent (std::uint32_t tag) noexcept;
+
+        /** Whole blob: every content payload of now equals the one right after the load. */
+        bool contentUnchanged (const Payloads& now) const;
     };
 }

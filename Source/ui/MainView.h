@@ -65,6 +65,9 @@ namespace sl::ui
 
         static constexpr int columnWidth = 172, headerHeight = 28;
 
+        /** The wave's opacity over the strip's background (sl-ui.js renderWave: globalAlpha 0.8). */
+        static constexpr float waveAlpha = 0.8f;
+
     private:
         void makePeaks();
 

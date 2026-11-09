@@ -15,7 +15,8 @@ namespace sl::ui
         knob (P::velSens, "Velocity", Tok::laneAmp);
         knob (P::polyphony, "Voices", Tok::acc);
         separator();
-        knob (P::outGain, "Output", Tok::laneAmp, true);
+        // Not bipolar: the skewed range puts -12 dB at twelve o'clock, so a bipolar arc would be lit at 0 dB.
+        knob (P::outGain, "Output", Tok::laneAmp);
 
         newRow();
         choice (P::vibSync, "Vibrato sync", 120);
