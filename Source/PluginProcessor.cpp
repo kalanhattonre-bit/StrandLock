@@ -296,6 +296,7 @@ void StrandLockProcessor::getStateInformation (juce::MemoryBlock& destData)
         const std::lock_guard<std::mutex> hold (stateLock);
         const auto bytes = kept.write (currentPayloads());
         destData.replaceAll (bytes.data(), bytes.size());
+        diag.stateSaved (bytes.size());
     }
     catch (...)
     {
@@ -322,6 +323,7 @@ void StrandLockProcessor::loadState (const void* data, std::size_t size)
 {
     const LoadScope loading (loadingState);
     const auto parsed = state::parseContainer (data, size);
+    diag.stateLoaded (size, parsed.status == state::HeaderStatus::ok);
 
     if (parsed.status != state::HeaderStatus::ok)
     {

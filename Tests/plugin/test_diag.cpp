@@ -321,6 +321,19 @@ SL_TEST ("diag", midiAndHostParameters)
                 t.lastHostParam, (double) t.lastHostParamValue, (unsigned long long) t.hostParamChanges));
     check (proc.getDiag().reportText().contains ("Last parameter the host changed: Speed (macro1) = "),
            "the report names it with its readout");
+
+    // The state's size, saved and loaded (checklist step 12), and a load that could not be read.
+    juce::MemoryBlock mine;
+    proc.getStateInformation (mine);
+    const char junk[] = "not a state";
+    proc.setStateInformation (junk, (int) sizeof (junk));
+    const auto u = proc.getDiag().snapshot();
+    check (u.stateSaves == 1 && u.lastSavedBytes == (long long) mine.getSize() && u.stateLoads == 2
+               && u.lastLoadedBytes == (long long) sizeof (junk) && ! u.lastLoadReadable,
+           fmt ("1 save of %lld bytes, 2 loads, the last of %lld bytes not readable", u.lastSavedBytes, u.lastLoadedBytes));
+    const juce::String stateLine = "State: saved 1 x, last " + juce::String ((juce::int64) mine.getSize())
+                                 + " bytes; loaded 2 x, last 12 bytes (could not be read: kept as it was)";
+    check (proc.getDiag().reportText().contains (stateLine), fmt ("the report says so: \"%s\"", stateLine.toRawUTF8()));
 }
 
 SL_TEST ("diag", messageThreadAndReport)

@@ -68,6 +68,12 @@ namespace sl::diag
         /** Any thread: a parameter the host (or anything but StrandLock's own controls) changed. */
         void hostParameterChanged (int paramIndex, float plainValue) noexcept;
 
+        /** Any thread (the host's state calls): a state of this many bytes was saved (checklist step 12). */
+        void stateSaved (std::size_t bytes) noexcept;
+
+        /** Any thread: a state of this many bytes was loaded; readable is false when it was kept unread. */
+        void stateLoaded (std::size_t bytes, bool readable) noexcept;
+
         //==========================================================================================
         // Message thread.
 
@@ -132,6 +138,10 @@ namespace sl::diag
             float lastHostParamValue = 0.0f;
             std::uint64_t hostParamChanges = 0;
 
+            std::uint64_t stateSaves = 0, stateLoads = 0;
+            long long lastSavedBytes = -1, lastLoadedBytes = -1;   // -1 before the first
+            bool lastLoadReadable = true;
+
             std::vector<BlockStart> blockStarts;   // recent, oldest first
             std::vector<Wrap> wraps;
             std::vector<BlockOverEnd> blocksOverEnd;
@@ -182,6 +192,9 @@ namespace sl::diag
         std::atomic<float> lastHostParamValue { 0.0f };
         std::atomic<std::uint64_t> hostParamChanges { 0 };
         std::atomic<std::uint64_t> lostEvents { 0 };
+        std::atomic<std::uint64_t> stateSaves { 0 }, stateLoads { 0 };
+        std::atomic<long long> lastSavedBytes { -1 }, lastLoadedBytes { -1 };
+        std::atomic<bool> lastLoadReadable { true };
 
         // The audio thread's own state (only it touches these, or prepare while no audio runs).
         std::uint64_t blockIndex = 0;

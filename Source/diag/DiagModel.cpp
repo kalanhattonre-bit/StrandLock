@@ -306,6 +306,19 @@ namespace sl::diag
         bump (hostParamChanges);
     }
 
+    void DiagModel::stateSaved (std::size_t bytes) noexcept
+    {
+        lastSavedBytes.store ((long long) bytes, relaxed);
+        bump (stateSaves);
+    }
+
+    void DiagModel::stateLoaded (std::size_t bytes, bool readable) noexcept
+    {
+        lastLoadedBytes.store ((long long) bytes, relaxed);
+        lastLoadReadable.store (readable, relaxed);
+        bump (stateLoads);
+    }
+
     //==============================================================================================
     void DiagModel::drain()
     {
@@ -452,6 +465,11 @@ namespace sl::diag
         s.lastHostParam = lastHostParam.load (relaxed);
         s.lastHostParamValue = lastHostParamValue.load (relaxed);
         s.hostParamChanges = hostParamChanges.load (relaxed);
+        s.stateSaves = stateSaves.load (relaxed);
+        s.stateLoads = stateLoads.load (relaxed);
+        s.lastSavedBytes = lastSavedBytes.load (relaxed);
+        s.lastLoadedBytes = lastLoadedBytes.load (relaxed);
+        s.lastLoadReadable = lastLoadReadable.load (relaxed);
 
         s.blockStarts = listOf (blockStartHistory);
         s.wraps = listOf (wrapHistory);
@@ -554,6 +572,16 @@ namespace sl::diag
                        + " (" + juce::String ((juce::int64) s.hostParamChanges) + " changes)");
         else
             lines.add ("Last parameter the host changed: none yet");
+
+        // The project's state (checklist step 12).
+        juce::String stateLine = "State: saved " + juce::String ((juce::int64) s.stateSaves) + " x";
+        if (s.lastSavedBytes >= 0)
+            stateLine << ", last " << (juce::int64) s.lastSavedBytes << " bytes";
+        stateLine << "; loaded " << (juce::int64) s.stateLoads << " x";
+        if (s.lastLoadedBytes >= 0)
+            stateLine << ", last " << (juce::int64) s.lastLoadedBytes << " bytes ("
+                      << (s.lastLoadReadable ? "read" : "could not be read: kept as it was") << ")";
+        lines.add (stateLine);
 
         // Keys and drops.
         juce::String keys = "Keys received (" + juce::String ((int) s.keys.size()) + "):";

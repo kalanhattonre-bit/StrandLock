@@ -63,3 +63,93 @@ Builder notes for M0 (PLUGIN-PLAN section 4 and 7). Append only: one bullet per 
 - For M1 and M2: the same holds for the C++. `std::pow` on Linux (glibc) can be one ulp from the fixture where
   Windows matches it, at inputs like the one above. The plan's tolerances absorb one ulp; if a discrete decision
   ever flips on such a value, that is plan 1.6 rule 9's fdlibm case.
+
+## M0 part 1 (engine side of the probe build)
+
+### Progress
+
+- Done: parameters (`params/**`), the binary state (`state/**`), the diagnostics model (`diag/**`), host info, the
+  probe voice (`probe/**`), the starter sounds (`sounds/**`), `UserSettings`, `Tests/support/Harness.*` and
+  `Measure.*`, and the tests for every M0 table row that is part 1's (groups `params`, `state`, `sounds`, `probe`,
+  `diag`, `alloc`).
+- Not part 1's: the editor, the theme tokens, the Diagnostics page and the UI snapshots (part 2, on this branch).
+- Next (part 2): the UI. The hand-off below lists what it can call.
+
+### Hand-off for the UI builder
+
+- **Parameters.** `proc.getApvts()` holds the 50 parameters in the frozen order. Ids, names and ranges are in
+  `params/ParamIds.h` (`params::kParams[i]`, `params::P`, `params::findParam`); `proc.getParam (params::P::speed)`
+  returns one. Float parameters are `params::FloatParameter`, a `juce::RangedAudioParameter`, so
+  `AudioProcessorValueTreeState::SliderAttachment` and `ParameterAttachment` work on them as usual. Choices, switches
+  and whole numbers are JUCE's own classes. `getText` and `getValueForText` give the prototype's readouts
+  (`params/ParamText.h`). The knob snapping while dragging (`qLin`, `qLog`, `KNOB_MATH`) is the UI's job.
+- To set a parameter from code with one host gesture, use `beginChangeGesture`, `setValueNotifyingHost`,
+  `endChangeGesture`. A change inside a gesture is not reported as the host's on the Diagnostics page.
+  `params::setPlainValue (param, index, plain)` sets a plain value without a gesture (state loads use it).
+- **Instrument.** `proc.readInst()` is the `core::Inst` the audio thread plays now. `getInstState` and
+  `setInstState` hold the INST fields that are not parameters (seed, wheel targets and CCs, key, scale, scale lock,
+  exact Region edges).
+- **Theme, UI scale, Keys default.** `proc.getTheme()` is the per-user theme when there is one, else the project's
+  UIST copy. `proc.setTheme (t)` writes both. `proc.getUserSettings()` is the shared `state::UserSettings`
+  (a `juce::ChangeBroadcaster`): `uiScalePercent()` (empty when never set), `setUiScalePercent`, `keysDefault()`,
+  `setKeysDefault`. Every set is written to `%APPDATA%\StrandLock\StrandLock.settings` at once. In the test runner
+  the file is a fresh one in the temp folder, so snapshots start from no per-user values. Suggested rule for the UI
+  scale: the per-user value wins, and the UIST copy (`getUiState().uiScalePercent`) is used when there is none, as
+  for the theme.
+- **UIST.** `proc.getUiState()` and `setUiState (s)`: theme copy, UI scale, logical size, mode, sub-lane, tab,
+  folded, zooms, scroll, grid, scope, copy mask, strip view. Decoding clamps every field to a usable value.
+- **The waveform strip.** `proc.getLoadedSound()` returns `std::shared_ptr<const sounds::StarterSound>`, never
+  null: `left`, `right` (float vectors), `sampleRate` (44100), `frames()`, `seconds()`, `id`, `seed`. It changes when
+  a state load names another starter, so compare the pointer in the editor's timer and redraw when it changes.
+- **Banner.** `proc.getStateBanner()` is non-empty while a state this version could not read (all of it, or one
+  chunk) is being written back unchanged. Show it as the plan's banner. `proc.getUnknownChunkCount()` counts the
+  unknown chunks kept.
+- **Diagnostics.** `proc.getDiag()` is the `diag::DiagModel`. Call it on the message thread only.
+  - `snapshot()` drains the audio thread's ring and returns everything: block counts (playing, stopped, no
+    position, offline), min, max and last block size, the size histogram (`kBuckets` ranges: 1, 2-3, 4-7, ... 8192
+    and up), the first 8 distinct sizes with counts (`exactSizes`) and `otherSizes`, the latest position (ppq, bpm,
+    loop points, time signature, playing, looping, recording), cycle wraps, wraps inside a block and other jumps with
+    their before and after positions, tempo min, max and changes, MIDI counts and the last note, velocity, CC, value,
+    pitch bend and mod wheel, the recent MIDI list (block and sample of each event), the recent block starts with
+    their ppq, the last parameter the host changed (`lastHostParam`, `lastHostParamValue`), state saves and loads
+    with sizes, keys, drops, and the display scale. Call it from a timer (10 to 30 Hz). The totals are atomics and
+    never lost; the recent history is a ring of 4096 events, and `lostEvents` counts what fell off while nothing
+    drained it.
+  - `keyReceived (description, keysSwitchOn)`: every key the editor gets (checklist steps 4 and 5).
+  - `filesDropped (paths)`: each path with its size, and for an audio file JUCE reads, its frames, sample rate,
+    seconds and channels (step 6). `textDropped (text)` for a text drop.
+  - `setDisplayScale (desktopScale, uiScalePercent)`: what the editor sees (Windows scaling and the UI scale).
+  - `reportText()`: the Copy report text, one line per item: plugin version, host name and version (PluginHostType
+    plus the host program's file version), sample rate and the prepared block size, display scale, block sizes and
+    ranges, recent block sizes, blocks while playing and stopped, offline blocks, position and tempo, block-start
+    ppq, wraps, MIDI, the last host-changed parameter with its readout, state saves and loads, keys and drops.
+  - The host's tempo for the top bar: `snapshot().hasBpm` and `snapshot().bpm`.
+- **Host.** `proc.getHostInfo()`: `name`, `version`, `path`, `format`, `isCubase`, `summary()`.
+
+### Deviations and decisions (part 1)
+
+- The probe plays the starter `saw`, as the M0 section says, so a new instance's SMPL names `saw` (seed 1).
+  M2 makes `sawopen` the default (D9).
+- Float parameters are a small `FloatParameter` class, not `juce::AudioParameterFloat`. It keeps the exact plain
+  value it was set to. With AudioParameterFloat a value can only go in through its normalised value, and plain to
+  normalised to plain moves a skewed value by an ulp, so a get, set, get of the state would not be byte-identical.
+- A state that lacks some chunks re-saves with the missing chunks appended after the kept ones, written from the
+  defaults. The plan does not say where they go; this keeps every kept chunk in its place.
+- A cut end of a container (bytes that hold no whole chunk) is kept, but written after every other chunk. In the
+  middle, its header would claim the chunks after it as its payload, and the next load would lose them.
+- A CLIP chunk with a bad CRC stays kept, with the banner, through parameter edits: M0 cannot edit a clip, so its
+  part of the state stays unedited. "Replaced after an edit" (plan 3 (e)) is tested for the whole-blob cases and for
+  a damaged PARM; for CLIP it comes with M2's clip edits.
+- The sanitizer job also runs the `state` group. The state tests load every blob from a heap block of exactly its
+  size, so a read past the data is an AddressSanitizer error there.
+- Speed readouts under 1e-6 print in exponent form ("1.60e-7x", toPrecision's rule). SLSampleUI's parseNum would
+  read that back as 1.6, so text entry for Speed reads an exponent. Text entry at a readout's step boundary
+  ("1000 ms" means 999.5 to 1000; 1000 prints "1 s") tries values just inside the printed step before the general
+  search.
+- The Diagnostics page counts a move of the host position by more than 0.05 beat between playing blocks as a wrap
+  (backwards with the cycle on) or a jump. The engine's own jump rule (0.1 beat, M2) is separate.
+- The report also gives the size of the last state saved and loaded (checklist step 12 asks how big the project is).
+- `ParamBridge::applyPatch` (plan 2.4) is not written yet: nothing in M0 loads a sound or a preset from the UI.
+  M2 or M6 adds it when sound loads, presets and undo need it.
+- Starter sounds are made on the message thread when a state load names one (tens of milliseconds). The plan's
+  SampleManager worker thread comes with M2.
