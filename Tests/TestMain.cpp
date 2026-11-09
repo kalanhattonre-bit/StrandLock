@@ -172,7 +172,7 @@ namespace
         check (proc.acceptsMidi() && ! proc.producesMidi() && ! proc.isMidiEffect(),
                "accepts MIDI, sends none, and is not a MIDI effect");
         check (proc.getName() == "StrandLock", fmt ("named \"%s\"", proc.getName().toRawUTF8()));
-        check (proc.getLatencySamples() == 0 && proc.getTailLengthSeconds() == 0.0,
+        check (proc.getLatencySamples() == 0 && juce::exactlyEqual (proc.getTailLengthSeconds(), 0.0),
                fmt ("zero latency (%d samples), no tail (%.1f s)", proc.getLatencySamples(), proc.getTailLengthSeconds()));
 
         check (proc.checkBusesLayoutSupported (layout ({}, { Set::stereo() })), "no input / stereo out supported");
@@ -220,7 +220,7 @@ namespace
                         {
                             if (! std::isfinite (d[i]))
                                 ++nonFinite;
-                            else if (d[i] != 0.0f)
+                            else if (! juce::exactlyEqual (d[i], 0.0f))
                                 ++nonZero;
                         }
                     }
@@ -362,7 +362,8 @@ namespace
             const float* l = buffer.getReadPointer (0);
             const float* r = buffer.getReadPointer (1);
             for (int i = 0; i < block; ++i)
-                silentAndFinite = silentAndFinite && std::isfinite (l[i]) && std::isfinite (r[i]) && l[i] == 0.0f && r[i] == 0.0f;
+                silentAndFinite = silentAndFinite && std::isfinite (l[i]) && std::isfinite (r[i])
+                                      && juce::exactlyEqual (l[i], 0.0f) && juce::exactlyEqual (r[i], 0.0f);
         }
 
         const double seconds = (juce::Time::getMillisecondCounterHiRes() - startMs) / 1000.0;
