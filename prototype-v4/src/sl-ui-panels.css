@@ -1,0 +1,57 @@
+/* StrandLock v4: sl-ui-panels.css (selection bar, inspector, Note settings, Try this).
+   Every colour is a theme token from shell.html, so both themes work. Class names start with slp-. */
+
+/* ===== selection bar ===== */
+#selBar.slp-bar{display:flex;flex-direction:column;gap:6px;flex:1 1 auto;min-width:0}
+#selBar.slp-bar.slp-open{flex-basis:100%}
+.slp-row{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0}
+.slp-bar button,.slp-bar select{padding:4px 8px;font-size:12px}
+.slp-lanesel{border-width:2px}
+.slp-drawer{display:flex;flex-direction:column;gap:6px;padding:7px 8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;min-width:0;max-width:100%;max-height:var(--drawer-max,320px);overflow-y:auto;overscroll-behavior:contain}
+.slp-drawer:empty{display:none}
+/* nothing selected: an open drawer stays where it is, asleep (it wakes with the next selection) */
+.slp-idle .slp-drawer{opacity:.45;pointer-events:none}
+.slp-line{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;min-width:0}
+.slp-sub{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;padding:6px 8px;border:1px dashed var(--btnb);border-radius:7px;min-width:0}
+.slp-g{display:inline-flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0;max-width:100%}
+.slp-val{color:var(--txt);font-size:11.5px;min-width:4.2em;white-space:nowrap}
+.slp-unit{color:var(--dim);font-size:11px;white-space:nowrap}
+.slp-note{color:var(--dim);font-size:11.5px;line-height:1.35}
+.slp-warn{color:var(--warn);font-size:11.5px;line-height:1.35}
+.slp-go{border-color:var(--acc)}
+.slp-faded{opacity:.5}
+.slp-bar input[type=range],.slp-ns input[type=range]{width:92px}
+
+/* segmented buttons */
+.slp-seg{display:inline-flex;flex-wrap:wrap;max-width:100%;border:1px solid var(--btnb);border-radius:7px;overflow:hidden;background:var(--btn)}
+.slp-seg>button{border:none;border-radius:0;border-right:1px solid var(--btnb);padding:4px 8px;font-size:12px}
+.slp-seg>button:last-child{border-right:none}
+.slp-seg>button.on{background:var(--acc);color:var(--onacc)}
+.slp-mixed{display:inline-block;font-size:10.5px;font-weight:700;padding:1px 6px;border-radius:9px;background:var(--chip-warn-bg);color:var(--chip-warn-txt);white-space:nowrap}
+.slp-mixed[hidden]{display:none}
+
+/* ===== inspector ===== */
+#inspector.slp-insp{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:center;min-width:0}
+.slp-field{display:inline-flex;gap:4px;align-items:center;white-space:nowrap}
+input.slp-in{width:66px;padding:4px 6px;font-weight:500;font-size:12px}
+input.slp-in:disabled{opacity:.55;cursor:default}
+.slp-node{padding-left:8px;border-left:1px solid var(--line)}
+
+/* ===== Note settings ===== */
+#noteSettings.slp-ns{display:flex;flex-direction:column;gap:7px;min-width:0;width:100%}
+.slp-nsbody{display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;min-width:0}
+.slp-nsg{display:inline-flex;flex-wrap:wrap;gap:4px 6px;align-items:center;min-width:0;max-width:100%}
+.slp-nshead{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12px;color:var(--dim)}
+.slp-nshead b{color:var(--txt)}
+
+/* ===== Try this ===== */
+#tryThis b{color:var(--acc)}
+
+/* ===== narrow screens ===== */
+@media (max-width:640px){
+  .slp-drawer{max-height:none}
+  .slp-seg>button{padding:4px 6px}
+  input.slp-in{width:58px}
+  .slp-bar input[type=range],.slp-ns input[type=range]{width:80px}
+  .slp-node{padding-left:0;border-left:none}
+}

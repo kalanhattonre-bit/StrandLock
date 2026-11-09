@@ -1,0 +1,12 @@
+# Kalan's original handoff archive and third-party inspiration screenshots stay local (not ours to publish)
+StrandLock-handoff.zip
+StrandLock-handoff/reference/screenshots/inspiration-lines-*
+# build outputs
+build/
+out/
+cmake-build-*/
+.vs/
+*.user
+prototype-v4/dist/
+node_modules/
+.playwright-mcp/

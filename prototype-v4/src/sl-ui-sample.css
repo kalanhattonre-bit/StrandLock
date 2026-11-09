@@ -1,0 +1,81 @@
+/* StrandLock v4: sl-ui-sample.css (pass 2, sample builder)
+   The Sample tab, Recipes and Dice, Macros and offsets, the Sound and Clip preset menus and the part chips.
+   Every colour is a theme token from shell.html (var(--...)): nothing here works in only one theme. */
+
+/* ---- containers filled by sl-ui-sample.js */
+#sampleTab:not(:empty),#recipesBox:not(:empty),#macrosBox:not(:empty){flex:1 1 100%;display:flex;flex-direction:column;gap:8px;min-width:0}
+#recipesBox:not(:empty){border-top:1px solid var(--line);padding-top:8px}
+#clipPresetMenu:not(:empty){display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+#soundPresetMenu:not(:empty){display:flex;flex-direction:column;gap:4px;min-width:0}
+#partChips .chip{padding:3px 8px;font-size:12px;border-width:1px}
+
+/* ---- rows and groups */
+.sls-row{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;min-width:0}
+.sls-row.sls-knobs{align-items:flex-start;gap:6px 6px}
+.sls-g{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0}
+.sls-g>.lbl{display:inline-flex;align-items:center;gap:2px}
+.sls-sub{color:var(--dim);font-size:11.5px;white-space:normal}
+.sls-faded{opacity:.42}
+.sls-faded:hover{opacity:.6}
+
+/* ---- segmented buttons */
+.sls-seg{display:inline-flex;flex-wrap:wrap;min-width:0}
+.sls-seg>button{border-radius:0;margin-left:-1px;position:relative}
+.sls-seg>button:first-child{border-radius:7px 0 0 7px;margin-left:0}
+.sls-seg>button:last-child{border-radius:0 7px 7px 0}
+.sls-seg>button:only-child{border-radius:7px}
+.sls-seg>button.on{z-index:1}
+.sls-seg>button.sls-faded{opacity:.42}
+.sls-seg>button.on.sls-faded{opacity:.6}
+
+/* ---- pins (Dice leaves a pinned setting alone) */
+.sls-pin{padding:1px 3px;border:1px solid transparent;background:none;color:var(--dim);font-size:10px;line-height:0;border-radius:4px;opacity:.6;font-weight:400;display:inline-flex;align-items:center}
+.sls-pin svg{display:block}
+.sls-pin:hover{opacity:1;color:var(--txt);background:var(--hover)}
+.sls-pin.on{opacity:1;color:var(--onacc);background:var(--acc);border-color:var(--acc)}
+
+/* ---- knobs */
+.sls-knob{display:flex;flex-direction:column;align-items:center;min-width:64px;max-width:96px;gap:1px;user-select:none;-webkit-user-select:none;padding:2px 2px 0}
+.sls-klbl{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap;display:flex;align-items:center;gap:2px;min-height:16px}
+.sls-dial{width:36px;height:36px;display:block;cursor:ns-resize;touch-action:none;border-radius:50%;outline:none}
+.sls-ksep{align-self:stretch;height:auto;margin:4px 4px}
+.sls-dial:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.sls-dial .trk{stroke:var(--btnb)}
+.sls-dial .arc{stroke:var(--k-col,var(--acc))}
+.sls-dial .cap{fill:var(--btn);stroke:var(--line);stroke-width:1}
+.sls-dial .dot{fill:var(--txt)}
+.sls-dial .mid{fill:var(--dim)}
+.sls-knob.sls-drag .cap{stroke:var(--k-col,var(--acc))}
+.sls-knob.sls-off .sls-dial{cursor:not-allowed}
+.sls-kval{font-size:11px;color:var(--txt);white-space:nowrap;cursor:text;min-height:15px;max-width:96px;overflow:hidden;text-overflow:ellipsis;border-radius:4px;padding:0 3px}
+.sls-kval:hover{background:var(--hover)}
+.sls-knob.sls-off .sls-kval{cursor:default}
+.sls-kin{width:76px;padding:1px 4px !important;font-size:11px !important;font-weight:400 !important;text-align:center}
+
+/* ---- recipes and dice */
+.sls-recipes{display:flex;flex-wrap:wrap;gap:4px;min-width:0}
+.sls-recipes>button{padding:5px 8px}
+.sls-recipes>button b{color:var(--acc);margin-right:3px}
+.sls-dice{font-size:13px}
+
+/* ---- macros */
+.sls-macros .sls-dial .arc{stroke-width:4.5}
+.sls-reset{font-size:12px;padding:4px 8px}
+
+/* ---- engine suggestion and part chips */
+.sls-sugline{display:flex;flex-wrap:wrap;gap:6px;align-items:center;background:var(--panel);border:1px solid var(--acc);border-radius:8px;padding:5px 8px;font-size:12px}
+.sls-sugline[hidden]{display:none}
+.chip.sls-sug{border-color:var(--acc);color:var(--acc)}
+
+/* ---- save-as-my-preset form */
+.sls-save{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0}
+.sls-save[hidden]{display:none}
+.sls-save input[type=text]{width:150px;max-width:100%;font-weight:400;padding:4px 6px}
+.sls-save button{padding:4px 8px}
+.sls-pbtn{max-width:100%}
+
+@media (max-width:640px){
+  .sls-row{gap:6px 10px}
+  .sls-knob{min-width:58px}
+  .sls-recipes>button{padding:4px 6px}
+}

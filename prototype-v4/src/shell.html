@@ -1,0 +1,355 @@
+<!--SL:HEAD-->
+<title>StrandLock v4</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/* ===== Theme tokens. Dark first: bare :root holds the dark values; light comes from the system setting
+   (unless the page is forced dark) or from data-theme="light". Every colour in the page, canvases included,
+   comes from these tokens (sl-ui.js reads them with getComputedStyle and re-reads them on a theme change). */
+:root{
+  color-scheme:dark;
+  --bg:#151618;--panel:#1d1e21;--panel2:#18191c;--line:#33353a;--txt:#ece8e1;--dim:#9a9ea6;
+  --acc:#b58cff;--onacc:#170a2a;--warn:#ff5468;--btn:#27282c;--btnb:#3a3c42;--roll:#0f1012;--hdr:#1d1e21;
+  --menu:#27282c;--hover:#33353a;--shadow:rgba(0,0,0,.45);--toast-bg:rgba(0,0,0,.84);--toast-txt:#ffffff;
+  --row:#1d1e21;--row-black:#18191c;--row-out:#141517;--row-root:#22202c;--row-line:#25272b;--oct-line:#3a3c42;
+  --grid-bar:#5d6169;--grid-beat:#33353a;--grid-sub:#232428;
+  --note-line:#3ee6a8;--note-line-sel:#9dffd9;--start-ring:#f5c84a;--dot-fill:#151618;
+  --piano-white:#d8d6d0;--piano-black:#151618;--piano-text:#555555;--piano-out:rgba(0,0,0,.33);--piano-held:#ff5468;
+  --ruler-text:#ece8e1;--ruler-tick:#5d6169;--link:#b58cff;--handle-ring:#151618;--playhead:#ff7a00;
+  --box-fill:rgba(181,140,255,.12);--box-line:#b58cff;--node-sel:#ffffff;--ghost:#ffffff;
+  --lane-pitch:#3ee6a8;--lane-amp:#4f8bff;--lane-vib:#e05cff;--lane-tone:#ff9f1c;--lane-formant:#ff4d8d;
+  --lane-hollow:#22c3e6;--lane-sample:#e2c275;--on-lane:#111111;
+  --a-act:0.42;--a-act-sel:0.62;--a-idle:0.13;--a-idle-sel:0.22;
+  --strip-bg:#1c2046;--wave:#5fffc8;--strip-shade:rgba(0,0,0,.5);--region-edge:#ffb000;--region-band:rgba(255,176,0,.38);
+  --head:#c9a8ff;--head-txt:#170a2a;--grain:#efe4ff;--strip-txt:#ffffff;--strip-txt-b:#5fffc8;--start-mark:#f5c84a;
+  --meter-bg:#0f1012;--meter-ok:#3ee6a8;--meter-hot:#ff5468;--tip-bg:rgba(0,0,0,.86);--tip-txt:#ffffff;
+  --drop-bg:rgba(181,140,255,.16);--kbd-bg:rgba(0,0,0,.18);--chip-warn-bg:#3a2a0a;--chip-warn-txt:#ffd27a;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    color-scheme:light;
+    --bg:#f3f4f7;--panel:#ffffff;--panel2:#f7f8fb;--line:#d9dce5;--txt:#22242a;--dim:#6b707c;
+    --acc:#7b4fe0;--onacc:#ffffff;--warn:#e8384f;--btn:#eef0f5;--btnb:#cfd3de;--roll:#ffffff;--hdr:#eceef3;
+    --menu:#ffffff;--hover:#eef0f5;--shadow:rgba(38,43,82,.25);--toast-bg:rgba(20,22,30,.9);--toast-txt:#ffffff;
+    --row:#fbfbfd;--row-black:#eef0f5;--row-out:#e3e6ee;--row-root:#ece5fb;--row-line:#e4e7ee;--oct-line:#c3c8d6;
+    --grid-bar:#9aa0b4;--grid-beat:#cdd1dc;--grid-sub:#e4e7ee;
+    --note-line:#0b9e74;--note-line-sel:#067a59;--start-ring:#e0a400;--dot-fill:#ffffff;
+    --piano-white:#ffffff;--piano-black:#2a2c33;--piano-text:#555555;--piano-out:rgba(34,36,42,.15);--piano-held:#e8384f;
+    --ruler-text:#22242a;--ruler-tick:#b8bdcc;--link:#7b4fe0;--handle-ring:#ffffff;--playhead:#ff7a00;
+    --box-fill:rgba(123,79,224,.10);--box-line:#7b4fe0;--node-sel:#22242a;--ghost:#22242a;
+    --lane-pitch:#0b9e74;--lane-amp:#2f6fe8;--lane-vib:#b03fd6;--lane-tone:#e08600;--lane-formant:#e0306f;
+    --lane-hollow:#0fa0c2;--lane-sample:#b8913a;--on-lane:#ffffff;
+    --a-act:0.38;--a-act-sel:0.55;--a-idle:0.15;--a-idle-sel:0.24;
+    --strip-bg:#e8ebf6;--wave:#2e9c7c;--strip-shade:rgba(255,255,255,.62);--region-edge:#d48a00;--region-band:rgba(212,138,0,.32);
+    --head:#7b4fe0;--head-txt:#ffffff;--grain:#5a2fc0;--strip-txt:#22242a;--strip-txt-b:#0b9e74;--start-mark:#d48a00;
+    --meter-bg:#e3e6ee;--meter-ok:#0b9e74;--meter-hot:#e8384f;--tip-bg:rgba(20,22,30,.9);--tip-txt:#ffffff;
+    --drop-bg:rgba(123,79,224,.12);--kbd-bg:rgba(0,0,0,.08);--chip-warn-bg:#fff1d6;--chip-warn-txt:#7a4a00;
+  }
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#f3f4f7;--panel:#ffffff;--panel2:#f7f8fb;--line:#d9dce5;--txt:#22242a;--dim:#6b707c;
+  --acc:#7b4fe0;--onacc:#ffffff;--warn:#e8384f;--btn:#eef0f5;--btnb:#cfd3de;--roll:#ffffff;--hdr:#eceef3;
+  --menu:#ffffff;--hover:#eef0f5;--shadow:rgba(38,43,82,.25);--toast-bg:rgba(20,22,30,.9);--toast-txt:#ffffff;
+  --row:#fbfbfd;--row-black:#eef0f5;--row-out:#e3e6ee;--row-root:#ece5fb;--row-line:#e4e7ee;--oct-line:#c3c8d6;
+  --grid-bar:#9aa0b4;--grid-beat:#cdd1dc;--grid-sub:#e4e7ee;
+  --note-line:#0b9e74;--note-line-sel:#067a59;--start-ring:#e0a400;--dot-fill:#ffffff;
+  --piano-white:#ffffff;--piano-black:#2a2c33;--piano-text:#555555;--piano-out:rgba(34,36,42,.15);--piano-held:#e8384f;
+  --ruler-text:#22242a;--ruler-tick:#b8bdcc;--link:#7b4fe0;--handle-ring:#ffffff;--playhead:#ff7a00;
+  --box-fill:rgba(123,79,224,.10);--box-line:#7b4fe0;--node-sel:#22242a;--ghost:#22242a;
+  --lane-pitch:#0b9e74;--lane-amp:#2f6fe8;--lane-vib:#b03fd6;--lane-tone:#e08600;--lane-formant:#e0306f;
+  --lane-hollow:#0fa0c2;--lane-sample:#b8913a;--on-lane:#ffffff;
+  --a-act:0.38;--a-act-sel:0.55;--a-idle:0.15;--a-idle-sel:0.24;
+  --strip-bg:#e8ebf6;--wave:#2e9c7c;--strip-shade:rgba(255,255,255,.62);--region-edge:#d48a00;--region-band:rgba(212,138,0,.32);
+  --head:#7b4fe0;--head-txt:#ffffff;--grain:#5a2fc0;--strip-txt:#22242a;--strip-txt-b:#0b9e74;--start-mark:#d48a00;
+  --meter-bg:#e3e6ee;--meter-ok:#0b9e74;--meter-hot:#e8384f;--tip-bg:rgba(20,22,30,.9);--tip-txt:#ffffff;
+  --drop-bg:rgba(123,79,224,.12);--kbd-bg:rgba(0,0,0,.08);--chip-warn-bg:#fff1d6;--chip-warn-txt:#7a4a00;
+}
+
+/* ===== Base ===== */
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--txt);font:13px/1.3 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;overflow-x:hidden}
+#app{min-height:100%;display:flex;flex-direction:column;min-width:0;
+  padding-left:max(16px, env(safe-area-inset-left, 0px));padding-right:max(16px, env(safe-area-inset-right, 0px));
+  padding-block:max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-bottom, 0px))}
+#app>*{min-width:0}
+#app:focus{outline:none}
+.bar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;background:var(--panel);border:1px solid var(--line);border-top:none;min-width:0}
+.bar.b2{background:var(--panel2)}
+#topBar{border-top:1px solid var(--line);border-radius:10px 10px 0 0}
+.logo{display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.2em;font-size:15px;margin-right:4px;white-space:nowrap}
+.logo svg{flex:none}
+button,select,input[type=number],input[type=text]{background:var(--btn);color:var(--txt);border:1px solid var(--btnb);border-radius:7px;padding:6px 9px;font:inherit;font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;max-width:100%}
+input[type=number],input[type=text]{cursor:text}
+button:active{transform:translateY(1px)}
+button:disabled{opacity:.45;cursor:default;transform:none}
+button.on{background:var(--acc);color:var(--onacc);border-color:var(--acc)}
+button.rec.on{background:var(--warn);border-color:var(--warn);color:var(--onacc)}
+button.faded{opacity:.5}
+button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+input[type=number]{width:60px;padding:5px 6px}
+input[type=range]{width:96px;accent-color:var(--acc)}
+.grp{display:flex;gap:4px;align-items:center;flex-wrap:wrap;min-width:0}
+.lbl{color:var(--dim);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap}
+.val{color:var(--txt);font-size:11.5px;min-width:3.5em;white-space:nowrap}
+.sep{width:1px;height:22px;background:var(--line);margin:0 2px;flex:none}
+.grow{flex:1 1 auto}
+kbd{font:700 10px ui-monospace,monospace;background:var(--kbd-bg);border-radius:3px;padding:0 3px}
+.mode,.lane{border-width:2px;position:relative;padding-left:22px}
+.mode kbd,.lane kbd{position:absolute;left:5px;top:50%;transform:translateY(-50%)}
+.lane.on{color:var(--on-lane)}
+.lanewrap{display:inline-flex;align-items:stretch}
+.lanewrap .lane{border-top-right-radius:0;border-bottom-right-radius:0}
+.lanewrap .arrow{border-width:2px;border-left-width:0;border-top-left-radius:0;border-bottom-left-radius:0;padding:6px 6px}
+.subchip{padding:4px 8px;font-size:12px;border-width:2px;border-color:var(--lane-sample)}
+.subchip.on{background:var(--lane-sample);color:var(--on-lane);border-color:var(--lane-sample)}
+.chip{padding:4px 8px;font-size:12px;border-width:2px}
+.tab{background:none;border:none;border-bottom:2px solid transparent;border-radius:0;color:var(--dim);padding:6px 8px}
+.tab.on{color:var(--acc);border-bottom-color:var(--acc);background:none}
+#panels{background:var(--panel2);border:1px solid var(--line);border-top:none}
+#tabs{display:flex;flex-wrap:wrap;gap:0;padding:0 6px;border-bottom:1px solid var(--line)}
+.pane{display:none;flex-wrap:wrap;gap:6px;align-items:center;padding:6px 8px;min-width:0;max-height:var(--pane-max,none);overflow-y:auto;overscroll-behavior:contain}
+.pane.on{display:flex}
+#tabs .fold{margin-left:auto;font-weight:600}
+#panels.folded .pane.on{display:none}
+#panels.folded #tabs{border-bottom:none}
+#panels.folded .tab.on{border-bottom-color:transparent;color:var(--dim)}
+/* Containers that later builders fill. Hidden while empty, except inside panes, where a short note says what goes there. */
+.slot{min-width:0}
+.slot:empty{display:none}
+.pane .slot:empty{display:block;color:var(--dim);font-size:12px;padding:4px 0}
+.pane .slot:empty::before{content:attr(data-empty)}
+#selRow{min-height:40px}
+#selInfo{color:var(--dim);font-size:12px;white-space:nowrap}
+#inspector{margin-left:auto}
+.status{margin-left:auto}
+#engineStatus{font-size:11px;color:var(--dim);white-space:nowrap}
+#meter{width:64px;height:10px;border-radius:3px;background:var(--meter-bg);display:block}
+#soundOn{background:var(--chip-warn-bg);color:var(--chip-warn-txt);border-color:var(--chip-warn-txt)}
+#soundOn[hidden]{display:none}
+/* ===== Editor (roll) ===== */
+#editor{flex:1 1 0;min-height:160px;display:grid;grid-template-columns:40px minmax(0,1fr);grid-template-rows:20px minmax(0,1fr);background:var(--roll);border:1px solid var(--line);border-top:none;position:relative;overflow:hidden}
+#corner{background:var(--hdr);border-right:1px solid var(--line);border-bottom:1px solid var(--line)}
+#rulerWrap{overflow:hidden;background:var(--hdr);border-bottom:1px solid var(--line);position:relative;cursor:pointer}
+#pianoWrap{overflow:hidden;border-right:1px solid var(--line);touch-action:none;position:relative;cursor:pointer}
+#ruler,#piano{position:absolute;left:0;top:0;display:block}
+#rollWrap{position:relative;overflow:hidden;min-width:0;min-height:0}
+#roll{position:absolute;left:0;top:0;display:block}
+#scroller{position:absolute;inset:0;overflow:auto;touch-action:none;outline:none}
+#spacer{width:1px;height:1px}
+#ph{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--playhead);pointer-events:none;left:-10px}
+#readout{position:absolute;pointer-events:none;background:var(--tip-bg);color:var(--tip-txt);font-size:11.5px;padding:3px 7px;border-radius:6px;white-space:nowrap;display:none;z-index:6}
+.toast{position:absolute;left:50%;top:10px;transform:translateX(-50%);background:var(--toast-bg);color:var(--toast-txt);padding:6px 12px;border-radius:8px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:20;max-width:calc(100% - 20px);white-space:normal;text-align:center}
+/* ===== Waveform strip (Sample editor) ===== */
+#stripRow{display:flex;flex-wrap:wrap;gap:0;background:var(--panel);border:1px solid var(--line);border-top:none;min-width:0}
+#soundCol{display:flex;flex-direction:column;gap:5px;padding:6px 8px;border-right:1px solid var(--line);flex:0 0 auto;min-width:0;max-width:100%}
+#soundCol select{max-width:220px}
+#strip{flex:1 1 320px;min-width:0;display:flex;flex-direction:column}
+#stripHead{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;padding:4px 8px;min-width:0}
+#stripHead button,#stripHead select{padding:3px 7px;font-size:12px}
+/* the file line gives way first (cut short with ...; hover shows all of it), so it shares its row with the controls */
+#stripTxt{font-size:11.5px;color:var(--dim);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1 1 140px;max-width:max-content}
+#stripTxt b{color:var(--txt)}
+#stripCtl{flex:none;flex-wrap:nowrap}
+/* suggestions from listening to the file: one short button each (the full sentence is its tooltip) */
+#stripSugs{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0;max-width:100%}
+#stripTip{display:contents}
+/* --wave-h is the waveform height for the window size; --wave-cut is what fitLayout takes off when nothing else gives */
+#waveWrap{--wave-h:92px;position:relative;height:calc(var(--wave-h) - var(--wave-cut, 0px));min-width:0;overflow:hidden}
+#wave{position:absolute;inset:0;width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
+#stripReadout{position:absolute;right:6px;top:14px;pointer-events:none;background:var(--tip-bg);color:var(--tip-txt);font-size:11px;padding:2px 6px;border-radius:5px;display:none}
+#partChips{display:flex;flex-wrap:wrap;gap:4px}
+/* ===== Hint bar ===== */
+#hintBar{position:relative;display:flex;flex-wrap:wrap;gap:8px;align-items:center;background:var(--panel);border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;padding:5px 8px;min-width:0}
+/* hover help sits on top of the hint bar: it never changes the page height (the mode hint underneath keeps the bar's size) */
+#hintHover{position:absolute;left:-1px;right:-1px;bottom:-1px;min-height:calc(100% + 2px);display:flex;align-items:center;background:var(--panel);border:1px solid var(--acc);border-radius:0 0 10px 10px;padding:5px 8px;font-size:11.5px;color:var(--txt);pointer-events:none;z-index:8;box-shadow:0 -6px 16px var(--shadow)}
+#hintHover[hidden]{display:none}
+#hint{font-size:11.5px;color:var(--dim);flex:1 1 300px;min-width:0}
+#tryThis{font-size:11.5px}
+/* ===== Menus and overlays ===== */
+#menu{position:fixed;z-index:30;background:var(--menu);border:1px solid var(--line);border-radius:10px;box-shadow:0 10px 30px var(--shadow);padding:6px;display:none;min-width:190px;max-width:calc(100% - 16px);max-height:calc(100% - 16px);overflow:auto;overscroll-behavior:contain}
+#menu .h{font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.06em;padding:4px 8px}
+#menu button{display:block;width:100%;text-align:left;border:none;background:none;padding:7px 10px;border-radius:6px;white-space:normal}
+#menu button:hover{background:var(--hover)}
+#menu button.on{background:var(--acc);color:var(--onacc)}
+#menu hr{border:none;border-top:1px solid var(--line);margin:4px 0}
+#menu .row{display:flex;gap:4px;padding:2px 4px}
+#menu .row button{flex:1;text-align:center;border:1px solid var(--btnb)}
+#drop{position:fixed;inset:0;background:var(--drop-bg);border:4px dashed var(--acc);display:none;align-items:center;justify-content:center;font-size:22px;font-weight:700;color:var(--acc);z-index:40;pointer-events:none}
+/* ===== Short windows (laptops): tighter bars, a lower strip, so the roll keeps the room ===== */
+@media (max-height:820px){
+  .bar{padding:4px 8px;gap:5px}
+  button,select,input[type=number],input[type=text]{padding-top:4px;padding-bottom:4px}
+  #waveWrap{--wave-h:72px}
+  #stripHead{padding:3px 8px}
+  #soundCol{gap:3px;padding:4px 8px}
+  #soundCol>.lbl{display:none}
+  /* the mode hint keeps to two lines; hovering it shows all of it over the bar */
+  #hint{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;cursor:help}
+}
+/* ===== Very short windows (small laptops): smaller buttons, a lower strip, the sound buttons side by side, a one-line hint ===== */
+@media (max-height:720px){
+  button,select,input[type=number],input[type=text]{padding:3px 7px;font-size:12px}
+  .logo{font-size:13px;letter-spacing:.12em}
+  .bar{gap:4px}
+  .mode,.lane{padding-left:20px}
+  #waveWrap{--wave-h:56px}
+  #soundCol{flex-direction:row;flex-wrap:wrap;align-items:center;align-content:flex-start;max-width:252px}
+  #soundCol>select{flex:1 1 100%}
+  #hint{-webkit-line-clamp:1}
+  #editor{min-height:150px}
+}
+/* ===== Narrow screens: everything wraps, nothing scrolls sideways ===== */
+@media (max-width:640px){
+  button,select{padding:5px 7px;font-size:12px}
+  .logo{font-size:13px;letter-spacing:.12em}
+  .sep{display:none}
+  #soundCol{flex:1 1 100%;flex-direction:row;flex-wrap:wrap;border-right:none;border-bottom:1px solid var(--line);max-width:none}
+  #soundCol>select{flex:0 1 auto}
+  #stripTxt{flex-basis:100%;white-space:normal}
+  #waveWrap{--wave-h:84px}
+  #editor{min-height:300px}
+  .pane{max-height:none}
+}
+</style>
+<!--SL:STYLES-->
+<!--SL:BODY-->
+<div id="app" tabindex="-1">
+  <header class="bar" id="topBar">
+    <div class="logo"><svg width="22" height="22" viewBox="0 0 22 22" aria-hidden="true"><circle cx="11" cy="11" r="8.9" fill="none" stroke="var(--acc)" stroke-width="2.2"/><circle cx="17.9" cy="5.4" r="4.6" fill="var(--bg)"/><circle cx="17.9" cy="5.4" r="2.9" fill="var(--txt)"/></svg>STRANDLOCK</div>
+    <button id="play" title="Play / Stop (the spacebar stays with Cubase)">&#9654; Play</button>
+    <button id="rec" class="rec" title="Record what you play on the keys, the wheels and the bend">&#9679; Rec</button>
+    <button id="loopBtn" class="on" title="Loop the clip">&#10227; Loop</button>
+    <button id="undo" title="Undo (Ctrl+Z while Keys is on)">&#8630;</button>
+    <button id="redo" title="Redo (Ctrl+Shift+Z while Keys is on)">&#8631;</button>
+    <span class="sep"></span>
+    <button id="freeBtn" title="Paint the active lane of the selected note by hand">&#9997; Freehand</button>
+    <button id="linkBtn" title="Make the selected note slide into the next note you click (or Shift+click it)">&#128279; Slide into&hellip;</button>
+    <button id="multiBtn" title="Each click adds a note to the selection (same as Ctrl+click)">&#9744; Multi</button>
+    <button id="keysBtn" title="Computer keyboard: play notes on A&ndash;K and use shortcuts. Off = all keys go to Cubase.">&#9000; Keys</button>
+    <button id="panBtn" title="Drag (or swipe) to scroll the roll instead of editing it">&#9995; Scroll</button>
+    <span class="sep"></span>
+    <label class="grp"><span class="lbl">Tempo (host)</span><input id="bpm" type="number" min="40" max="240" step="1" value="96"></label>
+    <label class="grp"><span class="lbl">Bars</span><input id="bars" type="number" min="1" max="32" step="1" value="4"></label>
+    <label class="grp"><span class="lbl">Grid</span><select id="snap"><option value="1">1/4</option><option value="0.5">1/8</option><option value="0.25" selected>1/16</option><option value="0.125">1/32</option><option value="0">Free</option></select></label>
+    <div class="grp"><button id="hz-" title="Zoom out in time">H&minus;</button><button id="hz+" title="Zoom in on time">H+</button><button id="vz-" title="Smaller rows">V&minus;</button><button id="vz+" title="Taller rows">V+</button></div>
+    <div id="clipPresetMenu" class="slot"></div>
+    <button id="midiBtn" title="Connect a MIDI keyboard">&#127929; MIDI</button>
+    <button id="themeBtn" title="Dark or light">&#9728; Light</button>
+    <div class="grp status">
+      <button id="soundOn" class="chip" title="Browsers only allow sound after a click">&#128264; Click to turn sound on</button>
+      <span id="engineStatus">Sound engine: off</span>
+      <canvas id="meter" width="64" height="10" title="Output level"></canvas>
+    </div>
+  </header>
+  <nav class="bar b2" id="modeBar"></nav>
+  <div class="bar" id="selRow">
+    <div class="grp" id="selFixed">
+      <span id="selInfo">No notes selected</span>
+      <button id="selAllBtn" title="Select every note (Ctrl+A while Keys is on)">Select all</button>
+      <button id="dupBtn" title="Duplicate the selected notes (Ctrl+D while Keys is on)">Duplicate</button>
+      <button id="delBtn" title="Delete the selected notes (Delete while Keys is on)">&#128465; Delete</button>
+      <button id="clearBtn" title="Remove every note (click twice)">Clear all</button>
+    </div>
+    <div id="selBar" class="slot"></div>
+    <div id="inspector" class="slot"></div>
+  </div>
+  <section id="panels">
+    <div id="tabs" role="tablist">
+      <button class="tab" data-t="sample">Sample</button>
+      <button class="tab" data-t="macros">Macros</button>
+      <button class="tab" data-t="note">Note settings</button>
+      <button class="tab" data-t="glide">Slides</button>
+      <button class="tab" data-t="copy">Copy / Paste</button>
+      <button class="tab" data-t="mods">Mod wheels</button>
+      <button class="tab" data-t="sound">Sound</button>
+      <button class="tab fold" id="foldBtn" type="button" title="Fold the panel away to give the roll more room (or click the open tab)">&#9652; Hide</button>
+    </div>
+    <div class="pane" data-p="sample">
+      <div id="sampleTab" class="slot" data-empty="Sample settings (engine, motion, heads, grain, refresh) arrive in the next build."></div>
+      <div id="recipesBox" class="slot" data-empty=""></div>
+    </div>
+    <div class="pane" data-p="macros">
+      <div id="macrosBox" class="slot" data-empty="The 8 macro knobs and the whole-clip offsets arrive in the next build."></div>
+    </div>
+    <div class="pane" data-p="note">
+      <div id="noteSettings" class="slot" data-empty="Settings for the selected notes arrive in the next build."></div>
+    </div>
+    <div class="pane" data-p="glide">
+      <span class="lbl">Auto slide</span>
+      <select id="gMode"><option value="off">Off</option><option value="legato">Legato (touching notes)</option><option value="always">Always (next note)</option></select>
+      <span class="lbl">Slide time</span>
+      <select id="gTime"><option value="0.125">1/32</option><option value="0.25">1/16</option><option value="0.5">1/8</option><option value="1">1/4</option><option value="2">1/2</option></select>
+      <span class="sep"></span>
+      <span class="lbl">Selected notes</span>
+      <input id="gSel" type="range" min="0" max="2" step="0.0625" value="0.5"><span id="gSelV" class="val">&mdash;</span>
+      <button id="gAuto" title="Use the default slide time (Slide time above)">Auto</button>
+      <button id="gOff" title="Jump straight to the next note (it still plays on the same voice)">Jump, no slide</button>
+    </div>
+    <div class="pane" data-p="copy">
+      <span class="lbl">Lanes to copy</span><span id="copyChips" class="grp"></span>
+      <button id="copyBtn" title="Copy the chosen lanes of the selected note (Ctrl+C while Keys is on)">Copy</button>
+      <button id="pasteBtn" title="Paste them onto every selected note (Ctrl+V while Keys is on)">Paste</button>
+      <span class="lbl" id="clipInfo">nothing copied</span>
+    </div>
+    <div class="pane" data-p="mods">
+      <div class="grp"><span class="lbl">Mod 1</span><input id="m1" type="range" min="0" max="1" step="0.01" value="0"><select id="m1Lane" title="What Mod 1 moves"></select><button id="learn1" title="Move a wheel or knob on your keyboard to use it for Mod 1">Learn CC <span id="cc1">1</span></button><button id="free1" title="Let the lanes rule again">Let go</button></div>
+      <span class="sep"></span>
+      <div class="grp"><span class="lbl">Mod 2</span><input id="m2" type="range" min="0" max="1" step="0.01" value="0"><select id="m2Lane" title="What Mod 2 moves"></select><button id="learn2" title="Move a wheel or knob on your keyboard to use it for Mod 2">Learn CC <span id="cc2">2</span></button><button id="free2" title="Let the lanes rule again">Let go</button></div>
+      <span class="sep"></span>
+      <div class="grp"><span class="lbl">Bend</span><input id="bend" type="range" min="-1" max="1" step="0.01" value="0" title="Springs back when you let go"></div>
+      <button id="sustainBtn" title="Hold played notes, like a sustain pedal">Sustain</button>
+      <button id="midiBtn2" title="Connect a MIDI keyboard">&#127929; Connect MIDI</button>
+      <span id="midiMsg" class="lbl"></span>
+    </div>
+    <div class="pane" data-p="sound">
+      <span class="lbl">Root</span><select id="root" title="The note the sound plays at its own speed"></select><span class="val" id="cents">+0 cents</span>
+      <button id="detectBtn" title="Listen to your own sound file (the Region, when it is a part of the file) and set the root note, and the key as one undo step">&#127919; Detect pitch &amp; key</button>
+      <span class="sep"></span>
+      <span class="lbl">Key</span><select id="key"></select><select id="scale"></select><button id="lockBtn" title="New and moved notes land on the scale">Scale lock</button>
+      <span class="sep"></span>
+      <span class="lbl">Vibrato speed</span><input id="vrate" type="range" min="1" max="12" step="0.1" value="5.5"><span class="val" id="vrateV">5.5 Hz</span>
+      <span class="lbl">Bend range</span><select id="bendRange"><option value="1">1 semitone</option><option value="2">2 semitones</option><option value="7">7 semitones</option><option value="12">12 semitones</option><option value="24">24 semitones</option></select>
+      <button id="legatoBtn" title="Hold one key and press another: the sound carries on from where it was">Live legato</button>
+    </div>
+  </section>
+  <main id="editor">
+    <div id="corner"></div>
+    <div id="rulerWrap" title="Click to set where Play starts"><canvas id="ruler"></canvas></div>
+    <div id="pianoWrap" title="Click a key to hear it"><canvas id="piano"></canvas></div>
+    <div id="rollWrap">
+      <canvas id="roll"></canvas>
+      <div id="ph"></div>
+      <div id="scroller" tabindex="-1"><div id="spacer"></div></div>
+      <div id="readout"></div>
+      <div class="toast" id="toast"></div>
+    </div>
+  </main>
+  <section id="stripRow">
+    <div id="soundCol">
+      <span class="lbl">Sound</span>
+      <select id="soundSel" title="Built-in starter sounds"></select>
+      <button id="browseBtn" title="Load your own sound file (or drop one anywhere on the window)">&#128194; Browse&hellip;</button>
+      <div id="soundPresetMenu" class="slot"></div>
+    </div>
+    <div id="strip">
+      <!-- the file line and the controls share the first row; the suggestions (one button each) follow, on the same row
+           when there is room, else on a row of their own -->
+      <div id="stripHead">
+        <span id="stripTxt"></span>
+        <span class="grow"></span>
+        <span class="grp" id="stripCtl">
+          <label class="grp"><span class="lbl">At the end</span><select id="atEnd" title="What a note does when it reaches the end of the Region"><option value="loop">Loop</option><option value="hold">Hold</option><option value="stop">Stop</option></select></label>
+          <button id="wz-" title="Zoom out on the sound">&minus;</button><button id="wz+" title="Zoom in on the sound">+</button><button id="wzAll" title="Zoom out to show the whole file (the Region stays as it is)">Show all</button>
+        </span>
+        <div id="stripSugs"><span id="stripTip"></span><div id="partChips" class="slot"></div></div>
+      </div>
+      <div id="waveWrap" title="Drag across the waveform = a new Region · drag its orange edges or the top band = move it · hold the mouse down = hear that spot · a short click with notes selected = their Start"><canvas id="wave"></canvas><div id="stripReadout"></div></div>
+    </div>
+  </section>
+  <footer id="hintBar"><span id="hint"></span><div id="tryThis" class="slot"></div><div id="hintHover" hidden></div></footer>
+</div>
+<div id="menu" role="menu"></div>
+<div id="drop">Drop a sound file to load it</div>
+<input id="file" type="file" accept="audio/*" hidden>
+<!--SL:SCRIPTS-->
