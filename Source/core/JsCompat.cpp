@@ -327,4 +327,103 @@ namespace sl::core
         }
         return sign + "0." + std::string ((std::size_t) -(e + 1), '0') + m;
     }
+
+    //==============================================================================================
+    std::string toBase36 (std::uint32_t u)
+    {
+        constexpr const char* digits = "0123456789abcdefghijklmnopqrstuvwxyz";
+        char buffer[8] {};   // 4294967295 is "1z141z3": 7 digits
+        std::size_t n = 0;
+        do
+        {
+            buffer[n++] = digits[u % 36u];
+            u /= 36u;
+        }
+        while (u != 0 && n < sizeof (buffer));
+        std::string out;
+        out.reserve (n);
+        while (n > 0)
+            out += buffer[--n];
+        return out;
+    }
+
+    namespace
+    {
+        /** Reads the UTF-16 code units of a UTF-8 string one at a time, exactly as forEachUtf16Unit does (a
+            code point above U+FFFF gives its two surrogates, a bad byte gives U+FFFD). Never allocates. */
+        class Utf16Cursor
+        {
+        public:
+            explicit Utf16Cursor (std::string_view s) noexcept : text (s) {}
+
+            /** The next unit, or -1 at the end. */
+            long next() noexcept
+            {
+                if (pendingLow >= 0)
+                {
+                    const long low = pendingLow;
+                    pendingLow = -1;
+                    return low;
+                }
+                if (i >= text.size())
+                    return -1;
+
+                const std::uint32_t b0 = byteAt (i);
+                std::uint32_t cp = 0xfffdu;
+                std::size_t length = 1;
+
+                if (b0 < 0x80u)
+                {
+                    cp = b0;
+                }
+                else if ((b0 & 0xe0u) == 0xc0u && isTail (i + 1))
+                {
+                    cp = ((b0 & 0x1fu) << 6) | (byteAt (i + 1) & 0x3fu);
+                    length = 2;
+                }
+                else if ((b0 & 0xf0u) == 0xe0u && isTail (i + 1) && isTail (i + 2))
+                {
+                    cp = ((b0 & 0x0fu) << 12) | ((byteAt (i + 1) & 0x3fu) << 6) | (byteAt (i + 2) & 0x3fu);
+                    length = 3;
+                }
+                else if ((b0 & 0xf8u) == 0xf0u && isTail (i + 1) && isTail (i + 2) && isTail (i + 3))
+                {
+                    cp = ((b0 & 0x07u) << 18) | ((byteAt (i + 1) & 0x3fu) << 12) | ((byteAt (i + 2) & 0x3fu) << 6) | (byteAt (i + 3) & 0x3fu);
+                    length = 4;
+                }
+                i += length;
+
+                if (cp >= 0x10000u && cp <= 0x10ffffu)
+                {
+                    cp -= 0x10000u;
+                    pendingLow = static_cast<long> (0xdc00u + (cp & 0x3ffu));
+                    return static_cast<long> (0xd800u + (cp >> 10));
+                }
+                return static_cast<long> (cp > 0x10ffffu ? 0xfffdu : cp);
+            }
+
+        private:
+            std::uint32_t byteAt (std::size_t k) const noexcept { return static_cast<std::uint32_t> (static_cast<unsigned char> (text[k])); }
+            bool isTail (std::size_t k) const noexcept { return k < text.size() && (byteAt (k) & 0xc0u) == 0x80u; }
+
+            std::string_view text;
+            std::size_t i = 0;
+            long pendingLow = -1;
+        };
+    }
+
+    bool jsStringLess (std::string_view a, std::string_view b) noexcept
+    {
+        // JavaScript compares strings by UTF-16 code units, so U+FFFF sorts after U+1F600 (a surrogate pair
+        // starting 0xD83D), the reverse of code point (and UTF-8 byte) order.
+        Utf16Cursor ca (a), cb (b);
+        for (;;)
+        {
+            const long ua = ca.next(), ub = cb.next();
+            if (ua != ub)
+                return ua < ub;   // a shorter string (-1) sorts first
+            if (ua < 0)
+                return false;     // equal
+        }
+    }
 }
