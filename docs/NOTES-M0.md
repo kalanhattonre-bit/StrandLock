@@ -217,8 +217,10 @@ Builder notes for M0 (PLUGIN-PLAN section 4 and 7). Append only: one bullet per 
 - Done: all eleven review findings checked in the code; all are real. Fixed: the kept unreadable blob, the folded
   pane, the allocation test, the corruption load gate, the Output knob, the wave's opacity, checklist step 7, and
   in M1 the clip settings flags. NOTES bullets below.
-- In progress: the CI round for these fixes.
-- Next: rebase on origin/main if it moved, CI green, fast-forward main.
+- Done: CI run 42682683007 green on 2aaf7a0 (Windows Release 649 checks in 91 tests, Debug CRT alloc 18 checks in
+  3 tests with 0 JUCE assertions, Debug snapshots 0 assertions, pluginval strictness 10; Linux 650 checks in 91
+  tests, sanitizers 289 + 79 checks). Snapshots looked at: the Output knob and the softer wave.
+- Next: CI on the NOTES commit, then fast-forward main.
 
 ### Decisions and deviations
 
@@ -234,17 +236,31 @@ Builder notes for M0 (PLUGIN-PLAN section 4 and 7). Append only: one bullet per 
   process(), before processBlock (JUCE's VST3 wrapper calls `setValueNotifyingHost` there), so the allocation test
   now moves parameters inside the counted scope. A second test does it with the editor open, from a thread of its
   own (the test thread is the message thread, and a change made there updates the knobs at once).
+- **For the architect: with the editor open, JUCE allocates on the audio thread when the host moves a parameter.**
+  Each knob, switch and menu is bound through JUCE's ParameterAttachment. A change from another thread calls
+  `triggerAsyncUpdate`, which posts one message to the message queue (`InternalMessageQueue::postMessage`: a lock,
+  then `messageQueue.add`). When the queue's array has no room, that add grows it with malloc on the posting
+  thread. On Windows the message thread swaps the whole array out on every dispatch, so the first post after each
+  dispatch allocates (a small block, freed on the message thread). Measured (run 42682683007, where the test thread
+  never dispatches): 1 allocation of 1088 bytes for 11,250 host changes on Linux and in the Debug CRT run; 0 in
+  Windows Release, which counts operator new only. Our own listener and the diagnostics allocate nothing (0 over
+  4,348 changes with no editor, gated). The test gates "at most one per parameter", so anything per change turns it
+  red. Plan 4 asks for 0 heap allocations on the audio thread; meeting that with the editor open would mean not
+  using ParameterAttachment for host changes (for example the editor's 30 Hz timer reading each parameter and
+  moving its control). Left for the architect; every JUCE plugin that uses attachments does the same.
 - **Corrupted-state loads miss the 50 ms target.** Main's CI run 42676366984: single-byte mutations 74.67 ms and
   mutations with CRCs fixed up 72.18 ms on Windows; 56.10 and 56.35 ms on Linux; 79.01 ms under ASan. The slow ones
   are mutations of the SMPL seed: `setStateInformation` makes that starter again on the calling thread (one
-  2.1 MB sound). They are gated at 250 ms now, as the truncation loads are. In M2 the SampleManager makes
-  starter sounds on its worker thread (plan 1.3), which should bring these loads under target.
+  2.1 MB sound). They are gated at 250 ms now, as the truncation loads are. On this branch (run 42682683007):
+  60.04 and 58.98 ms on Windows, 67.98 and 68.11 ms on Linux, 85.11 and 84.23 ms under ASan. In M2 the
+  SampleManager makes starter sounds on its worker thread (plan 1.3), which should bring these loads under target.
 - **`sawopen` made synchronously misses its 60 ms target**: 82.3 ms on Windows and 69.4 ms on Linux (run
-  42676366984). The JS takes 88 ms. It is gated at 5 x the target (300 ms) by the timing rule. M2 opens on
-  `sawopen` (D9); its SampleManager worker thread (plan 1.3) keeps that time off the message thread.
+  42676366984); 67.7 ms on Windows and 76.4 ms on Linux in run 42682683007. The JS takes 88 ms. It is gated at
+  5 x the target (300 ms) by the timing rule. M2 opens on `sawopen` (D9); its SampleManager worker thread
+  (plan 1.3) keeps that time off the message thread.
 - **The Output knob is not bipolar.** Its range is skewed (centre -12 dB), so twelve o'clock is -12 dB and a
   bipolar arc was lit at the 0 dB default. A test now holds every bipolar knob to a default at twelve o'clock.
 - **The waveform is drawn at 80 % opacity** over the strip's background, as sl-ui.js renderWave does
-  (globalAlpha 0.8): #52D2AE dark, #53AC94 light.
+  (globalAlpha 0.8): about #51D1AD dark (the test's blend) and #53AC94 light.
 - **Checklist step 7**: the Diagnostics tab hides the roll, so the step now says to click another tab to see the
   orange playhead, then come back.
