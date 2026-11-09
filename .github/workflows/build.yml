@@ -1,6 +1,7 @@
 name: Build
 
-# Every pushed branch builds and tests; a v* tag also publishes a release.
+# Every pushed branch builds and tests (so a builder's branch is green or red before any PR);
+# a v* tag also publishes a release, which happens only when Kalan says so.
 on:
   push:
     branches: ['**']
@@ -29,16 +30,22 @@ jobs:
       - name: Build (Release)
         run: cmake --build build --config Release --parallel
 
+      # The working folder is the repository root, so docs/parameters.json and Tests/fixtures resolve.
       - name: Run tests (Release)
         run: build/StrandLockTests_artefacts/Release/StrandLockTests.exe
 
-      # Snapshots come from the build alone, so a failing test never hides the picture.
+      # The writers run even when a test failed, so a red build still shows what it draws and writes.
       - name: Render UI snapshots
         if: ${{ !cancelled() }}
         run: build/StrandLockTests_artefacts/Release/StrandLockTests.exe --snapshot ui-snapshots
 
-      # Sound fingerprints (GrainLock's --write-fingerprint step and its artifact) come back with the
-      # classic engine in milestone 4, when there is a sound to fingerprint. The skeleton plays silence.
+      - name: Write sound fingerprints
+        if: ${{ !cancelled() }}
+        run: build/StrandLockTests_artefacts/Release/StrandLockTests.exe --write-fingerprint fingerprints
+
+      - name: Write state fixtures
+        if: ${{ !cancelled() }}
+        run: build/StrandLockTests_artefacts/Release/StrandLockTests.exe --write-state-fixtures state-fixtures
 
       - name: Upload UI snapshots
         if: ${{ !cancelled() }}
@@ -48,17 +55,44 @@ jobs:
           path: ui-snapshots/
           if-no-files-found: error
 
-      # The Release run counts operator new only. The debug CRT reports every heap allocation
-      # (including malloc from JUCE's HeapBlock), so the no-allocation check runs again there.
+      # Fingerprints and state fixtures are committed from these artifacts at M9 and at each release;
+      # until then a missing file only warns.
+      - name: Upload sound fingerprints
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: StrandLock-Fingerprints
+          path: fingerprints/
+          if-no-files-found: warn
+
+      - name: Upload state fixtures
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: StrandLock-State-Fixtures
+          path: state-fixtures/
+          if-no-files-found: warn
+
+      # The Release run counts operator new and delete only. The debug CRT reports every heap allocation
+      # (including malloc from JUCE's HeapBlock), so the no-allocation check runs again there. jassert is
+      # compiled only in Debug, so this is also where "no assertion" is proven, on the tests and on the
+      # snapshots (the Debug snapshots are not uploaded).
       - name: Build tests (Debug CRT)
+        if: ${{ !cancelled() }}
         run: cmake --build build --config Debug --target StrandLockTests --parallel
 
       - name: Allocation check (Debug CRT)
+        if: ${{ !cancelled() }}
         run: build/StrandLockTests_artefacts/Debug/StrandLockTests.exe --only alloc --alloc-minutes 3
+
+      - name: Render UI snapshots (Debug, assertions live)
+        if: ${{ !cancelled() }}
+        run: build/StrandLockTests_artefacts/Debug/StrandLockTests.exe --snapshot debug-snapshots
 
       # bash, not pwsh: pluginval.exe is a GUI-subsystem program, and PowerShell's call operator
       # returns without waiting for those, so it never sees the exit code.
       - name: Validate with pluginval
+        if: ${{ !cancelled() }}
         shell: bash
         run: |
           curl -sSL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip
@@ -75,6 +109,7 @@ jobs:
           if-no-files-found: ignore
 
       - name: Upload VST3
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
           name: StrandLock-VST3-Windows
@@ -94,13 +129,24 @@ jobs:
         run: gh release create "${{ github.ref_name }}" "StrandLock-${{ github.ref_name }}-Windows-x64.zip" --title "StrandLock ${{ github.ref_name }}" --generate-notes
 
   linux-tests:
-    name: Linux (tests)
+    name: Linux (tests, sanitizers, fixtures)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
 
+      # Node 24 is the major the fixtures were made with; make-fixtures.js prints a note on any other.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # The committed fixtures must be what the prototype produces today, and docs/parameters.json must
+      # agree with SLModel (PLUGIN-PLAN 1.11, 5).
+      - name: Check the golden fixtures
+        run: node tools/make-fixtures.js --check
+
       - name: Install JUCE dependencies
+        if: ${{ !cancelled() }}
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -109,10 +155,33 @@ jobs:
             libxinerama-dev libxrandr-dev libxrender-dev
 
       - name: Configure
+        if: ${{ !cancelled() }}
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSTRANDLOCK_BUILD_PLUGIN=OFF -DSTRANDLOCK_BUILD_TESTS=ON
 
       - name: Build
+        if: ${{ !cancelled() }}
         run: cmake --build build --parallel
 
+      # CPU figures are printed here and gated on Windows only.
       - name: Run tests
+        if: ${{ !cancelled() }}
         run: build/StrandLockTests_artefacts/Release/StrandLockTests
+
+      # AddressSanitizer and UBSan on StrandCore and the runner's own code: a releasing voice reading a
+      # freed snapshot is a crash here, not a wrong sample. It reuses the JUCE download of the first build.
+      - name: Configure (sanitizers)
+        if: ${{ !cancelled() }}
+        run: >
+          cmake -S . -B build-san -DCMAKE_BUILD_TYPE=Release -DSTRANDLOCK_BUILD_PLUGIN=OFF -DSTRANDLOCK_BUILD_TESTS=ON
+          -DSTRANDLOCK_SANITIZE=ON -DFETCHCONTENT_SOURCE_DIR_JUCE=${{ github.workspace }}/build/_deps/juce-src
+
+      - name: Build (sanitizers)
+        if: ${{ !cancelled() }}
+        run: cmake --build build-san --parallel --target StrandLockTests
+
+      - name: Run the contract, model and engine groups (sanitizers)
+        if: ${{ !cancelled() }}
+        env:
+          ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: build-san/StrandLockTests_artefacts/Release/StrandLockTests --only contract,model,engine
