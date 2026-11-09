@@ -1,12 +1,18 @@
 #include "Normalize.h"
 
+#include "Generators.h"
 #include "Num.h"
 #include "core/Inst.h"
 #include "core/JsCompat.h"
 #include "core/Rates.h"
+#include "core/Seeds.h"
 
 #include <cmath>
+#include <iterator>
 #include <limits>
+#include <memory>
+#include <string>
+#include <unordered_set>
 
 namespace sl::model
 {
@@ -132,5 +138,141 @@ namespace sl::model
         out.lock = boolOrNull (s["lock"]);
         out.restart = jsTruthy (s["restart"]);
         return out;
+    }
+
+    //==============================================================================================
+    NoteSample normalizeSample (NoteSample s) noexcept
+    {
+        if (s.motion.has_value() && static_cast<int> (*s.motion) >= static_cast<int> (std::size (core::kMotionCodes)))
+            s.motion.reset();
+        if (static_cast<int> (s.travel) >= static_cast<int> (std::size (kTravelKindCodes)))
+            s.travel = TravelKind::speed;
+        if (static_cast<int> (s.start.mode) >= static_cast<int> (std::size (kStartModeCodes)))
+            s.start.mode = StartMode::region;
+        s.start.pos = clamp (num (s.start.pos, 0.0), 0.0, 1.0);
+        s.start.range = clamp (num (s.start.range, 0.25), 0.0, 1.0);
+        if (s.jump.has_value() && ! core::isValidRate (*s.jump))
+            s.jump.reset();
+        if (s.engine.has_value() && static_cast<int> (*s.engine) >= static_cast<int> (std::size (core::kEngineCodes)))
+            s.engine.reset();
+        return s;
+    }
+
+    Note normalizeNote (const Note& n, int index)
+    {
+        Note out = n;   // a fresh serial; the extras pointer is shared
+        out.p = clamp (num (n.p, 60.0), 0.0, 127.0);
+        out.s = jsMax (0.0, num (n.s, 0.0));
+        out.l = jsMax (1e-3, num (n.l, 1.0));
+        if (out.id.empty())
+            out.id = "n" + core::toBase36 (core::hash32 (index, core::jsRound (out.p * 100.0), core::jsRound (out.s * 1e6),
+                                                         core::jsRound (out.l * 1e6)));
+        out.vel = clamp (num (n.vel, 0.8), 0.0, 1.0);
+        if (n.glide.has_value())
+            out.glide = jsMax (0.0, num (*n.glide, 0.0));
+        out.gc = clamp (num (n.gc, 0.0), -1.0, 1.0);
+        for (int i = 0; i < core::kNumLanes; ++i)
+        {
+            const auto lane = static_cast<core::LaneId> (i);
+            out.lane (lane) = normalizeNodes (n.lane (lane), core::laneDef (lane));
+            auto& g = out.genOf (lane);
+            if (g.has_value())
+                g = normalizeGen (*g);
+        }
+        out.sample = normalizeSample (n.sample);
+        return out;
+    }
+
+    Clip normalizeClip (const Clip& clip)
+    {
+        std::vector<std::shared_ptr<Note>> notes;
+        notes.reserve (clip.notes.size());
+        std::unordered_set<std::string> seen;
+        for (std::size_t i = 0; i < clip.notes.size(); ++i)
+        {
+            auto q = std::make_shared<Note> (normalizeNote (*clip.notes[i], static_cast<int> (i)));
+            if (seen.count (q->id) != 0)
+            {
+                int k = 1;
+                while (seen.count (q->id + "~" + std::to_string (k)) != 0)
+                    ++k;
+                q->id = q->id + "~" + std::to_string (k);
+            }
+            seen.insert (q->id);
+            notes.push_back (std::move (q));
+        }
+        for (auto& n : notes)
+            if (! n->glideTo.empty() && (seen.count (n->glideTo) == 0 || n->glideTo == n->id))
+                n->glideTo.clear();
+
+        Clip out;
+        out.bars = static_cast<int> (clamp (static_cast<double> (clip.bars), static_cast<double> (kMinBars), static_cast<double> (kMaxBars)));
+        out.beatsPerBar = clip.beatsPerBar;
+        out.offsetBeats = clip.offsetBeats;
+        out.loop = clip.loop;
+        out.tieAcrossLoop = clip.tieAcrossLoop;
+        out.extras = clip.extras;
+        out.notes.assign (notes.begin(), notes.end());
+        return out;
+    }
+
+    namespace
+    {
+        // (typeof x === 'string' && x) || (typeof x === 'number' && String (x)) || '' (the caller's fallback)
+        std::string idOrEmpty (const JsonValue& v)
+        {
+            if (v.isString())
+                return v.asString();
+            if (v.isNumber())
+                return core::jsNumberToString (v.asNumber());
+            return {};
+        }
+    }
+
+    namespace
+    {
+        /** The note-like object read with JavaScript's coercions, before normalizeNote cleans it: a wrong-typed
+            number is NaN (num () gives its default), a missing glide is null, an invalid id is empty. */
+        Note rawNoteFromJson (const JsonValue& n)
+        {
+            // n = n || {}: a value that is not an object has none of the fields (operator[] reads null)
+            Note raw;
+            raw.id = idOrEmpty (n["id"]);
+            raw.p = jsonNumber (n["p"]);
+            raw.s = jsonNumber (n["s"]);
+            raw.l = jsonNumber (n["l"]);
+            raw.vel = jsonNumber (n["vel"]);
+            if (const JsonValue& g = n["glide"]; ! g.isNull())   // n.glide == null: null or missing
+                raw.glide = jsonNumber (g);
+            raw.gc = jsonNumber (n["gc"]);
+            raw.glideTo = idOrEmpty (n["glideTo"]);
+            const JsonValue& c = n["c"];
+            const JsonValue& gens = n["gen"];
+            for (int i = 0; i < core::kNumLanes; ++i)
+            {
+                const auto lane = static_cast<core::LaneId> (i);
+                raw.lane (lane) = nodesFromJson (c[core::kLanes[i].code]);
+                raw.genOf (lane) = genFromJson (gens[core::kLanes[i].code]);
+            }
+            raw.sample = sampleFromJson (n["sample"]);
+            return raw;
+        }
+    }
+
+    Note noteFromJson (const JsonValue& n, int index)
+    {
+        return normalizeNote (rawNoteFromJson (n), index);
+    }
+
+    Clip clipFromJson (const JsonValue& data)
+    {
+        // Array.isArray (data) ? { notes: data } : (data || {})
+        const JsonValue& notes = data.isArray() ? data : data["notes"];
+        Clip raw;
+        raw.bars = data.isArray() ? 4 : newClip (num (jsonNumber (data["bars"]), 4.0)).bars;
+        if (notes.isArray())
+            for (std::size_t i = 0; i < notes.size(); ++i)
+                raw.notes.push_back (std::make_shared<const Note> (rawNoteFromJson (notes[i])));
+        return normalizeClip (raw);
     }
 }

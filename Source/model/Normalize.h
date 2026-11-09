@@ -4,8 +4,8 @@
 // inputs go through the prototype's own normalize rules, with JavaScript's coercions: a value of the wrong
 // type reads as missing, a missing number takes its default, truthiness where the prototype uses `!!x`.
 //
-// M1 part 1 has the pieces below; normalizeNote and normalizeClip (missing ids, renamed duplicates,
-// dangling links) are added by a later part.
+// normalizeNote and normalizeClip also take typed notes: the clip presets, and later the clip codec, rebuild
+// their notes through them, so every clip is made valid by the same rules.
 
 #include "Clip.h"
 #include "Node.h"
@@ -38,4 +38,28 @@ namespace sl::model
 
     /** A JSON value as SLModel's num () sees it: the number, or NaN for anything that is not a number. */
     double jsonNumber (const core::JsonValue& v) noexcept;
+
+    //==============================================================================================
+    /** SLModel.normalizeSample on a typed value: pos 0..1 (non-finite: 0), range 0..1 (0.25); a choice that is
+        not one of its list (an enum cast from a bad integer) reads null, Speed or Region. */
+    NoteSample normalizeSample (NoteSample s) noexcept;
+
+    /** SLModel.normalizeNote (n, i) on a typed note: p 0..127 (60), s at least 0 (0), l at least 1e-3 (1), vel
+        0..1 (0.8), glide at least 0 (a NaN glide reads 0), gc -1..1 (0), every lane normalizeNodes (lane
+        default), every generator normalizeGen, the sample normalizeSample. An empty id is made from the index
+        and position: 'n' + base 36 of hash32 (i, round (p * 100), round (s * 1e6), round (l * 1e6)). The link
+        is kept as it is (normalizeClip drops a dangling one). A new Note (a fresh serial); extras are shared. */
+    Note normalizeNote (const Note& n, int index);
+
+    /** SLModel.normalizeClip on a typed clip: bars 1..64, every note normalizeNote (n, its index), a repeated
+        id renamed id~1, id~2, ..., and a link to a missing note or to itself dropped. The clip settings
+        (beatsPerBar, offsetBeats, loop, tieAcrossLoop, extras) are kept. Every note is a new Note. */
+    Clip normalizeClip (const Clip& clip);
+
+    /** SLModel.normalizeNote on JSON (any note-like object, v3 notes too): a string id, or a number's
+        String (n); a missing or wrong-typed field takes its default; then normalizeNote. */
+    Note noteFromJson (const core::JsonValue& note, int index);
+
+    /** SLModel.normalizeClip on JSON: a v4 clip, a {bars, notes} object or a v3 notes array. */
+    Clip clipFromJson (const core::JsonValue& data);
 }
