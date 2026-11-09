@@ -82,7 +82,9 @@ namespace
         const int n = static_cast<int> (c.notes.size());
         const std::string id = n > 0 ? c.notes[static_cast<std::size_t> (rnd.below (n))]->id : std::string();
         const auto lane = static_cast<core::LaneId> (rnd.below (core::kNumLanes));
-        switch (rnd.below (10))
+        // mostly edits; now and then a push of the same state (cases 8 and 9), which push must refuse
+        const int pick = rnd.below (20);
+        switch (pick >= 18 ? pick - 10 : pick % 8)
         {
             case 0:
                 label = "Add note";
@@ -215,7 +217,7 @@ SL_TEST ("model", historyRandomSequences)
         for (int k = 0; k < length; ++k)
         {
             ++steps;
-            if (k > 0 && k + 1 < length && rnd.next() < 0.04)
+            if (k > 0 && k + 1 < length && rnd.next() < 0.01)
             {
                 // undo a few steps mid-way; the next accepted push drops what they undid
                 const int back = 1 + rnd.below (3);

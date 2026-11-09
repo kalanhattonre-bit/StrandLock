@@ -195,5 +195,65 @@ What part 3 builds: the snapshot compiler, undo (`VersionHistory`), the clip cod
 
 - Done: `core/Snapshot.h` (+ `Snapshot.cpp`: `core::resolve`), `model/SnapshotCompiler`, `model/History`,
   `model/ClipCodec` (encode, decode, `ClipSizer`, `limitEdit`), plan 8.2 #27 in `normalizeNote` / `normalizeClip`.
-- In progress: the tests (snapshot, history, codec, codec_compat, limits, immutability on the codec).
+- Done: the tests (snapshot, history, codec, codec_compat, limits, immutability and mode lock on the codec). Run
+  42667581146 at 5cd48d5: everything green but two checks that tested the test (Strand Demo has no generators; the
+  random sequences rarely passed 200 steps), fixed in the next push, plus a memo for untouched lane tables
+  (1024-note compile 128 ms on Windows against the 120 ms target).
 - Next: CI green, the M1 summary, rebase on main, fast-forward main.
+
+### Where each JS function landed
+
+- `core/Snapshot.h`: the plan 1.4 layout (`LaneTab`, `StartSnap`, `GlideSnap`, `ChainSnap`, `NoteSnap`, `Snapshot`) plus
+  `NoteTables` (the 10 tables of a note and each one's full length) and `ResolvedNote`. `core/Snapshot.cpp`:
+  `core::resolve (NoteSnap, Inst)`, the engine's per-tick resolution of the follow markers.
+- `model/SnapshotCompiler`: `compileSnapshot (clip, res, reuse, remember)` (SLModel.compileSnapshot), `compileTables`,
+  and `SnapshotCache`.
+- `model/History`: `VersionHistory<State, Same>` (SLModel.History), `ClipHistory`, `sameClip`.
+- `model/ClipCodec`: `encodeClip`, `decodeClip`, `encodedNoteSize`, `encodedClipSize`, `ClipSizer`, `limitEdit`.
+- `model/Generators`: `laneTableOfLength` (laneTable with its length given; laneTable calls it).
+
+### Decisions and deviations
+
+- **A record's length counts the bytes after its own length field.** Plan 3 says every record starts with its
+  length but not whether the length includes itself.
+- **Every note is written with all 10 lanes**, in registry order, then the unknown lane records. Writing only the
+  lanes that are not flat would save about 600 bytes a note, but a lane that is omitted and a lane that is written
+  must decode the same anyway, and one fixed rule keeps re-saves byte-identical.
+- **What "unknown value" covers.** Besides enum strings and node shape codes above 3 (plan 3), a tri-state outside
+  -1, 0, 1 and a flag byte above 1 (restart, hasGen, lockToBeat, invert) count too: they keep the record's original
+  bytes and read as null or as true. An empty travel string counts as unknown (the encoder always writes one).
+- **Missing trailing fields.** A field that does not fit in its record takes its default, and so does every field
+  after it (plan 3: "a newer reader gives missing trailing fields their defaults"). A record whose length runs past
+  the record holding it, or a count (notes, lanes, nodes) larger than the bytes left, makes the whole payload
+  unreadable: the decoder returns nothing and a reason, and the state layer keeps the blob (plan 3).
+- **A second record of a known lane** is kept verbatim with the unknown lanes, and the first one is the lane. At most
+  54 unknown lane records are kept per note, so 10 + 54 never passes the 64-lane cap on the next save.
+- **Bytes after the last note record** (the 1.0 layout has none) are kept in `ClipExtras::payloadTrailing` and
+  written back.
+- **The decoder also refuses a clip that would encode to more than 32 MiB.** A payload near the cap that leaves out
+  lanes the encoder always writes could grow on its first save; refusing it at load keeps "never write what it
+  would refuse to load".
+- **8.2 #27 lives in `normalizeNote`**: an id over 255 bytes is made by the missing-id rule, a link over 255 bytes is
+  dropped (it cannot name a note that kept its id), and `normalizeGen` drops a generator key over 255 bytes (the
+  note's own id is then hashed). `normalizeClip`'s `~k` renaming falls back to the missing-id rule when the renamed id
+  would pass 255 bytes. Only pathological imported saves meet any of this.
+- **normalizeClip now cleans the two clip settings** the prototype does not have: beatsPerBar clamped 1..64, a
+  non-finite offsetBeats read as 0. The plan names no range for beatsPerBar; 1..64 matches bars.
+- **The snapshot compiler normalizes the clip first**, as the JS does. The cache is keyed by the input note's serial,
+  but an entry is used only when the normalized id and res match too: a Different generator hashes the id, and
+  normalizeClip can rename a repeated id.
+- **Lane tables are capped at 2^20 values** (`kMaxTableLength`, 4 MB). normalizeNote does not bound a note's length,
+  so a note of a million beats would ask for 256 million values per lane. Only notes longer than 4096 beats at res
+  256 get the coarser table. Even so, 4096 notes of 64 bars with generators on every lane would need about 10 GB:
+  the memory a snapshot may take is for M2's SnapshotPublisher to bound.
+- **Untouched lanes are computed once per compile.** A lane with no generator that is exactly flat at its default
+  gives a table that depends only on the lane and its length, so the compiler keeps the first one it makes and
+  copies it for every other note of that length. It is the same function on the same input, so no value changes
+  (the test also compares every Strand Demo table with compileTables of its note alone).
+- **A flat table is stored as 2 values only when every value has the same bits**; the fixture calls a table flat
+  when every binary32 is the same, which the test holds the compiler to lane by lane.
+- **VersionHistory hands back the stored version** (a `ClipPtr`), not a copy: versions are immutable. `push` takes a
+  comparator; `ClipHistory` uses `sameClip` (the same settings and extras, each note the same object or the same
+  content with the same extras), the prototype's JSON comparison (which also reads -0 as 0).
+- **The edit caps go through `limitEdit (before, proposed, sizer)`**, which M2's ClipDocument calls on every edit
+  with its `ClipSizer` (the running size, each note's size cached by its serial). `EditResult` gained `bytes`.

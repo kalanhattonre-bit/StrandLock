@@ -5,6 +5,8 @@
 #include "Normalize.h"
 
 #include "core/Inst.h"
+#include "core/JsCompat.h"
+#include "core/Lanes.h"
 #include "core/Rates.h"
 #include "core/Seeds.h"
 
@@ -55,25 +57,70 @@ namespace sl::model
         {
             return v.has_value() ? marker (*v) : core::kFollow;
         }
+
+        bool sameBits (double a, double b) noexcept { return std::memcmp (&a, &b, sizeof a) == 0; }
+
+        /** The lane is the untouched default: no generator, and no nodes (noteLane reads them as flat (def)) or
+            exactly flat (def): t 0 and 1, v the default (same bits), both smooth. A table then depends on the
+            lane and its length only (a smooth segment never reads bend). */
+        bool defaultFlat (const Note& note, std::size_t lane) noexcept
+        {
+            if (note.gen[lane].has_value())
+                return false;
+            const NodeList& nd = note.c[lane];
+            if (nd.empty())
+                return true;
+            const double def = core::kLanes[lane].def;
+            return nd.size() == 2 && sameBits (nd[0].t, 0.0) && sameBits (nd[1].t, 1.0) && sameBits (nd[0].v, def) && sameBits (nd[1].v, def)
+                && nd[0].shape == NodeShape::smooth && nd[1].shape == NodeShape::smooth;
+        }
+
+        /** The tables of default-flat lanes already made in this compile, by lane and length. Reusing one is the
+            same function on the same input, so no value changes; it saves recomputing the 9 untouched lanes of
+            most notes. */
+        struct MemoTable
+        {
+            std::int32_t fullLength = 0;
+            std::vector<float> values;
+        };
+
+        using FlatMemo = std::unordered_map<std::uint64_t, MemoTable>;
+
+        std::shared_ptr<const core::NoteTables> tablesOf (const Note& note, int res, FlatMemo* memo)
+        {
+            // laneTable's length, max (2, ceil (l * res) + 1), capped
+            const double N = std::min (tableLength (note.l, static_cast<double> (std::max (1, res))), static_cast<double> (kMaxTableLength));
+
+            auto out = std::make_shared<core::NoteTables>();
+            for (std::size_t i = 0; i < static_cast<std::size_t> (core::kNumLanes); ++i)
+            {
+                const bool memoable = memo != nullptr && defaultFlat (note, i);
+                const std::uint64_t key = (static_cast<std::uint64_t> (i) << 32) | static_cast<std::uint32_t> (core::toInt32 (N));
+                if (memoable)
+                {
+                    if (const auto it = memo->find (key); it != memo->end())
+                    {
+                        out->fullLength[i] = it->second.fullLength;
+                        out->lanes[i] = it->second.values;
+                        continue;
+                    }
+                }
+                std::vector<float> table = laneTableOfLength (note, static_cast<core::LaneId> (i), N);
+                out->fullLength[i] = static_cast<std::int32_t> (table.size());
+                if (table.size() > 2 && allSameBits (table))
+                    table.resize (2);
+                table.shrink_to_fit();
+                if (memoable)
+                    memo->emplace (key, MemoTable { out->fullLength[i], table });
+                out->lanes[i] = std::move (table);
+            }
+            return out;
+        }
     }
 
     std::shared_ptr<const core::NoteTables> compileTables (const Note& note, int res)
     {
-        // laneTable's length, max (2, ceil (l * res) + 1), capped
-        const double N = std::min (tableLength (note.l, static_cast<double> (std::max (1, res))), static_cast<double> (kMaxTableLength));
-
-        auto out = std::make_shared<core::NoteTables>();
-        for (int k = 0; k < core::kNumLanes; ++k)
-        {
-            std::vector<float> table = laneTableOfLength (note, static_cast<core::LaneId> (k), N);
-            const auto i = static_cast<std::size_t> (k);
-            out->fullLength[i] = static_cast<std::int32_t> (table.size());
-            if (table.size() > 2 && allSameBits (table))
-                table.resize (2);
-            table.shrink_to_fit();
-            out->lanes[i] = std::move (table);
-        }
-        return out;
+        return tablesOf (note, res, nullptr);
     }
 
     std::unique_ptr<core::Snapshot> compileSnapshot (const Clip& clip, int res, const SnapshotCache* reuse, SnapshotCache* remember)
@@ -140,6 +187,7 @@ namespace sl::model
         snap->byHash.reserve (count);
 
         SnapshotCache next;
+        FlatMemo memo;
         const double nan = std::numeric_limits<double>::quiet_NaN();
         for (std::size_t k = 0; k < count; ++k)
         {
@@ -183,7 +231,7 @@ namespace sl::model
             const std::uint64_t serial = source.serial.get();
             std::shared_ptr<const core::NoteTables> tables = reuse != nullptr ? reuse->find (serial, n.id, res) : nullptr;
             if (tables == nullptr)
-                tables = compileTables (n, res);
+                tables = tablesOf (n, res, &memo);
             for (int lane = 0; lane < core::kNumLanes; ++lane)
             {
                 const auto li = static_cast<std::size_t> (lane);

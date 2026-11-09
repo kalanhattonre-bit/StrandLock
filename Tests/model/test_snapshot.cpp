@@ -324,6 +324,22 @@ SL_TEST ("model", snapshotDeterminismAndSpeed)
         const auto s2 = model::compileSnapshot (demo, 256);
         std::string why;
         check (sameSnapshot (*s1, *s2, why) && s1->tables[0] != s2->tables[0], "compiling Strand Demo twice gives identical notes and tables " + why);
+
+        // the compiler reuses the tables of untouched default lanes within one compile: the same values as computing each
+        int same = 0, total = 0;
+        for (std::size_t k = 0; k < s1->notes.size(); ++k)
+        {
+            const model::Note* n = modelfx::findNote (demo, s1->ids[k]);
+            if (n == nullptr)
+                continue;
+            const auto own = model::compileTables (*n, 256);
+            for (std::size_t lane = 0; lane < static_cast<std::size_t> (core::kNumLanes); ++lane)
+            {
+                ++total;
+                same += own->lanes[lane] == s1->tables[k]->lanes[lane] && own->fullLength[lane] == s1->tables[k]->fullLength[lane] ? 1 : 0;
+            }
+        }
+        check (total == 260 && same == total, fmt ("each table equals compileTables of its note alone, value for value (%d of %d)", same, total));
     }
 
     // the cache: an edit of one note recompiles that note only

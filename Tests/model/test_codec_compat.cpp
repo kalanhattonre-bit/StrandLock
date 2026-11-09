@@ -9,8 +9,10 @@
 #include "ModelFixture.h"
 
 #include "core/Lanes.h"
+#include "core/Rates.h"
 #include "model/ClipCodec.h"
 #include "model/ClipEdit.h"
+#include "model/Generators.h"
 #include "model/NoteSettings.h"
 #include "model/Presets.h"
 #include "support/Check.h"
@@ -29,8 +31,8 @@ namespace
     using namespace sl::test;
     using Bytes = std::vector<std::uint8_t>;
 
-    /** The clip the cases start from: Strand Demo (26 notes, generators, links), two notes with Bounce, and note
-        6 following the instrument's motion with a tone lane that starts with a smooth node (what case (d)'s
+    /** The clip the cases start from: Strand Demo (26 notes, links), generators on two notes (it has none of its
+        own), two notes with Bounce, and note 6 following the instrument's motion with a tone lane that starts with a smooth node (what case (d)'s
         unknown values read as). */
     model::Clip baseClip()
     {
@@ -38,6 +40,11 @@ namespace
         model::SamplePatch patch;
         patch.motion = std::optional<core::Motion> (core::Motion::bounce);
         clip = model::setNoteSample (clip, model::Ids { clip.notes[2]->id, clip.notes[5]->id }, patch);
+        model::GenPatch g;
+        g.rate = core::RateId::r1_8;
+        g.key = "sd-other";
+        clip = model::setGen (clip, model::Ids { clip.notes[0]->id, clip.notes[3]->id }, core::LaneId::amp, model::makeGen (model::GenKind::random, g));
+        clip = model::setGen (clip, model::Ids (clip.notes[3]->id), core::LaneId::heads, model::makeGen (model::GenKind::pattern, model::GenPatch {}));
         model::SamplePatch follow;
         follow.motion.emplace();   // null: follow the instrument
         clip = model::setNoteSample (clip, model::Ids (clip.notes[6]->id), follow);
