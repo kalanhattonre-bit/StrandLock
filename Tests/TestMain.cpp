@@ -1,512 +1,428 @@
-// Offline verification for StrandLock. Runs the shipped processor and editor with no host and exits
-// non-zero if any check fails, so CI fails with it.
+// StrandLock's offline test runner (PLUGIN-PLAN 7.1, 7.2). This file is only the runner: tests,
+// snapshots, fingerprints and state fixtures register themselves (Tests/support/TestRegistry.h), so
+// nobody edits it after the scaffold.
 //
-//   StrandLockTests                 run everything
-//   StrandLockTests --only alloc    run just the allocation check (used for the Debug-CRT build)
-//   StrandLockTests --snapshot DIR  render the editor to PNGs in DIR instead of testing
+//   StrandLockTests                              run every test
+//   StrandLockTests --only alloc                 run one group (a comma list runs several: --only contract,model)
+//   StrandLockTests --list                       list the registered tests and writers
+//   StrandLockTests --alloc-minutes N            minutes of audio for the allocation runs (default 10)
+//   StrandLockTests --fixtures DIR               the golden fixtures (default: Tests/fixtures, found upward from here)
+//   StrandLockTests --snapshot DIR               write every SL_SNAPSHOT as DIR/<name>.png
+//   StrandLockTests --write-fingerprint DIR      write every SL_FINGERPRINT as DIR/<name>.txt
+//   StrandLockTests --write-state-fixtures DIR   write every SL_STATE_FIXTURE as DIR/<name>.bin
+//
+// It exits 0 only when every check passed, every writer wrote its file and no JUCE assertion fired.
+// Assertions are compiled into the Debug build only; there the runner counts them through a Logger
+// (the Debug build sets JUCE_LOG_ASSERTIONS=1, so jassert reports to Logger::writeToLog).
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
-#include "PluginProcessor.h"
-#include "PluginEditor.h"
-#include "ui/Theme.h"
+#include "support/AllocCounter.h"
+#include "support/Check.h"
+#include "support/TestRegistry.h"
 
 #include <algorithm>
-#include <array>
 #include <atomic>
-#include <cerrno>
-#include <cmath>
-#include <cstdarg>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
-#include <memory>
-#include <new>
+#include <exception>
+#include <string>
+#include <vector>
 
-//==============================================================================
-// Allocation counter. Counting is switched on only for the calling thread, and only
-// around processBlock, so it measures exactly what the audio thread would allocate.
-
-namespace alloccount
+namespace
 {
-    std::atomic<long long> count { 0 };
-    thread_local bool active = false;
+    using namespace sl::test;
 
-    inline void note() noexcept
+    /** Counts JUCE assertion reports and prints every message it is sent. */
+    struct AssertionCounter final : public juce::Logger
     {
-        if (active)
-            count.fetch_add (1, std::memory_order_relaxed);
-    }
+        std::atomic<int> count { 0 };
 
-    struct Scope
-    {
-        Scope() noexcept  { active = true; }
-        ~Scope() noexcept { active = false; }
+        void logMessage (const juce::String& message) override
+        {
+            if (message.startsWith ("JUCE Assertion failure"))
+                ++count;
+            std::printf ("%s\n", message.toRawUTF8());
+            std::fflush (stdout);
+        }
     };
 
-    const char* coverage = "operator new/new[]";
-}
-
-void* operator new (std::size_t size)
-{
-    alloccount::note();
-    if (void* p = std::malloc (size == 0 ? 1 : size))
-        return p;
-    throw std::bad_alloc();
-}
-
-void* operator new[] (std::size_t size)
-{
-    alloccount::note();
-    if (void* p = std::malloc (size == 0 ? 1 : size))
-        return p;
-    throw std::bad_alloc();
-}
-
-void operator delete (void* p) noexcept                 { std::free (p); }
-void operator delete[] (void* p) noexcept               { std::free (p); }
-void operator delete (void* p, std::size_t) noexcept    { std::free (p); }
-void operator delete[] (void* p, std::size_t) noexcept  { std::free (p); }
-
-#if defined (__linux__) && defined (__GLIBC__)
-// glibc lets the executable interpose the C allocator, which also catches JUCE's HeapBlock
-// (it calls malloc directly, never operator new).
-extern "C"
-{
-    void* __libc_malloc (size_t);
-    void* __libc_calloc (size_t, size_t);
-    void* __libc_realloc (void*, size_t);
-    void* __libc_memalign (size_t, size_t);
-    void  __libc_free (void*);
-
-    void* malloc (size_t size) noexcept                 { alloccount::note(); return __libc_malloc (size); }
-    void* calloc (size_t n, size_t size) noexcept       { alloccount::note(); return __libc_calloc (n, size); }
-    void* realloc (void* p, size_t size) noexcept       { alloccount::note(); return __libc_realloc (p, size); }
-    void  free (void* p) noexcept                       { __libc_free (p); }
-    void* memalign (size_t align, size_t size) noexcept { alloccount::note(); return __libc_memalign (align, size); }
-    void* aligned_alloc (size_t align, size_t size) noexcept { alloccount::note(); return __libc_memalign (align, size); }
-
-    int posix_memalign (void** out, size_t align, size_t size) noexcept
+    struct Args
     {
-        alloccount::note();
-        void* p = __libc_memalign (align, size);
-        if (p == nullptr)
-            return ENOMEM;
-        *out = p;
-        return 0;
-    }
-}
- #define STRANDLOCK_INSTALL_ALLOC_HOOK() alloccount::coverage = "malloc/calloc/realloc/memalign + operator new (glibc interposition)"
+        std::vector<std::string> only;
+        bool list = false;
+        double allocMinutes = 10.0;
+        std::string fixtures, snapshotDir, fingerprintDir, stateFixtureDir;
+    };
 
-#elif defined (_MSC_VER) && defined (_DEBUG)
- #include <crtdbg.h>
-// The debug CRT reports every heap allocation, including malloc calls that bypass operator new.
-static int crtAllocHook (int allocType, void*, size_t, int, long, const unsigned char*, int)
-{
-    if (allocType == _HOOK_ALLOC || allocType == _HOOK_REALLOC)
-        alloccount::note();
-    return 1;
-}
- #define STRANDLOCK_INSTALL_ALLOC_HOOK() (_CrtSetAllocHook (crtAllocHook), alloccount::coverage = "every CRT heap allocation (debug CRT hook)")
-
-#else
- #define STRANDLOCK_INSTALL_ALLOC_HOOK() (void) 0
-#endif
-
-//==============================================================================
-namespace
-{
-    using strandlock::ui::Theme;
-
-    int failures = 0;
-
-    /** printf-style formatting into a juce::String. (juce::String::formatted is wide-char on Windows,
-        where %s would read a narrow string as UTF-16 and print garbage.) */
-    juce::String fmt (const char* format, ...)
+    void printUsage()
     {
-        char buffer[1024];
-        va_list args;
-        va_start (args, format);
-        std::vsnprintf (buffer, sizeof (buffer), format, args);
-        va_end (args);
-        return juce::String (buffer);
+        std::printf ("StrandLockTests [--only G[,G...]] [--list] [--alloc-minutes N] [--fixtures DIR]\n"
+                     "                [--snapshot DIR | --write-fingerprint DIR | --write-state-fixtures DIR]\n");
     }
 
-    void check (bool ok, const juce::String& what)
+    std::vector<std::string> splitList (const std::string& text)
     {
-        std::printf ("[%s] %s\n", ok ? "PASS" : "FAIL", what.toRawUTF8());
-        std::fflush (stdout);
-        if (! ok)
-            ++failures;
-    }
-
-    void section (const char* name)
-    {
-        std::printf ("\n== %s ==\n", name);
-        std::fflush (stdout);
-    }
-
-    using Set = juce::AudioChannelSet;
-
-    juce::AudioProcessor::BusesLayout layout (std::initializer_list<Set> inputs, std::initializer_list<Set> outputs)
-    {
-        juce::AudioProcessor::BusesLayout l;
-        for (const auto& s : inputs)
-            l.inputBuses.add (s);
-        for (const auto& s : outputs)
-            l.outputBuses.add (s);
-        return l;
-    }
-
-    //==========================================================================
-    void testPluginType()
-    {
-        section ("1. An instrument: no audio input, one stereo output, MIDI in");
-
-        StrandLockProcessor proc;
-        check (proc.getBusCount (true) == 0 && proc.getTotalNumInputChannels() == 0,
-               fmt ("no input bus (%d input buses, %d input channels)", proc.getBusCount (true), proc.getTotalNumInputChannels()));
-        check (proc.getBusCount (false) == 1 && proc.getTotalNumOutputChannels() == 2
-                   && proc.getChannelLayoutOfBus (false, 0) == Set::stereo(),
-               fmt ("one stereo output bus (%d output buses, %d output channels)", proc.getBusCount (false), proc.getTotalNumOutputChannels()));
-        check (proc.acceptsMidi() && ! proc.producesMidi() && ! proc.isMidiEffect(),
-               "accepts MIDI, sends none, and is not a MIDI effect");
-        check (proc.getName() == "StrandLock", fmt ("named \"%s\"", proc.getName().toRawUTF8()));
-        check (proc.getLatencySamples() == 0 && juce::exactlyEqual (proc.getTailLengthSeconds(), 0.0),
-               fmt ("zero latency (%d samples), no tail (%.1f s)", proc.getLatencySamples(), proc.getTailLengthSeconds()));
-
-        check (proc.checkBusesLayoutSupported (layout ({}, { Set::stereo() })), "no input / stereo out supported");
-        check (! proc.checkBusesLayoutSupported (layout ({}, { Set::mono() })), "no input / mono out rejected");
-        check (! proc.checkBusesLayoutSupported (layout ({ Set::stereo() }, { Set::stereo() })), "stereo in / stereo out rejected");
-    }
-
-    //==========================================================================
-    void testSilence()
-    {
-        section ("2. Ten seconds with no MIDI: every sample is exactly zero and finite");
-
-        for (const double rate : { 44100.0, 96000.0 })
+        std::vector<std::string> out;
+        std::string item;
+        for (const char c : text + ",")
         {
-            for (const int block : { 1, 64, 4096 })
+            if (c == ',')
             {
-                StrandLockProcessor proc;
-                proc.setPlayConfigDetails (0, 2, rate, block);
-                proc.prepareToPlay (rate, block);
-
-                juce::AudioBuffer<float> buffer (2, block);
-                juce::MidiBuffer midi;
-                juce::Random rng ((juce::int64) rate + block);
-
-                const juce::int64 total = (juce::int64) (10.0 * rate);
-                long long nonZero = 0, nonFinite = 0;
-
-                for (juce::int64 pos = 0; pos < total; pos += block)
-                {
-                    const int n = (int) std::min<juce::int64> (block, total - pos);
-                    buffer.setSize (2, n, false, false, true);
-
-                    // A host's output buffer can hold anything before the call; the plugin must overwrite it.
-                    for (int ch = 0; ch < 2; ++ch)
-                        for (int i = 0; i < n; ++i)
-                            buffer.setSample (ch, i, rng.nextFloat() * 2.0f - 1.0f);
-
-                    midi.clear();
-                    proc.processBlock (buffer, midi);
-
-                    for (int ch = 0; ch < 2; ++ch)
-                    {
-                        const float* d = buffer.getReadPointer (ch);
-                        for (int i = 0; i < n; ++i)
-                        {
-                            if (! std::isfinite (d[i]))
-                                ++nonFinite;
-                            else if (! juce::exactlyEqual (d[i], 0.0f))
-                                ++nonZero;
-                        }
-                    }
-                }
-
-                proc.releaseResources();
-                check (nonZero == 0 && nonFinite == 0,
-                       fmt ("%.1f kHz, %d-sample blocks: %lld samples per channel, %lld non-zero, %lld non-finite",
-                            rate / 1000.0, block, (long long) total, nonZero, nonFinite));
+                if (! item.empty())
+                    out.push_back (item);
+                item.clear();
             }
+            else if (c != ' ')
+            {
+                item += c;
+            }
+        }
+        return out;
+    }
+
+    /** False (after printing why) for an unknown flag or a flag without its value. */
+    bool parseArgs (int argc, char** argv, Args& a)
+    {
+        for (int i = 1; i < argc; ++i)
+        {
+            const std::string arg (argv[i]);
+            const bool hasValue = i + 1 < argc;
+            auto value = [&] { return std::string (argv[++i]); };
+
+            if (arg == "--list")                                       a.list = true;
+            else if (arg == "--only" && hasValue)                      a.only = splitList (value());
+            else if (arg == "--alloc-minutes" && hasValue)             a.allocMinutes = juce::String (value()).getDoubleValue();
+            else if (arg == "--fixtures" && hasValue)                  a.fixtures = value();
+            else if (arg == "--snapshot" && hasValue)                  a.snapshotDir = value();
+            else if (arg == "--write-fingerprint" && hasValue)         a.fingerprintDir = value();
+            else if (arg == "--write-state-fixtures" && hasValue)      a.stateFixtureDir = value();
+            else
+            {
+                std::printf ("Unknown or incomplete argument: %s\n", arg.c_str());
+                printUsage();
+                return false;
+            }
+        }
+
+        const int writers = (a.snapshotDir.empty() ? 0 : 1) + (a.fingerprintDir.empty() ? 0 : 1) + (a.stateFixtureDir.empty() ? 0 : 1);
+        if (writers > 1)
+        {
+            std::printf ("Give one of --snapshot, --write-fingerprint, --write-state-fixtures at a time.\n");
+            return false;
+        }
+        return true;
+    }
+
+    /** Fills options(): the fixtures folder and the repository root. */
+    void resolvePaths (const Args& a)
+    {
+        auto& o = options();
+        o.allocMinutes = a.allocMinutes;
+
+        const auto cwd = juce::File::getCurrentWorkingDirectory();
+        if (! a.fixtures.empty())
+        {
+            const auto dir = cwd.getChildFile (juce::String::fromUTF8 (a.fixtures.c_str()));
+            o.fixturesDir = dir.getFullPathName().toStdString();
+            const auto root = dir.getParentDirectory().getParentDirectory();
+            if (root.getChildFile ("docs").isDirectory())
+                o.repoRoot = root.getFullPathName().toStdString();
+            return;
+        }
+
+        for (auto dir = cwd;; dir = dir.getParentDirectory())
+        {
+            const auto fixtures = dir.getChildFile ("Tests").getChildFile ("fixtures");
+            if (fixtures.isDirectory())
+            {
+                o.fixturesDir = fixtures.getFullPathName().toStdString();
+                o.repoRoot = dir.getFullPathName().toStdString();
+                return;
+            }
+            if (dir.isRoot() || dir.getParentDirectory() == dir)
+                break;
         }
     }
 
-    //==========================================================================
-    juce::MemoryBlock header (const char* magic, juce::uint32 version)
+    bool lessByGroupThenName (const TestEntry& a, const TestEntry& b)
     {
-        juce::MemoryBlock block;
-        juce::MemoryOutputStream out (block, false);
-        out.write (magic, 4);
-        out.writeInt ((int) version);
-        out.flush();
-        return block;
+        const int g = std::strcmp (a.group, b.group);
+        return g != 0 ? g < 0 : std::strcmp (a.name, b.name) < 0;
     }
 
-    void testStateRoundTrip()
+    void listEverything()
     {
-        section ("3. State: the 'STLK' magic and format version 1 round-trip");
+        auto tests = registeredTests();
+        std::stable_sort (tests.begin(), tests.end(), lessByGroupThenName);
+        std::printf ("Tests (%d):\n", (int) tests.size());
+        for (const auto& t : tests)
+            std::printf ("  %-10s %s  (%s:%d)\n", t.group, t.name, t.file, t.line);
 
-        StrandLockProcessor a;
-        juce::MemoryBlock saved;
-        a.getStateInformation (saved);
-
-        const auto* bytes = static_cast<const char*> (saved.getData());
-        const bool magicOk = saved.getSize() >= 4 && std::memcmp (bytes, "STLK", 4) == 0;
-        const juce::uint32 version = saved.getSize() >= 8 ? juce::ByteOrder::littleEndianInt (bytes + 4) : 0;
-        check (saved.getSize() == 8, fmt ("version 1 saves the 8-byte header alone (%d bytes)", (int) saved.getSize()));
-        check (magicOk, "it starts with the magic 'STLK'");
-        check (version == 1, fmt ("then the format version as a little-endian uint32 (%u)", (unsigned) version));
-
-        StrandLockProcessor b;
-        check (b.getLoadedStateVersion() == 0, "a new instance has loaded no state");
-        b.setStateInformation (saved.getData(), (int) saved.getSize());
-        check (b.getLoadedStateVersion() == 1, fmt ("a fresh instance accepts it as version %u", (unsigned) b.getLoadedStateVersion()));
-
-        juce::MemoryBlock again;
-        b.getStateInformation (again);
-        check (again == saved, "saving the restored instance gives the same bytes");
-
-        // Not a StrandLock state: nothing is taken from it.
-        const juce::MemoryBlock full = header ("STLK", 1);
-        const juce::MemoryBlock junk[] = {
-            juce::MemoryBlock(),                       // empty
-            juce::MemoryBlock (full.getData(), 6),     // the header cut short
-            header ("GRLK", 1),                        // another plugin's magic
-            header ("STLK", 0),                        // version 0 was never written
+        auto listWriters = [] (const char* title, const auto& list)
+        {
+            std::printf ("%s (%d):\n", title, (int) list.size());
+            for (const auto& w : list)
+                std::printf ("  %s  (%s:%d)\n", w.name, w.file, w.line);
         };
-        int taken = 0;
-        for (const auto& data : junk)
-        {
-            StrandLockProcessor c;
-            c.setStateInformation (data.getData(), (int) data.getSize());
-            taken += c.getLoadedStateVersion() != 0 ? 1 : 0;
-        }
-        check (taken == 0, fmt ("ignored: an empty block, a cut-off header, the wrong magic, version 0 (%d of 4 accepted)", taken));
+        listWriters ("Snapshots, --snapshot", registeredSnapshots());
+        listWriters ("Fingerprints, --write-fingerprint", registeredFingerprints());
+        listWriters ("State fixtures, --write-state-fixtures", registeredStateFixtures());
     }
 
-    //==========================================================================
-    void testNoAllocations (double minutes)
+    //==============================================================================================
+    struct GroupTally
     {
-        section ("4. Long run at 48 kHz / 64-sample blocks with MIDI: no allocations on the audio thread");
+        std::string group;
+        int tests = 0;
+        long long checks = 0;
+        long long failures = 0;
+    };
 
-        const double rate = 48000.0;
-        const int block = 64;
-        StrandLockProcessor proc;
-        proc.setPlayConfigDetails (0, 2, rate, block);
-        proc.prepareToPlay (rate, block);
+    int runTests (const std::vector<std::string>& only)
+    {
+        auto tests = registeredTests();
+        std::stable_sort (tests.begin(), tests.end(), lessByGroupThenName);
 
-        juce::AudioBuffer<float> buffer (2, block);
-        juce::MidiBuffer midi;
-        midi.ensureSize (8192);
-        juce::Random rng (99);
+        for (std::size_t i = 1; i < tests.size(); ++i)
+            if (std::strcmp (tests[i].group, tests[i - 1].group) == 0 && std::strcmp (tests[i].name, tests[i - 1].name) == 0)
+                check (false, fmt ("test names are unique in a group: %s / %s is registered twice (%s:%d, %s:%d)",
+                                   tests[i].group, tests[i].name, tests[i - 1].file, tests[i - 1].line, tests[i].file, tests[i].line));
 
-        const juce::int64 totalBlocks = (juce::int64) (minutes * 60.0 * rate / block);
-        std::array<int, 16> held {};
-        int numHeld = 0;
-        bool silentAndFinite = true;
+        std::vector<TestEntry> chosen;
+        for (const auto& t : tests)
+            if (only.empty() || std::find (only.begin(), only.end(), std::string (t.group)) != only.end())
+                chosen.push_back (t);
 
-        alloccount::count = 0;
-        const auto startMs = juce::Time::getMillisecondCounterHiRes();
+        for (const auto& g : only)
+            if (std::none_of (tests.begin(), tests.end(), [&g] (const TestEntry& t) { return g == t.group; }))
+                std::printf ("Note: group \"%s\" has no tests yet.\n", g.c_str());
 
-        for (juce::int64 b = 0; b < totalBlocks; ++b)
+        if (chosen.empty())
         {
-            // Everything a host would do between callbacks happens outside the counted scope.
-            for (int ch = 0; ch < 2; ++ch)
-            {
-                auto* d = buffer.getWritePointer (ch);
-                for (int i = 0; i < block; ++i)
-                    d[i] = (rng.nextFloat() * 2.0f - 1.0f) * 0.4f;
-            }
-
-            midi.clear();
-            if (rng.nextInt (6) == 0 && numHeld < (int) held.size())
-            {
-                const int note = 30 + rng.nextInt (70);
-                const juce::uint8 on[3] = { 0x90, (juce::uint8) note, (juce::uint8) (1 + rng.nextInt (127)) };
-                midi.addEvent (on, 3, rng.nextInt (block));
-                held[(size_t) numHeld++] = note;
-            }
-            if (numHeld > 0 && rng.nextInt (5) == 0)
-            {
-                const int idx = rng.nextInt (numHeld);
-                const juce::uint8 off[3] = { 0x80, (juce::uint8) held[(size_t) idx], 0 };
-                midi.addEvent (off, 3, rng.nextInt (block));
-                held[(size_t) idx] = held[(size_t) --numHeld];
-            }
-            if (rng.nextInt (40) == 0)
-            {
-                const int bend = rng.nextInt (16384);
-                const juce::uint8 pb[3] = { 0xe0, (juce::uint8) (bend & 0x7f), (juce::uint8) (bend >> 7) };
-                midi.addEvent (pb, 3, 0);
-            }
-            if (rng.nextInt (60) == 0)
-            {
-                static const int controllers[] = { 1, 2, 11, 64, 120, 121, 123 };
-                const juce::uint8 cc[3] = { 0xb0, (juce::uint8) controllers[rng.nextInt (7)], (juce::uint8) rng.nextInt (128) };
-                midi.addEvent (cc, 3, rng.nextInt (block));
-            }
-            if (rng.nextInt (90) == 0)
-            {
-                const juce::uint8 pressure[2] = { 0xd0, (juce::uint8) rng.nextInt (128) };
-                midi.addEvent (pressure, 2, block - 1);
-            }
-
-            {
-                const alloccount::Scope counting;
-                proc.processBlock (buffer, midi);
-            }
-
-            const float* l = buffer.getReadPointer (0);
-            const float* r = buffer.getReadPointer (1);
-            for (int i = 0; i < block; ++i)
-                silentAndFinite = silentAndFinite && std::isfinite (l[i]) && std::isfinite (r[i])
-                                      && juce::exactlyEqual (l[i], 0.0f) && juce::exactlyEqual (r[i], 0.0f);
+            std::printf ("No registered test matches --only; nothing ran.\n");
+            return 1;
         }
 
-        const double seconds = (juce::Time::getMillisecondCounterHiRes() - startMs) / 1000.0;
-        std::printf ("    %.1f minutes of audio in %.1f s; counting %s\n", minutes, seconds, alloccount::coverage);
+        std::vector<GroupTally> groups;
+        for (const auto& t : chosen)
+        {
+            std::printf ("\n######## %s / %s\n", t.group, t.name);
+            std::fflush (stdout);
 
-        check (silentAndFinite, "long run with notes, bends and controllers: silent and finite throughout (the skeleton plays nothing)");
-        check (alloccount::count.load() == 0, fmt ("allocations inside processBlock: %lld", alloccount::count.load()));
+            const Tally before = tally();
+            try
+            {
+                t.run();
+            }
+            catch (const std::exception& e)
+            {
+                check (false, fmt ("%s / %s ran to the end (it threw: %s)", t.group, t.name, e.what()));
+            }
+            catch (...)
+            {
+                check (false, fmt ("%s / %s ran to the end (it threw a non-standard exception)", t.group, t.name));
+            }
+
+            if (tally().checks == before.checks)
+                check (false, fmt ("%s / %s made at least one check (a test with no check proves nothing)", t.group, t.name));
+
+            const Tally after = tally();
+            if (groups.empty() || groups.back().group != t.group)
+                groups.push_back ({ t.group, 0, 0, 0 });
+            auto& g = groups.back();
+            ++g.tests;
+            g.checks += after.checks - before.checks;
+            g.failures += after.failures - before.failures;
+        }
+
+        const Tally total = tally();
+        int numTests = 0;
+        std::printf ("\n== Summary ==\n%-12s %6s %8s %8s\n", "group", "tests", "checks", "failed");
+        for (const auto& g : groups)
+        {
+            std::printf ("%-12s %6d %8lld %8lld\n", g.group.c_str(), g.tests, g.checks, g.failures);
+            numTests += g.tests;
+        }
+
+        if (total.failures == 0)
+            std::printf ("\nALL PASSED: %lld checks in %d tests, 0 failure(s)\n", total.checks, numTests);
+        else
+            std::printf ("\nFAILED: %lld of %lld checks failed in %d tests\n", total.failures, total.checks, numTests);
+        std::fflush (stdout);
+        return total.failures == 0 ? 0 : 1;
     }
 
-    //==========================================================================
-    int channelDistance (juce::Colour a, juce::Colour b)
+    //==============================================================================================
+    juce::File writerDirectory (const std::string& name)
     {
-        return std::max ({ std::abs ((int) a.getRed() - (int) b.getRed()),
-                           std::abs ((int) a.getGreen() - (int) b.getGreen()),
-                           std::abs ((int) a.getBlue() - (int) b.getBlue()) });
+        const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (juce::String::fromUTF8 (name.c_str()));
+        const auto made = dir.createDirectory();
+        if (made.failed())
+            std::printf ("FAILED to create %s: %s\n", dir.getFullPathName().toRawUTF8(), made.getErrorMessage().toRawUTF8());
+        return dir;
     }
 
-    /** How many pixels in area are within tolerance of colour. */
-    int countNear (const juce::Image& image, juce::Rectangle<int> area, juce::Colour colour, int tolerance)
-    {
-        int n = 0;
-        const juce::Image::BitmapData pixels (image, juce::Image::BitmapData::readOnly);
-        for (int y = area.getY(); y < area.getBottom(); ++y)
-            for (int x = area.getX(); x < area.getRight(); ++x)
-                if (channelDistance (pixels.getPixelColour (x, y), colour) <= tolerance)
-                    ++n;
-        return n;
-    }
-
-    void testEditor()
-    {
-        section ("5. Editor: 1100 x 680, resizable 75% to 200%, renders the dark skeleton");
-
-        StrandLockProcessor proc;
-        std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
-
-        check (editor != nullptr && editor->getWidth() == 1100 && editor->getHeight() == 680,
-               fmt ("opens at %d x %d", editor != nullptr ? editor->getWidth() : 0, editor != nullptr ? editor->getHeight() : 0));
-        if (editor == nullptr)
-            return;
-
-        const auto* limits = editor->getConstrainer();
-        check (editor->isResizable() && limits != nullptr
-                   && limits->getMinimumWidth() == 825 && limits->getMinimumHeight() == 510
-                   && limits->getMaximumWidth() == 2200 && limits->getMaximumHeight() == 1360,
-               fmt ("resizable from 825 x 510 to 2200 x 1360 (%d x %d to %d x %d)",
-                    limits != nullptr ? limits->getMinimumWidth() : 0, limits != nullptr ? limits->getMinimumHeight() : 0,
-                    limits != nullptr ? limits->getMaximumWidth() : 0, limits != nullptr ? limits->getMaximumHeight() : 0));
-
-        const auto image = editor->createComponentSnapshot (editor->getLocalBounds(), true, 1.0f);
-        check (image.isValid() && image.getWidth() == 1100 && image.getHeight() == 680,
-               fmt ("renders a %d x %d image", image.getWidth(), image.getHeight()));
-
-        juce::MemoryOutputStream png;
-        juce::PNGImageFormat format;
-        const bool encoded = image.isValid() && format.writeImageToStream (image, png);
-        juce::MemoryInputStream pngIn (png.getData(), png.getDataSize(), false);
-        const auto decoded = encoded ? format.decodeImage (pngIn) : juce::Image();
-        check (decoded.isValid() && decoded.getWidth() == 1100 && decoded.getHeight() == 680,
-               fmt ("encodes as a %d-byte PNG that reads back at %d x %d", (int) png.getDataSize(), decoded.getWidth(), decoded.getHeight()));
-
-        if (! image.isValid() || image.getWidth() != 1100 || image.getHeight() != 680)
-            return;
-
-        // The dark theme: the background beside the wordmark, and the empty panel below it.
-        const auto bg = image.getPixelAt (700, 22);
-        const auto panel = image.getPixelAt (300, 200);
-        check (channelDistance (bg, Theme::background) <= 1,
-               fmt ("top bar is the suite's background #151618 (#%s)", bg.toDisplayString (false).toRawUTF8()));
-        check (channelDistance (panel, Theme::panel) <= 1,
-               fmt ("the empty panel is the suite's panel #1D1E21 (#%s)", panel.toDisplayString (false).toRawUTF8()));
-
-        // The logo's ring is drawn in the orchid accent, and the wordmark in the text colour.
-        const int ringPixels = countNear (image, { 16, 11, 22, 22 }, Theme::accent, 12);
-        const int wordPixels = countNear (image, { 46, 10, 200, 24 }, Theme::text, 12);
-        const int strayAccent = countNear (image, { 46, 0, 1054, 44 }, Theme::accent, 12);
-        check (ringPixels >= 20, fmt ("logo ring in orchid #B58CFF (%d pixels)", ringPixels));
-        check (wordPixels >= 30, fmt ("STRANDLOCK wordmark in the text colour (%d pixels)", wordPixels));
-        check (strayAccent == 0, fmt ("no orchid elsewhere in the top bar (%d pixels)", strayAccent));
-    }
-}
-
-namespace
-{
-    bool writePng (const juce::File& file, const juce::Image& image)
+    bool writeBytes (const juce::File& file, const void* data, std::size_t size)
     {
         file.deleteFile();
         bool ok = false;
         {
             juce::FileOutputStream out (file);
-            juce::PNGImageFormat png;
-            ok = out.openedOk() && image.isValid() && png.writeImageToStream (image, out);
+            ok = out.openedOk() && out.write (data, size);
+            out.flush();
+            ok = ok && out.getStatus().wasOk();
         }
-        std::printf ("%s %s (%d x %d)\n", ok ? "wrote" : "FAILED to write", file.getFullPathName().toRawUTF8(),
-                     image.getWidth(), image.getHeight());
+        std::printf ("%s %s (%d bytes)\n", ok ? "wrote" : "FAILED to write", file.getFullPathName().toRawUTF8(), (int) size);
         return ok;
     }
 
-    /** Renders the real editor, exactly as the host shows it at its default size: once at 1x
-        (1100 x 680) and once at 2x for a close look at the logo and type. */
-    int renderSnapshots (const juce::String& directory)
+    int writeSnapshots (const std::string& dirName)
     {
-        const auto dir = juce::File::getCurrentWorkingDirectory().getChildFile (directory);
-        dir.createDirectory();
-
-        StrandLockProcessor proc;
-        std::unique_ptr<juce::AudioProcessorEditor> editor (proc.createEditor());
-        if (editor == nullptr)
+        const auto dir = writerDirectory (dirName);
+        auto list = registeredSnapshots();
+        std::sort (list.begin(), list.end(), [] (const auto& a, const auto& b) { return std::strcmp (a.name, b.name) < 0; });
+        if (list.empty())
+        {
+            std::printf ("FAILED: no SL_SNAPSHOT is registered\n");
             return 1;
+        }
 
-        const auto bounds = editor->getLocalBounds();
-        bool ok = writePng (dir.getChildFile ("strandlock-skeleton-dark.png"), editor->createComponentSnapshot (bounds, true, 1.0f));
-        ok = writePng (dir.getChildFile ("strandlock-skeleton-dark-2x.png"), editor->createComponentSnapshot (bounds, true, 2.0f)) && ok;
+        bool ok = true;
+        for (const auto& s : list)
+        {
+            juce::Image image;
+            try
+            {
+                image = s.write();
+            }
+            catch (...)
+            {
+                std::printf ("FAILED: snapshot %s threw\n", s.name);
+            }
+
+            juce::MemoryOutputStream png;
+            juce::PNGImageFormat format;
+            const bool encoded = image.isValid() && format.writeImageToStream (image, png);
+            const auto file = dir.getChildFile (juce::String (s.name) + ".png");
+            const bool wrote = encoded && writeBytes (file, png.getData(), png.getDataSize());
+            if (encoded)
+                std::printf ("    %s is %d x %d\n", s.name, image.getWidth(), image.getHeight());
+            else
+                std::printf ("FAILED: snapshot %s gave no image\n", s.name);
+            ok = ok && wrote;
+        }
         return ok ? 0 : 1;
+    }
+
+    int writeFingerprints (const std::string& dirName)
+    {
+        const auto dir = writerDirectory (dirName);
+        auto list = registeredFingerprints();
+        std::sort (list.begin(), list.end(), [] (const auto& a, const auto& b) { return std::strcmp (a.name, b.name) < 0; });
+
+        if (list.empty())
+        {
+            // PLUGIN-PLAN 7.1: until M9 the upload still gets a file.
+            const std::string text = "no sound fingerprints before M9\n";
+            return writeBytes (dir.getChildFile ("placeholder.txt"), text.data(), text.size()) ? 0 : 1;
+        }
+
+        bool ok = true;
+        for (const auto& f : list)
+        {
+            try
+            {
+                const std::string text = f.write();
+                ok = writeBytes (dir.getChildFile (juce::String (f.name) + ".txt"), text.data(), text.size()) && ok;
+            }
+            catch (...)
+            {
+                std::printf ("FAILED: fingerprint %s threw\n", f.name);
+                ok = false;
+            }
+        }
+        return ok ? 0 : 1;
+    }
+
+    int writeStateFixtures (const std::string& dirName)
+    {
+        const auto dir = writerDirectory (dirName);
+        auto list = registeredStateFixtures();
+        std::sort (list.begin(), list.end(), [] (const auto& a, const auto& b) { return std::strcmp (a.name, b.name) < 0; });
+
+        if (list.empty())
+        {
+            std::printf ("No SL_STATE_FIXTURE is registered yet: nothing to write.\n");
+            return 0;
+        }
+
+        bool ok = true;
+        for (const auto& s : list)
+        {
+            try
+            {
+                const juce::MemoryBlock block = s.write();
+                ok = writeBytes (dir.getChildFile (juce::String (s.name) + ".bin"), block.getData(), block.getSize()) && ok;
+            }
+            catch (...)
+            {
+                std::printf ("FAILED: state fixture %s threw\n", s.name);
+                ok = false;
+            }
+        }
+        return ok ? 0 : 1;
+    }
+
+    int run (int argc, char** argv)
+    {
+        Args a;
+        if (! parseArgs (argc, argv, a))
+            return 2;
+
+        resolvePaths (a);
+        std::printf ("StrandLockTests: fixtures %s\n", options().fixturesDir.empty() ? "(not found)" : options().fixturesDir.c_str());
+        std::printf ("Allocation counting: %s\n", sl::test::alloc::coverage());
+
+        if (a.list)
+        {
+            listEverything();
+            return 0;
+        }
+        if (! a.snapshotDir.empty())
+            return writeSnapshots (a.snapshotDir);
+        if (! a.fingerprintDir.empty())
+            return writeFingerprints (a.fingerprintDir);
+        if (! a.stateFixtureDir.empty())
+            return writeStateFixtures (a.stateFixtureDir);
+        return runTests (a.only);
     }
 }
 
 int main (int argc, char** argv)
 {
-    STRANDLOCK_INSTALL_ALLOC_HOOK();
-    juce::ScopedJuceInitialiser_GUI juceInit;
+    sl::test::alloc::install();
 
-    juce::String only;
-    double allocMinutes = 10.0;
-    for (int i = 1; i < argc; ++i)
+    // The counter outlives JUCE, so assertions during JUCE's own shutdown are counted too.
+    AssertionCounter assertions;
+    juce::Logger::setCurrentLogger (&assertions);
+
+    int result = 0;
     {
-        const juce::String arg (argv[i]);
-        if (arg == "--only" && i + 1 < argc)
-            only = argv[++i];
-        else if (arg == "--alloc-minutes" && i + 1 < argc)
-            allocMinutes = juce::String (argv[++i]).getDoubleValue();
-        else if (arg == "--snapshot" && i + 1 < argc)
-            return renderSnapshots (argv[++i]);
+        const juce::ScopedJuceInitialiser_GUI juceInit;
+        result = run (argc, argv);
     }
 
-    auto wants = [&only] (const char* name) { return only.isEmpty() || only == name; };
+    juce::Logger::setCurrentLogger (nullptr);
 
-    if (wants ("type"))    testPluginType();
-    if (wants ("silence")) testSilence();
-    if (wants ("state"))   testStateRoundTrip();
-    if (wants ("alloc"))   testNoAllocations (allocMinutes);
-    if (wants ("editor"))  testEditor();
+   #if JUCE_ASSERTIONS_ENABLED_OR_LOGGED
+    const int fired = assertions.count.load();
+    std::printf ("JUCE assertions: %d%s\n", fired, fired == 0 ? "" : " (each one is a failure)");
+    if (fired > 0 && result == 0)
+        result = 1;
+   #else
+    std::printf ("JUCE assertions: compiled out in this build (the Debug runner counts them)\n");
+   #endif
 
-    std::printf ("\n%s: %d failure(s)\n", failures == 0 ? "ALL PASSED" : "FAILED", failures);
-    return failures == 0 ? 0 : 1;
+    return result;
 }

@@ -2,7 +2,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
-namespace strandlock::ui
+namespace sl::ui
 {
     /** Every colour and font the interface uses. Change the look here and nowhere else.
 

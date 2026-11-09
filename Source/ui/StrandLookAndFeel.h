@@ -2,7 +2,7 @@
 
 #include "Theme.h"
 
-namespace strandlock::ui
+namespace sl::ui
 {
     /** Draws every standard JUCE widget StrandLock uses. No bitmaps: all vector drawing.
         Copied from GrainLock's GrainLookAndFeel, so the suite's controls look the same everywhere. */

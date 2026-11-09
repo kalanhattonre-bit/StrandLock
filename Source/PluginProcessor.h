@@ -3,19 +3,20 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include <atomic>
+#include <cstdint>
 
-namespace strandlock::state
+namespace sl::state
 {
-    /** The saved state starts with an 8-byte header: the four bytes 'S' 'T' 'L' 'K', then the format
-        version as a little-endian uint32. Version 1 is the header alone; each later version appends
-        its data after the header, so a build can always tell which layout it is reading. */
-    inline constexpr char magic[4] = { 'S', 'T', 'L', 'K' };
-    inline constexpr juce::uint32 currentVersion = 1;
-    inline constexpr int headerSize = 8;
+    /** The binary state's 16-byte header (PLUGIN-PLAN 3), little-endian:
+        'S' 'T' 'L' 'K' | u16 formatVersion | u16 flags = 0 | u32 totalLength | u32 headerCrc32,
+        where headerCrc32 is the CRC-32 of the 12 bytes before it. The chunks follow it; the scaffold
+        writes none (M0 adds PARM, INST, UIST and SMPL, and keeps chunks it does not know). */
+    inline constexpr char kMagic[4] = { 'S', 'T', 'L', 'K' };
+    inline constexpr int kHeaderSize = 16;
 }
 
-/** The M0 skeleton: an instrument (no audio input, one stereo output) that accepts MIDI and
-    plays silence, with a versioned state and the suite's editor. The engine arrives in later milestones. */
+/** The scaffold's processor (PLUGIN-PLAN 7.1): a silent instrument (no audio input, one stereo
+    output) that accepts MIDI, reports no latency and saves an empty state container. M0 grows it. */
 class StrandLockProcessor final : public juce::AudioProcessor
 {
 public:
@@ -47,11 +48,11 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    /** The format version of the last state setStateInformation accepted, or 0 if it has accepted none. */
-    juce::uint32 getLoadedStateVersion() const noexcept { return loadedStateVersion.load(); }
+    /** The formatVersion of the last state setStateInformation accepted, or 0 if it has accepted none. */
+    std::uint32_t getLoadedStateVersion() const noexcept { return loadedStateVersion.load(); }
 
 private:
-    std::atomic<juce::uint32> loadedStateVersion { 0 };
+    std::atomic<std::uint32_t> loadedStateVersion { 0 };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StrandLockProcessor)
 };

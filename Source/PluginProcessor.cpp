@@ -1,7 +1,25 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include "core/Version.h"
+#include "state/Crc32.h"
+
 #include <cstring>
+
+namespace
+{
+    void writeLE16 (std::uint8_t* p, std::uint32_t v) noexcept
+    {
+        p[0] = static_cast<std::uint8_t> (v & 0xffu);
+        p[1] = static_cast<std::uint8_t> ((v >> 8) & 0xffu);
+    }
+
+    void writeLE32 (std::uint8_t* p, std::uint32_t v) noexcept
+    {
+        for (int i = 0; i < 4; ++i)
+            p[i] = static_cast<std::uint8_t> ((v >> (8 * i)) & 0xffu);
+    }
+}
 
 StrandLockProcessor::StrandLockProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true))
@@ -35,27 +53,37 @@ juce::AudioProcessorEditor* StrandLockProcessor::createEditor()
 
 void StrandLockProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    juce::MemoryOutputStream out (destData, false);
-    out.write (strandlock::state::magic, sizeof (strandlock::state::magic));
-    out.writeInt ((int) strandlock::state::currentVersion);   // little-endian
+    // The empty container: the header alone.
+    std::uint8_t header[sl::state::kHeaderSize] {};
+    std::memcpy (header, sl::state::kMagic, sizeof (sl::state::kMagic));
+    writeLE16 (header + 4, static_cast<std::uint32_t> (sl::core::kStateFormatVersion));
+    writeLE16 (header + 6, 0);
+    writeLE32 (header + 8, static_cast<std::uint32_t> (sl::state::kHeaderSize));
+    writeLE32 (header + 12, sl::state::crc32 (header, 12));
+    destData.replaceAll (header, sizeof (header));
 }
 
 void StrandLockProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // Anything that is not a StrandLock state (too short, the wrong magic, version 0) is ignored.
-    if (data == nullptr || sizeInBytes < strandlock::state::headerSize)
+    // Anything that is not a whole, intact StrandLock header is ignored: too short, the wrong magic,
+    // a bad header CRC, version 0 or a newer version, or a length past the end of the data.
+    if (data == nullptr || sizeInBytes < sl::state::kHeaderSize)
         return;
 
-    const auto* bytes = static_cast<const char*> (data);
-    if (std::memcmp (bytes, strandlock::state::magic, sizeof (strandlock::state::magic)) != 0)
+    const auto* bytes = static_cast<const std::uint8_t*> (data);
+    if (std::memcmp (bytes, sl::state::kMagic, sizeof (sl::state::kMagic)) != 0)
+        return;
+    if (juce::ByteOrder::littleEndianInt (bytes + 12) != sl::state::crc32 (bytes, 12))
         return;
 
-    const juce::uint32 version = juce::ByteOrder::littleEndianInt (bytes + 4);
-    if (version == 0)
+    const std::uint32_t version = juce::ByteOrder::littleEndianShort (bytes + 4);
+    const std::uint32_t totalLength = juce::ByteOrder::littleEndianInt (bytes + 8);
+    if (version == 0 || version > static_cast<std::uint32_t> (sl::core::kStateFormatVersion))
+        return;
+    if (totalLength < static_cast<std::uint32_t> (sl::state::kHeaderSize) || totalLength > static_cast<std::uint32_t> (sizeInBytes))
         return;
 
-    // Version 1 holds nothing after the header. A newer version's extra data is left for the build
-    // that understands it.
+    // No chunks are read yet (M0 adds them).
     loadedStateVersion = version;
 }
 

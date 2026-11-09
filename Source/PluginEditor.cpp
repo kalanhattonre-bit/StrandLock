@@ -1,8 +1,10 @@
 #include "PluginEditor.h"
 
+#include "core/Version.h"
+
 #include <cmath>
 
-using strandlock::ui::Theme;
+using sl::ui::Theme;
 
 namespace
 {
@@ -71,5 +73,5 @@ void StrandLockEditor::paint (juce::Graphics& g)
     g.fillRoundedRectangle (area, Theme::corner);
     g.setColour (Theme::textDim);
     g.setFont (Theme::font (15.0f));
-    g.drawText ("StrandLock " STRANDLOCK_VERSION " skeleton", area, juce::Justification::centred, false);
+    g.drawText (juce::String ("StrandLock ") + sl::core::kPluginVersion + " scaffold", area, juce::Justification::centred, false);
 }

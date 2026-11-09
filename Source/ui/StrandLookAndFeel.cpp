@@ -2,7 +2,7 @@
 
 #include <cmath>
 
-namespace strandlock::ui
+namespace sl::ui
 {
     StrandLookAndFeel::StrandLookAndFeel()
     {
