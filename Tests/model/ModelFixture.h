@@ -6,6 +6,7 @@
 
 #include "core/JsonLite.h"
 #include "model/Clip.h"
+#include "model/ClipEdit.h"
 #include "model/Node.h"
 
 #include <cstddef>
@@ -42,6 +43,29 @@ namespace sl::test::modelfx
 
     /** Readable short forms for failure lines. */
     std::string nodesText (const model::NodeList& nodes);
+
+    /** got against want, both model Notes (want usually decoded from a fixture with noteFrom): id, p, s, l,
+        glideTo and every flag, choice and integer exact; vel, glide, gc, the Start's pos and range, every node
+        value and every generator depth, warp, amount and smooth within tol. bitExact is cleared when any value
+        differs at all. */
+    bool notesClose (const model::Note& got, const model::Note& want, double tol, bool& bitExact, std::string& why);
+
+    /** got's notes against a fixture Note list, in order (bars too when the fixture clip has them). */
+    bool clipNotesClose (const std::vector<model::NotePtr>& got, const core::JsonValue& want, double tol, bool& bitExact, std::string& why);
+
+    /** Every bit of two notes the same: the fields of notesClose compared as bit patterns (so -0 differs from
+        0 and a NaN equals the same NaN), plus the extras pointer. The serial is not compared. */
+    bool bitIdentical (const model::Note& a, const model::Note& b, std::string& why);
+
+    /** A fixture's ids argument: null = every note, a string = one id, an array = a list. */
+    model::Ids idsFrom (const core::JsonValue& v);
+
+    /** A JSON array of strings. */
+    std::vector<std::string> stringsFrom (const core::JsonValue& v);
+
+    /** Structural equality of two JSON values: numbers by value (+0 equal to -0), objects by key whatever
+        their order. why names the first difference. */
+    bool jsonSame (const core::JsonValue& a, const core::JsonValue& b, const std::string& path, std::string& why);
 
     /** Counts one fixture file's cases. Every test that reads a fixture file makes one of these, counts each
         case into it, and calls finish (). */

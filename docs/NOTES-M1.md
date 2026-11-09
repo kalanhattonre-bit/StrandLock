@@ -96,3 +96,13 @@ lane readouts, with their fixture tests. Parts 2 and 3 only add functions (and t
 - `instFromJson` drops top-level keys it does not know (normalizeInst keeps them on the object; nothing reads them).
 - The monotone-smooth test also checks the Float32 table: every `sampleNodes` value lies between its two nodes
   rounded to Float32, which follows exactly from the double bound and makes the table side of the rule a gated check.
+
+## M1 part 2
+
+### Progress
+
+- Done: ClipEdit (uniqueId, addNote, removeNotes, updateNotes, duplicateNotes, pasteNotes, copyLanes, pasteLanes),
+  NoteSettings, Tools, Glides, Recipes, Presets, typed and JSON normalizeNote / normalizeClip; tests for tools.json,
+  glides.json, presets.json, normalize.json's clip cases, immutability, mode lock and edit caps.
+- In progress: first CI run of part 2.
+- Next: fix what CI shows, then the hand-off below.

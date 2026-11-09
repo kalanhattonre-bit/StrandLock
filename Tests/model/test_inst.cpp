@@ -1,7 +1,8 @@
 // core::Inst on the model's side (PLUGIN-PLAN 1.2: mergeInst, normalizeInst, instFromJson, instToJson):
 // the instrument cases of model/normalize.json (garbage, non-finite, wrong types, seeds past int32) and the
-// full instruments of model/presets.json, exactly. The clip cases of normalize.json belong to a later part
-// of M1 (normalizeNote, normalizeClip).
+// full instruments of model/presets.json, exactly. The clip cases of normalize.json are in test_normalize.cpp.
+
+#include "ModelFixture.h"
 
 #include "core/Inst.h"
 #include "core/JsCompat.h"
@@ -21,64 +22,7 @@ namespace
     using namespace sl::test;
     using core::JsonValue;
 
-    /** Structural equality of two JSON values: numbers by value (+0 equal to -0), objects by key whatever the order. */
-    bool jsonSame (const JsonValue& a, const JsonValue& b, const std::string& path, std::string& why)
-    {
-        if (a.type() != b.type())
-        {
-            why = path + ": " + core::toJson (a) + " vs " + core::toJson (b);
-            return false;
-        }
-        switch (a.type())
-        {
-            case JsonValue::Type::null:
-                return true;
-            case JsonValue::Type::boolean:
-            case JsonValue::Type::string:
-                if (core::toJson (a) != core::toJson (b))
-                {
-                    why = path + ": " + core::toJson (a) + " vs " + core::toJson (b);
-                    return false;
-                }
-                return true;
-            case JsonValue::Type::number:
-                if (! fixture::same (a.asNumber(), b.asNumber()))
-                {
-                    why = path + ": " + core::toJson (a) + " vs " + core::toJson (b);
-                    return false;
-                }
-                return true;
-            case JsonValue::Type::array:
-                if (a.size() != b.size())
-                {
-                    why = path + ": " + std::to_string (a.size()) + " vs " + std::to_string (b.size()) + " elements";
-                    return false;
-                }
-                for (std::size_t i = 0; i < a.size(); ++i)
-                    if (! jsonSame (a[i], b[i], path + "[" + std::to_string (i) + "]", why))
-                        return false;
-                return true;
-            case JsonValue::Type::object:
-                if (a.size() != b.size())
-                {
-                    why = path + ": " + std::to_string (a.size()) + " vs " + std::to_string (b.size()) + " keys";
-                    return false;
-                }
-                for (std::size_t i = 0; i < a.size(); ++i)
-                {
-                    const JsonValue* other = b.find (a.keyAt (i));
-                    if (other == nullptr)
-                    {
-                        why = path + "." + a.keyAt (i) + " is missing";
-                        return false;
-                    }
-                    if (! jsonSame (a.valueAt (i), *other, path + "." + a.keyAt (i), why))
-                        return false;
-                }
-                return true;
-        }
-        return false;
-    }
+    using test::modelfx::jsonSame;
 }
 
 SL_TEST ("model", instJson)
