@@ -234,7 +234,7 @@ namespace sl::test::modelfx
         /** Compares fields one by one and keeps the first difference. */
         struct FieldCompare
         {
-            double tol;
+            double nodeTol, tol;
             bool& bitExact;
             std::string& why;
             bool ok = true;
@@ -248,9 +248,14 @@ namespace sl::test::modelfx
 
             void number (const std::string& what, double a, double b, bool exactField)
             {
+                numberWithin (what, a, b, exactField ? 0.0 : tol);
+            }
+
+            void numberWithin (const std::string& what, double a, double b, double within)
+            {
                 if (! fixture::same (a, b))
                     bitExact = false;
-                if (! (exactField ? fixture::same (a, b) : fixture::withinAbs (a, b, tol)))
+                if (! fixture::withinAbs (a, b, within))
                     fail (what + " is " + core::jsNumberToString (a) + ", want " + core::jsNumberToString (b));
             }
 
@@ -281,9 +286,9 @@ namespace sl::test::modelfx
                 {
                     const std::string at = what + " node " + std::to_string (i);
                     text (at + " shape", model::code (a[i].shape), model::code (b[i].shape));
-                    number (at + " t", a[i].t, b[i].t, false);
-                    number (at + " v", a[i].v, b[i].v, false);
-                    number (at + " bend", a[i].bend, b[i].bend, false);
+                    numberWithin (at + " t", a[i].t, b[i].t, nodeTol);
+                    numberWithin (at + " v", a[i].v, b[i].v, nodeTol);
+                    numberWithin (at + " bend", a[i].bend, b[i].bend, nodeTol);
                 }
             }
         };
@@ -305,12 +310,12 @@ namespace sl::test::modelfx
         }
     }
 
-    bool notesClose (const model::Note& got, const model::Note& want, double tol, bool& bitExact, std::string& why)
+    bool notesClose (const model::Note& got, const model::Note& want, double nodeTol, double valueTol, bool& bitExact, std::string& why)
     {
         using core::code;
         using model::code;
 
-        FieldCompare f { tol, bitExact, why };
+        FieldCompare f { nodeTol, valueTol, bitExact, why };
         f.text ("id", got.id, want.id);
         f.number ("p", got.p, want.p, true);
         f.number ("s", got.s, want.s, true);
@@ -372,7 +377,8 @@ namespace sl::test::modelfx
         return f.ok;
     }
 
-    bool clipNotesClose (const std::vector<model::NotePtr>& got, const JsonValue& want, double tol, bool& bitExact, std::string& why)
+    bool clipNotesClose (const std::vector<model::NotePtr>& got, const JsonValue& want, double nodeTol, double valueTol, bool& bitExact,
+                         std::string& why)
     {
         if (! want.isArray() || got.size() != want.size())
         {
@@ -388,7 +394,7 @@ namespace sl::test::modelfx
                 why = "fixture note " + std::to_string (i) + ": " + why;
                 return false;
             }
-            if (! notesClose (*got[i], expected, tol, bitExact, why))
+            if (! notesClose (*got[i], expected, nodeTol, valueTol, bitExact, why))
                 return false;
         }
         return true;

@@ -25,6 +25,8 @@ namespace
     using namespace sl::test;
     using core::JsonValue;
 
+    // the file's tolerance: ids, order, links, flags, integers, p, s and l exact, node values within 1e-12; it names no
+    // other value, so vel, glide, gc, the Start position and generator depths are held to the node values' 1e-12
     constexpr double kTol = 1e-12;
 
     std::string labelOf (const JsonValue& c)
@@ -103,7 +105,7 @@ SL_TEST ("model", toolsFixture)
                         made.push_back (n);
                 sharedChecked += static_cast<int> (r.clip->notes.size() - made.size());
 
-                if (res.contains ("notes") && ! modelfx::clipNotesClose (made, res["notes"], kTol, exact, why))
+                if (res.contains ("notes") && ! modelfx::clipNotesClose (made, res["notes"], kTol, kTol, exact, why))
                 {
                     ok = false;
                     why = "new notes: " + why;

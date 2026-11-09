@@ -77,11 +77,11 @@ SL_TEST ("model", editCaps)
         check (! atCap.refused && atCap.count == 1024 && atCap.clip.notes.size() == 1024, "Chop to exactly 1024 notes is done");
     }
     {
-        // a maxNotes above the clip cap still stops at 4096
+        // a maxNotes above the clip cap still stops at 4096 (rates are quarter-note beats: 1/16 = 0.25, 1/32 = 0.125)
         const model::Clip in = clipOf (4090, 1);
-        const auto fits = model::chop (in, model::Ids ("c0"), core::RateId::r1_4, {}, 100000);
-        check (! fits.refused && fits.clip.notes.size() == 4093, "Chop with maxNotes 100000 to 4093 notes is done");
-        const auto over = model::chop (in, firstIds (2), core::RateId::r1_8, {}, 100000);
+        const auto fits = model::chop (in, model::Ids ("c0"), core::RateId::r1_16, {}, 100000);
+        check (! fits.refused && fits.count == 4093 && fits.clip.notes.size() == 4093, "Chop with maxNotes 100000 to 4093 notes is done");
+        const auto over = model::chop (in, firstIds (2), core::RateId::r1_32, {}, 100000);
         check (refusedWith (over, in, 4104), fmt ("Chop with maxNotes 100000 to 4104 notes is refused at the 4096 cap (count %g)", over.count));
     }
     {

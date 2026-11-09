@@ -13,6 +13,7 @@
 #include "support/TestRegistry.h"
 
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -23,7 +24,7 @@ namespace
     using namespace sl::test;
     using core::JsonValue;
 
-    constexpr double kTol = 1e-12;
+    constexpr double kTol = 1e-12;   // node values; everything else exact
 
     /** dice pins as the prototype accepts them: an array of names, or an object of name: true / false. */
     std::vector<std::string> pinsFrom (const JsonValue& v)
@@ -85,7 +86,7 @@ SL_TEST ("model", presetsFixture)
                 ok = false;
                 why = "bars " + std::to_string (clip->bars);
             }
-            else if (! modelfx::clipNotesClose (clip->notes, c["clip"]["notes"], kTol, exact, why))
+            else if (! modelfx::clipNotesClose (clip->notes, c["clip"]["notes"], kTol, 0.0, exact, why))
             {
                 ok = false;
             }
@@ -151,7 +152,7 @@ SL_TEST ("model", presetsFixture)
                     if (input.count (note.get()) == 0)
                         made.push_back (note);
                 }
-                if (! modelfx::clipNotesClose (made, c["result"]["notes"], kTol, exact, why))
+                if (! modelfx::clipNotesClose (made, c["result"]["notes"], kTol, 0.0, exact, why))
                 {
                     ok = false;
                     why = "new notes: " + why;

@@ -54,7 +54,7 @@ SL_TEST ("model", normalizeClips)
         std::string why;
         if (clip.bars != static_cast<int> (want["bars"].asNumber()))
             tally.fail (label + ": bars " + std::to_string (clip.bars) + ", want " + core::toJson (want["bars"]));
-        else if (! modelfx::clipNotesClose (clip.notes, want["notes"], 0.0, exact, why))
+        else if (! modelfx::clipNotesClose (clip.notes, want["notes"], 0.0, 0.0, exact, why))
             tally.fail (label + ": " + why);
         else
             tally.pass (exact);
