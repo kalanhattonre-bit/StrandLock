@@ -606,9 +606,23 @@ namespace sl::params
         switch (p)
         {
             case P::speed:
+            {
                 if (lowerAscii (t) == "stopped")
                     return 0.0;
+                // A speed under 1e-6 prints in exponent form ("1.60e-7x", toPrecision's rule), which parseNum
+                // would read as 1.6: read the whole number back, so the readout reads back as itself.
+                if (t.find_first_of ("eE") != std::string_view::npos)
+                {
+                    std::string_view s = t;
+                    if (! s.empty() && s.front() == '+')
+                        s.remove_prefix (1);
+                    double v = 0.0;
+                    const auto r = std::from_chars (s.data(), s.data() + s.size(), v);
+                    if (r.ec == std::errc() && r.ptr != s.data() && std::isfinite (v))
+                        return v;
+                }
                 return text::parseNum (t);
+            }
             case P::spread:
             case P::spray:
             case P::drift:

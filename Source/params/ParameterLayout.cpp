@@ -65,6 +65,21 @@ namespace sl::params
         if (paramText (index, (double) convertFrom0to1 (n), context) == typed)
             return n;
 
+        // A readout at a step boundary ("1000 ms" is 999.5 to 1000; 1000 itself prints "1 s"): try just inside
+        // the printed step on either side of the number read.
+        const double below = *parsed - std::abs (*parsed) * 1e-9 - 1e-12;
+        for (const double halfStep : { readoutHalfStep (index, *parsed), readoutHalfStep (index, below) })
+        {
+            if (! (halfStep > 0.0) || ! std::isfinite (halfStep))
+                continue;
+            for (const double fraction : { -0.45, 0.45, -0.9, 0.9 })
+            {
+                const float candidate = convertTo0to1 (legalPlain (index, (float) (*parsed + fraction * halfStep)));
+                if (paramText (index, (double) convertFrom0to1 (candidate), context) == typed)
+                    return candidate;
+            }
+        }
+
         // The text is a readout the plain reading does not print back (a coarse or saturating one): take the
         // nearest value that prints exactly this text, so reading a readout and printing it again changes nothing.
         constexpr int steps = 4096;
