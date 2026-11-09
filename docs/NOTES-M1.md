@@ -257,3 +257,43 @@ What part 3 builds: the snapshot compiler, undo (`VersionHistory`), the clip cod
   content with the same extras), the prototype's JSON comparison (which also reads -0 as 0).
 - **The edit caps go through `limitEdit (before, proposed, sizer)`**, which M2's ClipDocument calls on every edit
   with its `ClipSizer` (the running size, each note's size cached by its serial). `EditResult` gained `bytes`.
+
+### Results (CI)
+
+- snapshots.json: 24 of 24 cases bit for bit on Windows and Linux (every field resolved with each case's inst, every
+  table). The fixture clips: 46 clips (441 notes) encode, decode and encode again byte-identical, each decoded clip
+  bit-identical to normalizeClip of its notes; the 115 clips the tools make decode to normalizeClip of themselves.
+- Undo: 1,000 random sequences (about 148,000 steps) held to the prototype's History rules, undo to the start and redo
+  to the end byte-identical; 200 one-note edits on a 1024-note clip hold 5.75 MB (Linux, counting malloc too) and
+  5.76 MB (Windows, operator new) against the 8 MB limit.
+- Compile times at 5cd48d5, before the lane memo (targets 2, 10 and 120 ms): Strand Demo 1.42 ms (Linux) and
+  1.74 ms (Windows); 256 chopped notes 3.45 and 6.02 ms; 1024 four-beat notes 94.7 and 128.1 ms. The Windows figure
+  missed its target (the gate is 5 x); the memo is there for it.
+- The largest editable clip: 4096 notes, 33,554,431 bytes (one under 32 MiB), encodes and decodes bit for bit; one
+  more node (33,554,456 bytes) and one more note are refused with the clip unchanged.
+
+## M1 summary
+
+M1 ported all of sl-model.js to StrandCore (plain C++20, no JUCE) in three parts.
+
+- **Part 1:** the rest of `core/` (Travel, Curves, V8's exp, base 36, JS string order, mergeInst / normalizeInst and
+  the instrument's JSON), the note, clip and node types, the node functions, generators with the frozen seed recipe,
+  shapes and the lane readouts.
+- **Part 2:** every editing tool (Connect, Disconnect, Walk, Chop, Reverse, Flip, More / Less, Select similar,
+  Humanize, Strum, Legato), add / remove / update / duplicate / paste, note settings and the mode lock, glides and
+  chains, recipes and Dice, sound and clip presets, normalizeNote / normalizeClip on typed notes and on JSON.
+- **Part 3:** the snapshot compiler and `core::resolve`, `VersionHistory`, the clip codec with forward compatibility,
+  and the limits table (`limitEdit`, `ClipSizer`).
+
+Every model fixture file is run case by case, and each test fails when its case count differs from the file's:
+seeds.json 3077, nodes.json 80, shapes.json 398, generators.json 218, tools.json 132, glides.json 78, snapshots.json
+24, presets.json 105, format.json 1209, normalize.json 18 (12 clips, 6 instruments). On Windows every case is bit for
+bit. On Linux all are within tolerance; presets.json is 98 of 105 bit for bit and seeds.json 3076 of 3077 (glibc's
+pow, part 2's note).
+
+What M1 leaves for later milestones:
+- M2 wires the codec into the CLIP chunk (M0 keeps it as opaque bytes today), runs the state round trips through the
+  processor, and makes ClipDocument call `limitEdit` with one `ClipSizer` on every edit (plan 3). The
+  SnapshotPublisher keeps a `SnapshotCache` between compiles and should bound a snapshot's memory (see the table cap).
+- Section 3's case (a) (an unknown chunk) and (e) (unreadable blobs) are chunk-level: M0 and M2.
+- Rec and import refusals past the caps (plan 3) belong to M8 and M2.
