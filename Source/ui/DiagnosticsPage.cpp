@@ -17,6 +17,9 @@ namespace sl::ui
         juce::Font titleFont() { return Theme::px (10.5f, true, 0.06f); }
 
         juce::String fixed (double v, int decimals) { return juce::String (v, decimals); }
+
+        // PLUGIN-PLAN 4 M2: the Voice and Cloud grain engines come with M3.
+        constexpr const char* kEnginesNote = "Tape plays now. Notes set to Voice or Cloud play as Tape until the next build (M3).";
         juce::String count (std::uint64_t n) { return juce::String (static_cast<juce::int64> (n)); }
 
         juce::String noteText (int note)
@@ -72,6 +75,7 @@ namespace sl::ui
             const auto& host = processor.getHostInfo();
             c.rows.push_back ({ "StrandLock", juce::String (core::kPluginVersion) + " (probe build)" });
             c.rows.push_back ({ "Host", host.summary() });
+            c.rows.push_back ({ "Engines", juce::String (kEnginesNote) });
             c.rows.push_back ({ "Sample rate", s.sampleRate > 0.0 ? fixed (s.sampleRate, 0) + " Hz" : juce::String ("not playing yet") });
             c.rows.push_back ({ "Block size at start", juce::String (s.preparedBlockSize) + " samples" });
             c.rows.push_back ({ "Display scale", "Windows " + fixed (s.desktopScale * 100.0, 0) + " %, StrandLock UI "
@@ -197,7 +201,7 @@ namespace sl::ui
         {
             Card c { "Drops (checklist 6)", {} };
             if (s.drops.empty())
-                c.rows.push_back ({ "Nothing yet", "drag a sound file onto the StrandLock window" });
+                c.rows.push_back ({ "Nothing yet", "drag a sound file onto the StrandLock window: it loads as the sound" });
             for (std::size_t i = lastN (s.drops, 5); i < s.drops.size(); ++i)
             {
                 const auto& d = s.drops[i];

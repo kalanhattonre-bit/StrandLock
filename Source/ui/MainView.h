@@ -4,7 +4,7 @@
 // what M0 has behind it. From the top: the top bar (logo, wordmark, theme toggle, Keys, the host's tempo, UI
 // Scale), the state banner when there is one, the mode bar (1 Build .. 8 Sample with the four Sample chips),
 // the selection row, the tool tabs and their pane, the roll (a placeholder until M4), the waveform strip with
-// the loaded sound, and the hint bar. The Diagnostics tab takes the pane and the roll's room.
+// the loaded sound (ui/strip/WaveStrip), and the hint bar. The Diagnostics tab takes the pane and the roll's room.
 //
 // The editor scales this component as one piece (the UI Scale) and owns the theme, the Keys switch and the
 // drops; this view only shows them and reports clicks through its callbacks.
@@ -14,6 +14,7 @@
 #include "sounds/StarterSounds.h"
 #include "ui/Controls.h"
 #include "ui/DiagnosticsPage.h"
+#include "ui/strip/WaveStrip.h"
 
 #include <array>
 #include <functional>
@@ -46,48 +47,6 @@ namespace sl::ui
         std::optional<double> playhead;
     };
 
-    /** The waveform strip: the sound column, the file line with At the end, and the loaded sound drawn with
-        the Region band (the Region box, zoom and Browse come with M2). */
-    class StripView final : public juce::Component
-    {
-    public:
-        StripView (const Theme&, StrandLockProcessor&);
-        ~StripView() override;
-
-        /** Redraws when the loaded sound or the Region changed (the editor's timer). */
-        void refresh();
-
-        /** The sound drawn now (for the tests). */
-        const doc::SoundView* shownSound() const noexcept { return sound.get(); }
-        const juce::String& headerText() const noexcept { return header; }
-
-        void paint (juce::Graphics&) override;
-        void resized() override;
-
-        static constexpr int columnWidth = 172, headerHeight = 28;
-
-        /** The wave's opacity over the strip's background (sl-ui.js renderWave: globalAlpha 0.8). */
-        static constexpr float waveAlpha = 0.8f;
-
-    private:
-        void makePeaks();
-        juce::String soundName() const;
-        juce::String soundKind() const;   // " (built-in)", "" for a file, or that the project's file is missing
-
-        const Theme& theme;
-        StrandLockProcessor& processor;
-        std::shared_ptr<const doc::SoundView> sound;
-        std::vector<float> peakMin, peakMax;   // the mid channel's min and max in kPeakBuckets slices
-        float regionStart = 0.0f, regionEnd = 1.0f;
-        int root = 60;
-        juce::String header;
-        juce::Rectangle<int> waveArea;
-
-        juce::ComboBox soundMenu;   // the starter menu, shown but not usable until M2
-        FlatButton browse, presets, zoomOut, zoomIn, showAll;
-        std::unique_ptr<ChoiceBox> atEnd;
-    };
-
     class MainView final : public juce::Component
     {
     public:
@@ -109,7 +68,16 @@ namespace sl::ui
         void tick (const diag::DiagModel::Snapshot&, bool keysOn);
 
         void showDropOverlay (bool show, const juce::String& what = {});
-        void showToast (const juce::String& text);
+
+        /** A short message over the top of the roll for ms milliseconds (sl-ui.js toast: 2.4 s unless it says). */
+        void showToast (const juce::String& text, int ms = 2600);
+        const juce::String& getToastText() const noexcept;
+        bool isToastShown() const noexcept;
+
+        /** The editor's 30 Hz timer (PLUGIN-PLAN 7.4 decision 1): moves every control to its parameter's value
+            where that changed (never one the user is changing). Returns how many moved. */
+        int syncControls();
+        const std::vector<ParamSynced*>& getSyncedControls() const noexcept { return synced; }
 
         // The tool tabs (UIST "tab" names: sample macros note glide copy mods sound diag).
         enum Tab { sampleTab, macrosTab, noteTab, slidesTab, copyTab, modsTab, soundTab, diagTab, numTabs };
@@ -129,7 +97,7 @@ namespace sl::ui
         juce::ComboBox& getUiScaleBox() noexcept { return uiScaleBox; }
         TabStrip& getTabStrip() noexcept { return tabStrip; }
         DiagnosticsPage& getDiagnosticsPage() noexcept { return *diagPage; }
-        StripView& getStrip() noexcept { return strip; }
+        WaveStrip& getStrip() noexcept { return strip; }
         RollPlaceholder& getRoll() noexcept { return roll; }
         FlatButton& getModeButton (int modeNumber) noexcept;
         TabPanel* getTabPanel (int tab) const noexcept;
@@ -183,7 +151,8 @@ namespace sl::ui
         std::unique_ptr<DiagnosticsPage> diagPage;
 
         RollPlaceholder roll;
-        StripView strip;
+        WaveStrip strip;
+        std::vector<ParamSynced*> synced;   // every control bound to a parameter (the panels and the strip)
         std::unique_ptr<ToastView> toast;
 
         int openTabIndex = sampleTab;

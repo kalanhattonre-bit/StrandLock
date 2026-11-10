@@ -74,6 +74,7 @@ namespace sl::doc
         LoadOrigin origin = LoadOrigin::user;
         bool ok = false;        // the sound asked for is the one that plays now
         std::string message;    // what the toast says ("" when nothing needs saying)
+        std::string name;       // the sound asked for: a starter's name, a file's name (the toast's "Loaded ...")
     };
 
     /** A load the user asked for, ready: the sound, and the parameters it sets (parameters.json touchedBy

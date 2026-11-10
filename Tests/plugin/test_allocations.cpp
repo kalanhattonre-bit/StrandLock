@@ -3,7 +3,8 @@
 // --alloc-minutes of audio (10 by default, the Release run; the Debug-CRT run passes 3, and there malloc is
 // counted too). Cubase sends automation and Quick Control moves inside process(), on the audio thread, just
 // before processBlock (JUCE's VST3 wrapper calls setValueNotifyingHost there), so those are counted too. A
-// second run does the same with the editor open, its knobs' attachments listening, from a thread of its own.
+// second run does the same with the editor open, from a thread of its own: from M2 no control listens through
+// JUCE's attachments (PLUGIN-PLAN 7.4 decision 1), so that allocates nothing either.
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -173,8 +174,8 @@ SL_TEST ("alloc", hostChangesWithEditorOpen)
     proc.setPlayConfigDetails (0, 2, rate, block);
     proc.prepareToPlay (rate, block);
 
-    // The editor lives on this thread (the message thread). Its knobs, switches and menus listen to their
-    // parameters through JUCE's ParameterAttachment, which posts a message when a change comes from another thread.
+    // The editor lives on this thread (the message thread). Its controls do not listen to their parameters
+    // (decision 1): the editor's 30 Hz timer reads them, so a change from another thread posts nothing.
     StrandLockEditor editor (proc);
 
     const int totalBlocks = (int) (60.0 * rate / block);
@@ -247,12 +248,13 @@ SL_TEST ("alloc", hostChangesWithEditorOpen)
     check (process.news == 0 && process.deletes == 0,
            fmt ("allocations inside processBlock with the editor open: %lld, frees: %lld", process.news, process.deletes));
 
-    // Each attachment posts at most one message until the message thread handles it, and that thread is
-    // waiting here, so at most one per parameter. What JUCE's message queue allocates for those posts is
-    // reported here and in NOTES-M0; anything per change (our listener, the diagnostics) would pass the bound.
-    note (fmt ("host parameter changes with the editor open: %lld allocations, %lld frees (largest %zu bytes), from JUCE's "
-               "ParameterAttachment posting to the message queue (NOTES-M0)", change.news, change.deletes, change.largest));
-    check (change.news <= sl::params::kNumParams && change.deletes <= sl::params::kNumParams,
-           fmt ("the host's parameter changes allocate nothing per change: %lld allocations and %lld frees for %lld changes "
-                "(at most one each per parameter: JUCE's queue)", change.news, change.deletes, moves));
+    // Decision 1: 0 on every platform (M0 measured 1 allocation of 1088 bytes on Linux and in the Debug CRT run,
+    // from JUCE's ParameterAttachment posting to the message queue).
+    check (change.news == 0 && change.deletes == 0,
+           fmt ("the host's parameter changes with the editor open: %lld allocations and %lld frees for %lld changes (largest %zu bytes)",
+                change.news, change.deletes, moves, change.largest));
+
+    // And the editor's timer shows what the host did, once it runs (this thread is its message thread).
+    const int moved = editor.getView().syncControls();
+    check (moved > 0, fmt ("the next timer tick moves the controls the host changed (%d moved)", moved));
 }

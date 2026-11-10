@@ -496,6 +496,7 @@ namespace sl::diag
 
         lines.add (juce::String ("StrandLock ") + core::kPluginVersion + " diagnostics report");
         lines.add ("Host: " + hostInfo.summary() + (hostInfo.path.isNotEmpty() ? " at " + hostInfo.path : juce::String()));
+        lines.add ("Engines: Tape plays now; notes set to Voice or Cloud play as Tape until the next build (M3)");
         lines.add ("Sample rate: " + fixed (s.sampleRate, 0) + " Hz; block size given at prepare: " + juce::String (s.preparedBlockSize));
         lines.add ("Display scale: Windows " + fixed (s.desktopScale * 100.0, 0) + " %, StrandLock UI " + juce::String (s.uiScalePercent) + " %");
 

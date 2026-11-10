@@ -173,14 +173,14 @@ bool StrandLockEditor::keyPressed (const juce::KeyPress& key)
 }
 
 //==================================================================================================
-// Drops: recorded on the Diagnostics page (checklist step 6); loading the sound comes with M2.
+// Drops: a sound file loads as the sound (sl-ui.js: the first file dropped, rooted at C3); the Diagnostics page
+// records every drop (checklist step 6).
 
 bool StrandLockEditor::isInterestedInFileDrag (const juce::StringArray&) { return true; }
 
-void StrandLockEditor::fileDragEnter (const juce::StringArray& files, int, int)
+void StrandLockEditor::fileDragEnter (const juce::StringArray&, int, int)
 {
-    view.showDropOverlay (true, files.size() == 1 ? juce::String ("Drop it: the Diagnostics page shows what arrived")
-                                                  : juce::String (files.size()) + " files: the Diagnostics page shows what arrived");
+    view.showDropOverlay (true, "Drop a sound file to load it");
 }
 
 void StrandLockEditor::fileDragExit (const juce::StringArray&)
@@ -192,20 +192,15 @@ void StrandLockEditor::filesDropped (const juce::StringArray& files, int, int)
 {
     view.showDropOverlay (false);
     proc.getDiag().filesDropped (files);
-
-    const auto snap = proc.getDiag().snapshot();
-    juce::String message;
-    if (files.size() == 1)
-        message = "Got " + (juce::File::isAbsolutePath (files[0]) ? juce::File (files[0]).getFileName() : files[0]);
-    else
-        message = "Got " + juce::String (files.size()) + " files";
-    if (files.size() == 1 && ! snap.drops.empty() && snap.drops.back().readable)
-        message << " (" << juce::String (snap.drops.back().seconds, 2) << " s)";
-    message << ". Loading sounds arrives in M2.";
-
-    view.openTab (sl::ui::MainView::diagTab);
-    view.showToast (message);
-    view.tick (snap, keysOn);
+    if (! files.isEmpty())
+    {
+        // juce::File asserts on a relative path; a host could drop one, and it cannot be loaded anyway.
+        if (juce::File::isAbsolutePath (files[0]))
+            view.getStrip().loadFile (juce::File (files[0]));
+        else
+            view.showToast ("Could not read that file as sound");
+    }
+    refreshNow();
 }
 
 bool StrandLockEditor::isInterestedInTextDrag (const juce::String&) { return true; }
@@ -245,9 +240,47 @@ void StrandLockEditor::refreshNow()
     proc.getDiag().setDisplayScale (desktopScale(), uiScalePercent);
     const auto snap = proc.getDiag().snapshot();
     view.tick (snap, keysOn);
+    view.syncControls();
+    takeDisplayFrame();
+    showSoundReports();
+}
+
+void StrandLockEditor::showSoundReports()
+{
+    // The loader's results (doc::LoadReport): what went wrong or needs saying, else "Loaded ..." for a sound the
+    // person asked for. A project's or Undo's sound that loaded as it should says nothing.
+    for (const auto& r : proc.takeSoundReports())
+    {
+        juce::String text;
+        if (! r.message.empty())
+            text = juce::String::fromUTF8 (r.message.c_str());
+        else if (r.ok && r.origin == sl::doc::LoadOrigin::user)
+            text = "Loaded " + juce::String::fromUTF8 (r.name.c_str());
+        if (text.isNotEmpty())
+            view.showToast (text, r.ok ? 2600 : 5000);
+    }
+}
+
+void StrandLockEditor::takeDisplayFrame()
+{
+    // The engine's newest frame, when the processor has a display slot (the integration step makes it).
+    if (auto* slot = proc.getDisplaySlot(); slot != nullptr && slot->takeLatest())
+        view.getStrip().setDisplayFrame (&slot->latest());
 }
 
 void StrandLockEditor::timerCallback()
 {
-    refreshNow();
+    // 30 Hz: the controls and the heads; 15 Hz: the rest of the page; 10 Hz: free old versions (plan 1.3).
+    ++ticks;
+    if (ticks % 2 == 0)
+    {
+        refreshNow();
+    }
+    else
+    {
+        view.syncControls();
+        takeDisplayFrame();
+    }
+    if (ticks % 3 == 0)
+        proc.collectVersions();
 }

@@ -9,6 +9,7 @@
 #include "doc/EditHistory.h"
 #include "doc/SampleManager.h"
 #include "doc/SnapshotPublisher.h"
+#include "engine/DisplayFrame.h"
 #include "engine/SampleData.h"
 #include "host/HostInfo.h"
 #include "params/ParamBridge.h"
@@ -112,6 +113,11 @@ public:
     std::optional<std::string> undoLabel() const;
     std::optional<std::string> redoLabel() const;
 
+    /** One undo step called label for an edit the editor made itself, outside editClip (the strip's Region, At
+        the end): the clip and the INST state as they are now, and the values the named parameters have now
+        (plan 2.4: every other parameter keeps the previous step's value). False when nothing changed. */
+    bool pushUndoStep (const std::string& label, const std::vector<sl::params::P>& changed);
+
     sl::state::InstState getInstState() const { return clipDoc.instState(); }
     void setInstState (const sl::state::InstState& s) { clipDoc.setInstState (s); }
 
@@ -156,6 +162,10 @@ public:
 
     /** Frees every snapshot and sample version the audio thread no longer reads (plan 1.3's 10 Hz collect). */
     void collectVersions();
+
+    /** The engine's display frames for the editor (plan 1.5): the waveform strip draws the heads from them. Null
+        until the integration step makes the slot and writes it from the audio path. */
+    sl::engine::DisplaySlot* getDisplaySlot() noexcept { return displaySlot.get(); }
 
     //----------------------------------------------------------------------------------------------
     // Theme, banner, diagnostics.
@@ -210,6 +220,7 @@ private:
     sl::rt::VersionExchange<sl::core::Snapshot> snapshots;
     sl::rt::VersionExchange<sl::engine::SampleData> samples;
     std::unique_ptr<sl::doc::CommandQueue> commands = std::make_unique<sl::doc::CommandQueue>();   // on the heap (6 KB)
+    std::unique_ptr<sl::engine::DisplaySlot> displaySlot;   // the integration step makes it (three 8.5 KB frames: on the heap)
     mutable std::mutex historyLock;
     sl::doc::EditHistory history;
     std::unique_ptr<sl::doc::SnapshotPublisher> publisher;

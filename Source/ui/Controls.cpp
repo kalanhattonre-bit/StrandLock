@@ -1,11 +1,44 @@
 #include "Controls.h"
 
+#include "params/ParameterLayout.h"
+
 #include <cmath>
 
 namespace sl::ui
 {
     namespace
     {
+        /** The slider's range for a parameter, mapping as the parameter's own NormalisableRange does (what JUCE's
+            SliderParameterAttachment builds). */
+        juce::NormalisableRange<double> sliderRange (const juce::RangedAudioParameter& p)
+        {
+            auto range = p.getNormalisableRange();
+            auto from0To1 = [range] (double start, double end, double normalised) mutable
+            {
+                range.start = (float) start;
+                range.end = (float) end;
+                return (double) range.convertFrom0to1 ((float) normalised);
+            };
+            auto to0To1 = [range] (double start, double end, double mapped) mutable
+            {
+                range.start = (float) start;
+                range.end = (float) end;
+                return (double) range.convertTo0to1 ((float) mapped);
+            };
+            auto snap = [range] (double start, double end, double mapped) mutable
+            {
+                range.start = (float) start;
+                range.end = (float) end;
+                return (double) range.snapToLegalValue ((float) mapped);
+            };
+            juce::NormalisableRange<double> out { (double) range.start, (double) range.end,
+                                                  std::move (from0To1), std::move (to0To1), std::move (snap) };
+            out.interval = range.interval;
+            out.skew = range.skew;
+            out.symmetricSkew = range.symmetricSkew;
+            return out;
+        }
+
         // shell.html's button: padding 3px 7px at this window height, font 12px, weight 600, radius 7px.
         constexpr float kPadX = 7.0f;
         constexpr float kChipLeft = 5.0f;
@@ -21,6 +54,67 @@ namespace sl::ui
             p.addRoundedRectangle (r.getX(), r.getY(), r.getWidth(), r.getHeight(), corner, corner,
                                    ! squareLeft, ! squareRight, ! squareLeft, ! squareRight);
             return p;
+        }
+    }
+
+    //==============================================================================================
+    ParamBinding::ParamBinding (juce::RangedAudioParameter& p)
+        : param (p), paramIndex (p.getParameterIndex())
+    {
+    }
+
+    ParamBinding::~ParamBinding()
+    {
+        endGesture();   // a control destroyed in the middle of a drag still closes the host's gesture
+    }
+
+    float ParamBinding::plain() const noexcept
+    {
+        return params::plainValueOf (param);
+    }
+
+    void ParamBinding::beginGesture()
+    {
+        if (gesture)
+            return;
+        gesture = true;
+        param.beginChangeGesture();
+    }
+
+    void ParamBinding::setPlain (float value)
+    {
+        if (paramIndex < 0)
+            return;
+        if (! juce::exactlyEqual (params::legalPlain (paramIndex, value), plain()))
+            params::setPlainValue (param, paramIndex, value);
+    }
+
+    void ParamBinding::endGesture()
+    {
+        if (! gesture)
+            return;
+        gesture = false;
+        param.endChangeGesture();
+    }
+
+    void ParamBinding::setAsCompleteGesture (float value)
+    {
+        if (paramIndex < 0 || juce::exactlyEqual (params::legalPlain (paramIndex, value), plain()))
+            return;
+        const bool wasOpen = gesture;
+        beginGesture();
+        params::setPlainValue (param, paramIndex, value);
+        if (! wasOpen)
+            endGesture();
+    }
+
+    void collectSynced (juce::Component& parent, std::vector<ParamSynced*>& out)
+    {
+        for (auto* child : parent.getChildren())
+        {
+            if (auto* synced = dynamic_cast<ParamSynced*> (child))
+                out.push_back (synced);
+            collectSynced (*child, out);
         }
     }
 
@@ -74,18 +168,52 @@ namespace sl::ui
     //==============================================================================================
     Knob::Knob (const Theme& t, juce::AudioProcessorValueTreeState& state, const juce::String& parameterId,
                 const juce::String& displayName, Tok colour, bool bipolar)
-        : theme (t), parameter (*state.getParameter (parameterId)), name (displayName)
+        : theme (t), binding (*state.getParameter (parameterId)), name (displayName)
     {
+        auto* p = &binding.parameter();
+        slider.valueFromTextFunction = [p] (const juce::String& text) { return (double) p->convertFrom0to1 (p->getValueForText (text)); };
+        slider.textFromValueFunction = [p] (double value) { return p->getText (p->convertTo0to1 ((float) value), 0); };
+        slider.setNormalisableRange (sliderRange (*p));
+        slider.setDoubleClickReturnValue (true, (double) p->convertFrom0to1 (p->getDefaultValue()));
+
         slider.getProperties().set ("bipolar", bipolar);
         slider.getProperties().set ("tok", static_cast<int> (colour));
         slider.onHoverChange = [this] { repaint(); };
-        slider.onValueChange = [this] { repaint(); };
-        slider.onDragStart = [this] { repaint(); };
-        slider.onDragEnd = [this] { repaint(); };
+        // A drag, a wheel step and a double-click each come inside the slider's drag notification: one host gesture.
+        slider.onDragStart = [this] { binding.beginGesture(); repaint(); };
+        slider.onValueChange = [this]
+        {
+            if (! syncing)
+                write();
+            repaint();
+        };
+        slider.onDragEnd = [this] { binding.endGesture(); repaint(); };
         slider.setTitle (displayName);
         addAndMakeVisible (slider);
 
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (state, parameterId, slider);
+        syncToParameter();
+    }
+
+    void Knob::write()
+    {
+        const float v = (float) slider.getValue();
+        if (binding.inGesture())
+            binding.setPlain (v);
+        else
+            binding.setAsCompleteGesture (v);   // a value set from code, outside any drag
+    }
+
+    bool Knob::syncToParameter()
+    {
+        if (binding.inGesture() || slider.isMouseButtonDown())
+            return false;
+        const float v = binding.plain();
+        if (juce::exactlyEqual ((float) slider.getValue(), v))
+            return false;
+        const juce::ScopedValueSetter<bool> hold (syncing, true);
+        slider.setValue ((double) v, juce::dontSendNotification);
+        repaint();
+        return true;
     }
 
     int Knob::preferredWidth() const
@@ -319,18 +447,47 @@ namespace sl::ui
 
     //==============================================================================================
     ParamToggle::ParamToggle (const Theme& t, juce::AudioProcessorValueTreeState& state, const juce::String& parameterId, const juce::String& buttonText)
-        : FlatButton (t, buttonText)
+        : FlatButton (t, buttonText), binding (*state.getParameter (parameterId))
     {
         setClickingTogglesState (true);
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, parameterId, *this);
+        syncToParameter();
+    }
+
+    void ParamToggle::clicked()
+    {
+        // The button has already toggled itself (clickingTogglesState): the parameter follows, as one gesture.
+        binding.setAsCompleteGesture (getToggleState() ? 1.0f : 0.0f);
+    }
+
+    bool ParamToggle::syncToParameter()
+    {
+        const bool on = binding.plain() >= 0.5f;
+        if (binding.inGesture() || on == getToggleState())
+            return false;
+        setToggleState (on, juce::dontSendNotification);
+        return true;
     }
 
     //==============================================================================================
     PillToggle::PillToggle (const Theme& t, juce::AudioProcessorValueTreeState& state, const juce::String& parameterId, const juce::String& caption)
-        : juce::Button (caption), theme (t)
+        : juce::Button (caption), theme (t), binding (*state.getParameter (parameterId))
     {
         setClickingTogglesState (true);
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (state, parameterId, *this);
+        syncToParameter();
+    }
+
+    void PillToggle::clicked()
+    {
+        binding.setAsCompleteGesture (getToggleState() ? 1.0f : 0.0f);
+    }
+
+    bool PillToggle::syncToParameter()
+    {
+        const bool on = binding.plain() >= 0.5f;
+        if (binding.inGesture() || on == getToggleState())
+            return false;
+        setToggleState (on, juce::dontSendNotification);
+        return true;
     }
 
     void PillToggle::paintButton (juce::Graphics& g, bool isMouseOver, bool)
@@ -368,14 +525,29 @@ namespace sl::ui
         : theme (t),
           labels (segmentLabels),
           caption (captionText),
-          attachment (parameter, [this] (float value)
-                      {
-                          selected = juce::roundToInt (value);
-                          repaint();
-                      })
+          binding (parameter)
     {
         setTitle (captionText);
-        attachment.sendInitialUpdate();
+        selected = juce::roundToInt (binding.plain());
+    }
+
+    bool SegmentedControl::syncToParameter()
+    {
+        const int now = juce::roundToInt (binding.plain());
+        if (now == selected)
+            return false;
+        selected = now;
+        repaint();
+        return true;
+    }
+
+    void SegmentedControl::choose (int index)
+    {
+        if (index < 0 || index >= labels.size() || index == selected)
+            return;
+        selected = index;
+        binding.setAsCompleteGesture ((float) index);
+        repaint();
     }
 
     float SegmentedControl::captionWidth() const
@@ -458,9 +630,7 @@ namespace sl::ui
 
     void SegmentedControl::mouseDown (const juce::MouseEvent& e)
     {
-        const int index = segmentAt (e.position);
-        if (index >= 0 && index != selected)
-            attachment.setValueAsCompleteGesture ((float) index);
+        choose (segmentAt (e.position));
     }
 
     void SegmentedControl::mouseMove (const juce::MouseEvent& e)
@@ -482,13 +652,33 @@ namespace sl::ui
     //==============================================================================================
     ChoiceBox::ChoiceBox (const Theme& t, juce::AudioProcessorValueTreeState& state, const juce::String& parameterId,
                           const juce::String& captionText, int width)
-        : theme (t), caption (captionText), boxWidth (width)
+        : theme (t), caption (captionText), boxWidth (width), binding (*state.getParameter (parameterId))
     {
-        if (auto* choices = dynamic_cast<juce::AudioParameterChoice*> (state.getParameter (parameterId)))
+        if (auto* choices = dynamic_cast<juce::AudioParameterChoice*> (&binding.parameter()))
             box.addItemList (choices->choices, 1);
         box.setTitle (captionText);
+        box.onChange = [this]
+        {
+            const int index = box.getSelectedItemIndex();
+            if (syncing || index < 0 || index == juce::roundToInt (binding.plain()))
+                return;
+            binding.setAsCompleteGesture ((float) index);
+            if (onUserChange)
+                onUserChange();
+        };
         addAndMakeVisible (box);
-        attachment = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (state, parameterId, box);
+        syncToParameter();
+    }
+
+    bool ChoiceBox::syncToParameter()
+    {
+        // Not while its menu is open: the person is choosing.
+        const int now = juce::roundToInt (binding.plain());
+        if (box.isPopupActive() || now == box.getSelectedItemIndex())
+            return false;
+        const juce::ScopedValueSetter<bool> hold (syncing, true);
+        box.setSelectedItemIndex (now, juce::dontSendNotification);
+        return true;
     }
 
     float ChoiceBox::captionWidth() const

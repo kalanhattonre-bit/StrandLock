@@ -336,7 +336,7 @@ SL_TEST ("ui", editorLayout)
     check (loaded != nullptr && view.getStrip().shownSound() == loaded.get() && view.getStrip().headerText().startsWith ("Saw that opens up"),
            fmt ("the strip shows the loaded sound (\"%s\")", view.getStrip().headerText().toRawUTF8()));
     // The prototype draws the wave at 80 % over the strip's background (sl-ui.js renderWave: globalAlpha 0.8).
-    const auto blended = dark[Tok::stripBg].interpolatedWith (dark[Tok::wave], ui::StripView::waveAlpha);
+    const auto blended = dark[Tok::stripBg].interpolatedWith (dark[Tok::wave], ui::WaveStrip::waveAlpha);
     const int wavePixels = countNear (image, strip, blended, 3);
     const int fullWave = countNear (image, strip, dark[Tok::wave], 3);
     check (wavePixels > 3000 && fullWave < 100,
@@ -431,7 +431,8 @@ SL_TEST ("ui", editorTabsBoundToParameters)
            fmt ("the 15 bipolar knobs (8 macros, 5 offsets, Pitch, Cents) have their default at twelve o'clock (%d bipolar; off centre: %s)",
                 bipolar, offCentre.isEmpty() ? "none" : offCentre.toRawUTF8()));
 
-    // A knob shows the parameter's own readout.
+    // A knob shows the parameter's own readout (once the editor's timer has moved the knobs back to their defaults).
+    view.syncControls();
     auto* speedKnob = sample->getKnobs().empty() ? nullptr : sample->getKnobs().front();
     check (speedKnob != nullptr && speedKnob->getParameter().getParameterID() == "speed"
                && speedKnob->getSlider().getTextFromValue (speedKnob->getSlider().getValue()) == "1x",
@@ -509,7 +510,7 @@ SL_TEST ("ui", editorKeysSwitch)
 
 SL_TEST ("ui", editorDropsAndDiagnostics)
 {
-    section ("Editor: drops anywhere are recorded with the file's length; the Diagnostics page is live; Copy report");
+    section ("Editor: drops anywhere load the sound and are recorded with the file's length; the Diagnostics page is live; Copy report");
 
     StrandLockProcessor proc;
     resetUserSettings (proc);
@@ -552,8 +553,16 @@ SL_TEST ("ui", editorDropsAndDiagnostics)
                        s.drops.empty() ? 0.0 : s.drops[0].seconds));
     check (s.drops.size() == 3 && ! s.drops[1].readable && s.drops[1].bytes > 0 && ! s.drops[2].readable && s.drops[2].bytes < 0,
            "the text file is not a sound; the missing file is not found");
-    check (view.getOpenTab() == MainView::diagTab && ! view.isFolded(), "a drop opens the Diagnostics page");
+    // From M2 the first file dropped loads as the sound (sl-ui.js), rooted at C3; the page still records the drop.
+    proc.waitForSounds();
+    editor.refreshNow();
+    const auto loaded = proc.getCurrentSound();
+    check (loaded != nullptr && ! loaded->builtIn && loaded->name == wavFile.getFileName().toStdString()
+               && view.getToastText() == "Loaded " + wavFile.getFileName(),
+           fmt ("the dropped WAV is the sound now (toast \"%s\")", view.getToastText().toRawUTF8()));
 
+    view.openTab (MainView::diagTab);
+    editor.refreshNow();
     const auto shown = page.shownText().joinIntoString ("\n");
     check (shown.contains (wavFile.getFileName()) && shown.contains ("24000 frames, 0.500 s at 48000 Hz, 2 channels"),
            "the page shows the file's name and length");

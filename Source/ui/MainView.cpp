@@ -18,9 +18,8 @@ namespace sl::ui
     {
         constexpr int kSideMargin = 12, kTopMargin = 8;
         constexpr int kTopBarHeight = 40, kBannerHeight = 28, kSelRowHeight = 36, kTabsHeight = 30;
-        constexpr int kStripHeight = 104, kHintHeight = 30;
+        constexpr int kHintHeight = 30;
         constexpr int kBarPadX = 8, kItemHeight = 26, kGap = 5, kModeGap = 4;
-        constexpr int kPeakBuckets = 2048;
 
         const char* const kTabNames[] = { "Sample", "Macros", "Note settings", "Slides", "Copy / Paste", "Mod wheels", "Sound", "Diagnostics" };
         const char* const kTabIds[] = { "sample", "macros", "note", "glide", "copy", "mods", "sound", "diag" };
@@ -147,12 +146,12 @@ namespace sl::ui
     public:
         explicit ToastView (const Theme& t) : theme (t) { setInterceptsMouseClicks (false, false); }
 
-        void show (const juce::String& message)
+        void show (const juce::String& message, int ms)
         {
             text = message;
             setVisible (true);
             repaint();
-            startTimer (2600);
+            startTimer (juce::jmax (500, ms));
         }
 
         int preferredWidth() const { return (int) std::ceil (Theme::textWidth (Theme::px (12.0f), text)) + 26; }
@@ -165,7 +164,7 @@ namespace sl::ui
             g.fillRoundedRectangle (r, 8.0f);
             g.setColour (theme (Tok::toastTxt));
             g.setFont (Theme::px (12.0f));
-            g.drawFittedText (text, getLocalBounds().reduced (12, 4), juce::Justification::centred, 2, 0.9f);
+            g.drawFittedText (text, getLocalBounds().reduced (12, 4), juce::Justification::centred, 3, 0.9f);
         }
 
     private:
@@ -286,204 +285,6 @@ namespace sl::ui
     }
 
     //==============================================================================================
-    StripView::StripView (const Theme& t, StrandLockProcessor& p)
-        : theme (t),
-          processor (p),
-          browse (t, "Browse...", FlatButton::Icon::folder),
-          presets (t, "Sound presets", FlatButton::Icon::notes),
-          zoomOut (t, "-"),
-          zoomIn (t, "+"),
-          showAll (t, "Show all")
-    {
-        for (int i = 0; i < sounds::kNumStarters; ++i)
-            soundMenu.addItem (sounds::kStarterList[i].name, i + 1);
-        soundMenu.setEnabled (false);
-        soundMenu.setTooltip ("The starter sound menu arrives in M2");
-        addAndMakeVisible (soundMenu);
-
-        for (auto* b : { &browse, &presets, &zoomOut, &zoomIn, &showAll })
-        {
-            b->setEnabled (false);
-            addAndMakeVisible (*b);
-        }
-        browse.setTooltip ("Loading your own sound files arrives in M2");
-        presets.setTooltip ("Sound presets arrive in M8");
-
-        atEnd = std::make_unique<ChoiceBox> (t, processor.getApvts(), params::kParams[params::index (params::P::atEnd)].id, "At the end", 74);
-        addAndMakeVisible (*atEnd);
-        refresh();
-    }
-
-    StripView::~StripView() = default;
-
-    void StripView::makePeaks()
-    {
-        peakMin.assign ((std::size_t) kPeakBuckets, 0.0f);
-        peakMax.assign ((std::size_t) kPeakBuckets, 0.0f);
-        if (sound == nullptr || sound->frames <= 0 || sound->left == nullptr)
-            return;
-
-        const auto n = (std::size_t) sound->frames;
-        const float* L = sound->left;
-        const float* R = sound->right != nullptr ? sound->right : sound->left;
-        for (std::size_t b = 0; b < (std::size_t) kPeakBuckets; ++b)
-        {
-            const std::size_t from = b * n / (std::size_t) kPeakBuckets;
-            const std::size_t to = juce::jmax (from + 1, (b + 1) * n / (std::size_t) kPeakBuckets);
-            float lo = 1.0f, hi = -1.0f;
-            for (std::size_t i = from; i < to && i < n; ++i)
-            {
-                const float mid = 0.5f * (L[i] + R[i]);
-                lo = juce::jmin (lo, mid);
-                hi = juce::jmax (hi, mid);
-            }
-            peakMin[b] = lo;
-            peakMax[b] = hi;
-        }
-    }
-
-    juce::String StripView::soundName() const
-    {
-        return sound != nullptr ? juce::String::fromUTF8 (sound->name.c_str()) : juce::String (sounds::starterInfo (sounds::kDefaultStarter).name);
-    }
-
-    juce::String StripView::soundKind() const
-    {
-        if (sound == nullptr || sound->missing)
-            return sound != nullptr ? " (the project's sound file is missing)" : " (built-in)";
-        return sound->builtIn ? " (built-in)" : "";
-    }
-
-    void StripView::refresh()
-    {
-        auto now = processor.getCurrentSound();
-        const auto& apvts = processor.getApvts();
-        const float start = apvts.getRawParameterValue (params::kParams[params::index (params::P::regionStart)].id)->load();
-        const float end = apvts.getRawParameterValue (params::kParams[params::index (params::P::regionEnd)].id)->load();
-        const int rootNow = juce::roundToInt (apvts.getRawParameterValue (params::kParams[params::index (params::P::rootNote)].id)->load());
-
-        const bool newSound = now != sound;
-        if (! newSound && juce::exactlyEqual (start, regionStart) && juce::exactlyEqual (end, regionEnd) && rootNow == root)
-            return;
-
-        if (newSound)
-        {
-            sound = std::move (now);
-            makePeaks();
-        }
-        regionStart = start;
-        regionEnd = end;
-        root = rootNow;
-
-        const auto starter = sound != nullptr && sound->builtIn ? sound->starter : sounds::kDefaultStarter;
-        for (int i = 0; i < sounds::kNumStarters; ++i)
-            if (sounds::kStarterList[i].id == starter)
-                soundMenu.setSelectedId (i + 1, juce::dontSendNotification);
-        header = soundName() + " - " + juce::String (sound != nullptr ? sound->seconds() : 0.0, 2) + " s - root "
-                 + juce::String (core::noteName (root)) + soundKind();
-        repaint();
-    }
-
-    void StripView::resized()
-    {
-        auto r = getLocalBounds();
-        auto column = r.removeFromLeft (columnWidth).reduced (8, 6);
-        const int h = juce::jmin (kItemHeight, (column.getHeight() - 8) / 3);
-        soundMenu.setBounds (column.removeFromTop (h));
-        column.removeFromTop (4);
-        browse.setBounds (column.removeFromTop (h));
-        column.removeFromTop (4);
-        presets.setBounds (column.removeFromTop (h));
-
-        auto head = r.removeFromTop (headerHeight).reduced (8, 2);
-        const int sa = showAll.preferredWidth();
-        showAll.setBounds (head.removeFromRight (sa).withSizeKeepingCentre (sa, 22));
-        head.removeFromRight (4);
-        zoomIn.setBounds (head.removeFromRight (24).withSizeKeepingCentre (24, 22));
-        head.removeFromRight (4);
-        zoomOut.setBounds (head.removeFromRight (24).withSizeKeepingCentre (24, 22));
-        head.removeFromRight (8);
-        const int aw = atEnd->preferredWidth();
-        atEnd->setBounds (head.removeFromRight (aw).withSizeKeepingCentre (aw, 22));
-        waveArea = r;
-    }
-
-    void StripView::paint (juce::Graphics& g)
-    {
-        g.setColour (theme (Tok::panel));
-        g.fillAll();
-        g.setColour (theme (Tok::line));
-        g.fillRect (columnWidth - 1, 0, 1, getHeight());
-        g.fillRect (0, 0, getWidth(), 1);   // the line under the roll
-
-        // The file line: the name in bold, then the length and the root.
-        {
-            auto line = juce::Rectangle<int> (columnWidth + 8, 0, juce::jmax (0, atEnd->getX() - columnWidth - 16), headerHeight);
-            const auto bold = Theme::px (11.5f, true);
-            const juce::String name = soundName();
-            const int nameWidth = juce::jmin (line.getWidth(), (int) std::ceil (Theme::textWidth (bold, name)) + 1);
-            g.setColour (theme (Tok::txt));
-            g.setFont (bold);
-            g.drawText (name, line.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
-            g.setColour (theme (Tok::dim));
-            g.setFont (Theme::px (11.5f));
-            g.drawText (" - " + juce::String (sound != nullptr ? sound->seconds() : 0.0, 2) + " s - root " + juce::String (core::noteName (root)) + soundKind(),
-                        line, juce::Justification::centredLeft, true);
-        }
-
-        if (waveArea.isEmpty())
-            return;
-
-        // The waveform on its own background, with the Region band along the top and its edges.
-        const auto wave = waveArea.toFloat();
-        g.setColour (theme (Tok::stripBg));
-        g.fillRect (wave);
-
-        const float band = 12.0f;
-        const auto body = wave.withTrimmedTop (band);
-        const float mid = body.getCentreY();
-        const float amp = body.getHeight() * 0.5f - 2.0f;
-        if (! peakMin.empty())
-        {
-            juce::RectangleList<float> columns;
-            const int width = juce::jmax (1, (int) body.getWidth());
-            for (int x = 0; x < width; ++x)
-            {
-                const int b0 = x * kPeakBuckets / width;
-                const int b1 = juce::jmax (b0 + 1, (x + 1) * kPeakBuckets / width);
-                float lo = 1.0f, hi = -1.0f;
-                for (int b = b0; b < b1 && b < kPeakBuckets; ++b)
-                {
-                    lo = juce::jmin (lo, peakMin[(std::size_t) b]);
-                    hi = juce::jmax (hi, peakMax[(std::size_t) b]);
-                }
-                if (hi < lo)
-                    continue;
-                const float top = mid - hi * amp, bottom = mid - lo * amp;
-                columns.addWithoutMerging ({ body.getX() + (float) x, top, 1.0f, juce::jmax (1.0f, bottom - top) });
-            }
-            g.setColour (theme (Tok::wave).withMultipliedAlpha (waveAlpha));
-            g.fillRectList (columns);
-        }
-
-        const float x0 = wave.getX() + wave.getWidth() * juce::jlimit (0.0f, 1.0f, regionStart);
-        const float x1 = wave.getX() + wave.getWidth() * juce::jlimit (0.0f, 1.0f, regionEnd);
-        const float left = juce::jmin (x0, x1), right = juce::jmax (x0, x1);
-        g.setColour (theme (Tok::stripShade));
-        g.fillRect (juce::Rectangle<float> (wave.getX(), body.getY(), left - wave.getX(), body.getHeight()));
-        g.fillRect (juce::Rectangle<float> (right, body.getY(), wave.getRight() - right, body.getHeight()));
-
-        g.setColour (theme (Tok::regionBand));
-        g.fillRect (juce::Rectangle<float> (left, wave.getY(), juce::jmax (1.0f, right - left), band));
-        g.setColour (theme (Tok::txt));
-        g.setFont (Theme::px (9.0f, true, 0.06f));
-        g.drawText ("REGION", juce::Rectangle<float> (left + 4.0f, wave.getY(), 60.0f, band), juce::Justification::centredLeft, false);
-        g.setColour (theme (Tok::regionEdge));
-        g.fillRect (juce::Rectangle<float> (left, wave.getY(), 2.0f, wave.getHeight()));
-        g.fillRect (juce::Rectangle<float> (right - 2.0f, wave.getY(), 2.0f, wave.getHeight()));
-    }
-
-    //==============================================================================================
     MainView::MainView (const Theme& t, StrandLockProcessor& p)
         : theme (t),
           processor (p),
@@ -567,8 +368,12 @@ namespace sl::ui
 
         addAndMakeVisible (roll);
         addAndMakeVisible (strip);
+        strip.onToast = [this] (const juce::String& text, int ms) { showToast (text, ms); };
         toast = std::make_unique<ToastView> (t);
         addChildComponent (*toast);
+
+        // Every control bound to a parameter, for the 30 Hz timer (decision 1). The tree never changes after this.
+        collectSynced (*this, synced);
 
         // Where the person left the page (UIST).
         const auto ui = processor.getUiState();
@@ -784,13 +589,35 @@ namespace sl::ui
         }
     }
 
-    void MainView::showToast (const juce::String& text)
+    void MainView::showToast (const juce::String& text, int ms)
     {
-        toast->show (text);
-        const int w = juce::jmin (toast->preferredWidth(), juce::jmax (100, card.getWidth() - 40));
+        toast->show (text, ms);
+        // One line when it fits the card, else up to three lines (a missing file's toast names its whole path).
+        const int most = juce::jmax (100, juce::jmin (640, card.getWidth() - 40));
+        const int want = toast->preferredWidth();
+        const int lines = want <= most ? 1 : juce::jmin (3, (want + most - 1) / most);
+        const int w = juce::jmin (want, most);
         const int top = (roll.isVisible() ? roll.getY() : paneArea.getY()) + 10;
-        toast->setBounds (card.getCentreX() - w / 2, top, w, 30);
+        toast->setBounds (card.getCentreX() - w / 2, top, w, 14 + 16 * lines);
         toast->toFront (false);
+    }
+
+    const juce::String& MainView::getToastText() const noexcept
+    {
+        return toast->getText();
+    }
+
+    bool MainView::isToastShown() const noexcept
+    {
+        return toast->isVisible();
+    }
+
+    int MainView::syncControls()
+    {
+        int moved = 0;
+        for (auto* c : synced)
+            moved += c->syncToParameter() ? 1 : 0;
+        return moved;
     }
 
     void MainView::layoutPane()
@@ -892,7 +719,7 @@ namespace sl::ui
         foldButton->setBounds (tabsArea.getRight() - 64, tabsArea.getY() + 4, 56, kTabsHeight - 8);
 
         hintArea = area.removeFromBottom (kHintHeight);
-        strip.setBounds (area.removeFromBottom (kStripHeight));
+        strip.setBounds (area.removeFromBottom (WaveStrip::heightFor (getHeight())));
 
         // What is left holds the pane and the roll, or the Diagnostics page.
         const bool diag = openTabIndex == diagTab && ! folded;

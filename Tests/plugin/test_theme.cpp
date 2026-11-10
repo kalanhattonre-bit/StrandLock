@@ -1,6 +1,8 @@
 // The theme (PLUGIN-PLAN 4 M0, "theme"): both palettes hold every one of the 77 tokens of
 // Tests/fixtures/ui/theme.json with the same values, the accents are the plan's, and the lane lines and the
-// playhead keep at least 2.5:1 contrast against the roll in both themes.
+// playhead keep at least 2.5:1 contrast against the roll in both themes. From M2 (7.4 decision 2) three light
+// tokens are StrandLock's own: the Tone and Sample lane colours and the playhead, darkened in the prototype's
+// hue to at least 3:1 against the roll; the test checks those for that instead of equality.
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -23,11 +25,36 @@ namespace
     using ui::ThemeId;
 
     const char* themeName (ThemeId id) { return id == ThemeId::light ? "light" : "dark"; }
+
+    bool isDarkenedLight (const std::string& name)
+    {
+        for (const Tok t : ui::kDarkenedLight)
+            if (name == ui::kTokens[static_cast<std::size_t> (t)].name)
+                return true;
+        return false;
+    }
+
+    /** The colour of a theme's token in ui/theme.json (the prototype's own value). */
+    juce::Colour fixtureColour (const core::JsonValue& doc, bool light, Tok t)
+    {
+        const auto& cases = doc["cases"];
+        for (std::size_t c = 0; c < cases.size(); ++c)
+            if ((cases[c]["theme"].asString() == "light") == light)
+                if (const auto* v = cases[c]["tokens"].find (ui::kTokens[static_cast<std::size_t> (t)].name))
+                    return ui::parseCss (v->asString().c_str()).colour;
+        return juce::Colours::transparentBlack;
+    }
+
+    /** The hue in degrees (0..360) of an sRGB colour. */
+    double hueOf (juce::Colour c)
+    {
+        return (double) c.getHue() * 360.0;
+    }
 }
 
 SL_TEST ("theme", themeTokensMatchFixture)
 {
-    section ("Theme: both palettes define all 77 tokens of ui/theme.json with identical values");
+    section ("Theme: both palettes define all 77 tokens of ui/theme.json with identical values, but for the three light tokens of decision 2");
 
     core::JsonValue doc;
     if (! fixture::load ("ui/theme.json", doc))
@@ -50,8 +77,9 @@ SL_TEST ("theme", themeTokensMatchFixture)
         check ((int) tokens.size() == 77 && (int) themeCase["count"].asNumber() == 77,
                fmt ("%s: the fixture lists 77 tokens (%d)", light ? "light" : "dark", (int) tokens.size()));
 
-        // Every fixture token is ours with the same text, in the same order, and we have no others.
-        int missing = 0, different = 0, outOfOrder = 0;
+        // Every fixture token is ours with the same text, in the same order, and we have no others; the three
+        // darkened light tokens (decision 2) are checked in themeLaneContrast instead, and must differ here.
+        int missing = 0, different = 0, outOfOrder = 0, darkenedSame = 0;
         std::string firstProblem;
         for (std::size_t i = 0; i < tokens.size(); ++i)
         {
@@ -69,7 +97,11 @@ SL_TEST ("theme", themeTokensMatchFixture)
                 continue;
             }
             const std::string have = light ? ours->light : ours->dark;
-            if (have != want)
+            if (light && isDarkenedLight (name))
+            {
+                darkenedSame += have == want ? 1 : 0;
+            }
+            else if (have != want)
             {
                 ++different;
                 if (firstProblem.empty())
@@ -82,10 +114,14 @@ SL_TEST ("theme", themeTokensMatchFixture)
         for (const auto& t : ui::kTokens)
             if (tokens.find (t.name) == nullptr)
                 ++extra;
+        const int equalWanted = light ? 77 - (int) ui::kDarkenedLight.size() : 77;
         check (missing == 0 && different == 0 && extra == 0 && outOfOrder == 0,
-               fmt ("%s: all 77 tokens equal the fixture (%d missing, %d different, %d extra, %d out of order)%s%s",
-                    light ? "light" : "dark", missing, different, extra, outOfOrder,
+               fmt ("%s: %d tokens equal the fixture (%d missing, %d different, %d extra, %d out of order)%s%s",
+                    light ? "light" : "dark", equalWanted, missing, different, extra, outOfOrder,
                     firstProblem.empty() ? "" : "; first: ", firstProblem.c_str()));
+        if (light)
+            check (darkenedSame == 0, fmt ("light: the %d darkened tokens are StrandLock's own, not the prototype's (%d still equal)",
+                                           (int) ui::kDarkenedLight.size(), darkenedSame));
     }
 
     // Every value reads as a colour, except the four opacities, which read as numbers.
@@ -169,11 +205,33 @@ SL_TEST ("theme", themeLaneContrast)
         check (head >= 2.5, fmt ("%s: the playhead is %.2f against the roll", themeName (id), head));
     }
 
-    // The figures the plan quotes for the v4 palette: lanes 2.77 to 11.86, the playhead 2.61 on white.
+    // The figures the plan quotes for the v4 palette (the prototype's, in ui/theme.json): lanes 2.77 to 11.86,
+    // the playhead 2.61 on white.
+    core::JsonValue doc;
+    if (! fixture::load ("ui/theme.json", doc))
+        return;
     const auto& light = ui::palette (ThemeId::light);
     const auto& dark = ui::palette (ThemeId::dark);
-    check (std::abs (ui::contrastRatio (light[Tok::laneTone], light[Tok::roll]) - 2.77) < 0.005
+    const auto protoTone = fixtureColour (doc, true, Tok::laneTone);
+    const auto protoHead = fixtureColour (doc, true, Tok::playhead);
+    check (std::abs (ui::contrastRatio (protoTone, light[Tok::roll]) - 2.77) < 0.005
                && std::abs (ui::contrastRatio (dark[Tok::lanePitch], dark[Tok::roll]) - 11.86) < 0.005
-               && std::abs (ui::contrastRatio (light[Tok::playhead], light[Tok::roll]) - 2.61) < 0.005,
-           "the plan's figures: light Tone 2.77, dark Pitch 11.86, light playhead 2.61");
+               && std::abs (ui::contrastRatio (protoHead, light[Tok::roll]) - 2.61) < 0.005,
+           "the plan's figures for the prototype's palette: light Tone 2.77, dark Pitch 11.86, light playhead 2.61");
+
+    // Decision 2 (Kalan's answer 9.1): in the light theme the Tone and Sample lane colours and the playhead are
+    // darkened, in the same hue, to at least 3:1 against the roll; the prototype's were 2.6 to 2.9.
+    for (const Tok t : ui::kDarkenedLight)
+    {
+        const auto ours = light[t], proto = fixtureColour (doc, true, t);
+        const double now = ui::contrastRatio (ours, light[Tok::roll]), before = ui::contrastRatio (proto, light[Tok::roll]);
+        const double hueShift = std::abs (hueOf (ours) - hueOf (proto));
+        const auto* name = ui::kTokens[static_cast<std::size_t> (t)].name;
+        check (now >= 3.0 && before < 3.0, fmt ("light %s: %s is %.3f:1 against the roll (the prototype's %s was %.3f)", name,
+                                                ours.toDisplayString (false).toRawUTF8(), now,
+                                                proto.toDisplayString (false).toRawUTF8(), before));
+        check (hueShift < 0.5 && ui::relativeLuminance (ours) < ui::relativeLuminance (proto) && now < 3.1,
+               fmt ("light %s: the same hue (%.2f and %.2f degrees), darker, and no darker than needed (under 3.1:1)", name,
+                    hueOf (ours), hueOf (proto)));
+    }
 }

@@ -452,11 +452,19 @@ namespace sl::doc
         LoadReport report;
         report.request = r.id;
         report.origin = r.origin;
+        if (r.kind == Kind::starter)
+            report.name = sounds::starterInfo (r.starter).name;
+        else if (r.kind == Kind::file)
+            report.name = r.file.getFileName().toStdString();
+        else
+            report.name = r.ref.kind == state::kSampleStarter ? r.ref.starterId
+                                                              : (r.ref.file.displayName.empty() ? r.ref.file.path : r.ref.file.displayName);
 
         auto handOver = [&] (Made m, double a, double b)
         {
             m.view->request = r.id;
             report.ok = true;
+            report.name = m.view->name;
             if (r.origin == LoadOrigin::user)
             {
                 auto p = std::make_unique<PendingSound>();

@@ -248,6 +248,19 @@ doc::EditOutcome StrandLockProcessor::editClip (const std::string& label, model:
     return out;
 }
 
+bool StrandLockProcessor::pushUndoStep (const std::string& label, const std::vector<params::P>& changed)
+{
+    std::vector<std::pair<int, float>> values;
+    for (const auto p : changed)
+    {
+        const int i = params::index (p);
+        if (i >= 0 && i < params::kNumParams && i != params::index (params::P::bypass))
+            values.emplace_back (i, params::plainValueOf (*paramList[(std::size_t) i]));
+    }
+    const std::lock_guard<std::mutex> hold (historyLock);
+    return history.push (label, clipDoc.current(), clipDoc.nonParam(), values);
+}
+
 doc::EditOutcome StrandLockProcessor::editClip (const std::string& label, model::Clip proposed)
 {
     model::EditResult r;

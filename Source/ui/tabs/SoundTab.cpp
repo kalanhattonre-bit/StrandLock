@@ -21,6 +21,6 @@ namespace sl::ui
         newRow();
         choice (P::vibSync, "Vibrato sync", 120);
         toggle (P::liveLegato, "Live legato");
-        caption ("The sound menu and Browse arrive in M2; key, scale and Detect pitch in M7.", Caption::Style::sub);
+        caption ("The sound menu and Browse are on the waveform strip below; key, scale and Detect pitch arrive in M7.", Caption::Style::sub);
     }
 }

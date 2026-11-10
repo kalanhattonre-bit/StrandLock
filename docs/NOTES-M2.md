@@ -662,3 +662,17 @@ Everything below is on the processor (`StrandLockProcessor`), message thread unl
 - **Left for later parts**: the audio path (Engine, HostSync, MidiRouter, the display slot, setInUse; the
   integration step), the starter menu, Browse and drop wiring, the waveform strip with the Region box and zoom
   (P2), MIDI Learn (M8), Preview (M6), SoundMeta and Detect (M7), the analysis cache (M7).
+
+## P2
+
+The plugin chain, part 2 (plan 7.4): the UI for sounds. Branch `m2-plugin`, after P1. The audio path stays
+ProbeSynth until the integration step.
+
+### Progress
+
+- Done (first CI round pending): decision 1 (no attachments: `ParamBinding`, `ParamSynced`, the editor's 30 Hz
+  timer), decision 2 (three light colours), `ui/strip/WavePeaks` and `WaveStrip` (peaks, Region box, zoom, At the
+  end, file line, heads from a display frame), the starter menu, Browse, drops that load, the load toasts, the
+  Diagnostics line about Voice and Cloud, `Tests/ui/test_strip.cpp`, `Tests/ui/test_controls.cpp`, the M0 tests
+  updated, `alloc/hostChangesWithEditorOpen` at 0.
+- Next: CI green, look at every snapshot, fix, write the decisions below, rebase, merge to main.
