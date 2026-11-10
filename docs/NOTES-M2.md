@@ -670,9 +670,125 @@ ProbeSynth until the integration step.
 
 ### Progress
 
-- Done (first CI round pending): decision 1 (no attachments: `ParamBinding`, `ParamSynced`, the editor's 30 Hz
-  timer), decision 2 (three light colours), `ui/strip/WavePeaks` and `WaveStrip` (peaks, Region box, zoom, At the
-  end, file line, heads from a display frame), the starter menu, Browse, drops that load, the load toasts, the
-  Diagnostics line about Voice and Cloud, `Tests/ui/test_strip.cpp`, `Tests/ui/test_controls.cpp`, the M0 tests
-  updated, `alloc/hostChangesWithEditorOpen` at 0.
-- Next: CI green, look at every snapshot, fix, write the decisions below, rebase, merge to main.
+- Done: decision 1 (no attachments; controls write in gestures; a 30 Hz timer moves them), decision 2 (three light
+  colours), `ui/strip/WavePeaks` and `WaveStrip` (the waveform, the Region box, zoom, At the end, the file line,
+  heads from a display frame), the starter menu, Browse, drops that load the sound, the load toasts, the banner for a
+  clip too detailed to play, the Diagnostics line about Voice and Cloud, the tests and snapshots below. CI green on
+  a472f86 (run 42747026146); every snapshot looked at.
+- Next: rebase on main (the engine chain merged), CI green, fast-forward main. Then the integration step.
+
+### Decisions and deviations
+
+- **Decision 1: no control is bound through JUCE's attachments.** `ui::ParamBinding` writes one parameter on the
+  message thread: `beginGesture`, `setPlain` (through `params::setPlainValue`, so a float keeps its exact plain
+  value), `endGesture`, or `setAsCompleteGesture` for a click or a menu pick. `ui::ParamSynced::syncToParameter`
+  moves a control to its parameter's value when that differs from what it shows. Knob, ParamToggle, PillToggle,
+  SegmentedControl and ChoiceBox use both. MainView collects every ParamSynced once (48: the tabs' 47 and the
+  strip's At the end) and the editor's timer calls `syncControls` 30 times a second. A control the user is changing
+  is left alone: an open gesture, the mouse down on the knob, a ChoiceBox with its menu open. A knob's drag, wheel
+  step and double-click each come inside the slider's drag notification, so each is one host gesture; a value set
+  from code outside a drag is one whole gesture.
+- **Result: host parameter changes with the editor open allocate nothing.** `alloc/hostChangesWithEditorOpen` now
+  gates 0 allocations and 0 frees: 0 for 11,250 changes in Windows Release, on Linux and in the Debug-CRT run (M0
+  measured 1 allocation of 1088 bytes on Linux and in the Debug CRT, from ParameterAttachment's post). A check after
+  it shows the next timer tick moves the 45 controls the host changed. `ui/controlsFollowTheTimerNotAttachments`
+  shows the other half: a host change from the message thread does not move a control until the timer runs (an
+  attachment would move it at once), and a drag holds it.
+- **The editor's timer is 30 Hz** (it was 15): the controls and the display frame every tick; the Diagnostics
+  snapshot, the tempo, the banner check and the toasts every second tick (15 Hz, M0's rate: the snapshot copies the
+  recent-event lists); `collectVersions` every third tick (10 Hz, plan 1.3). `refreshNow` does all of it at once
+  (the tests call it). A test that moves a parameter and then reads a control calls `syncControls` first, as the
+  timer would (the M0 editor test now does).
+- **Decision 2: the light theme's Tone and Sample lane colours and the playhead.** Against the light roll (#ffffff):
+  Tone #e08600 -> **#d78000** (2.77 -> 3.01:1), Sample #b8913a -> **#b68f39** (2.94 -> 3.01:1), playhead #ff7a00 ->
+  **#ed7100** (2.61 -> 3.02:1). Each is the lightest colour of its hue that reaches 3:1: HSL lightness lowered with
+  hue and saturation fixed, rounded to 8 bits (the hue moves by less than 0.2 degrees in the rounding). The dark
+  theme and `ui/theme.json` (the prototype's) are unchanged; `ui::kDarkenedLight` names the three tokens. The theme
+  test checks those three for >= 3:1 (and under 3.1:1, the same hue within 0.5 degrees, darker than the
+  prototype's, and the prototype's below 3:1) instead of equality; the plan's figures (2.77, 11.86, 2.61) are now
+  checked on the fixture's values.
+- **The strip is `ui/strip/WaveStrip` and `WavePeaks`** (MainView's StripView is gone). Layout as M0's: the sound
+  column (the menu, Browse..., Sound presets disabled until M8), the file line with At the end, -, + and Show all,
+  the waveform below. Its height follows the window, as shell.html's --wave-h does (56, 72, 92 px at most 720, at
+  most 820, above): 104, 112 and 124 px here, so the Region stays easy to grab.
+- **Peaks** port buildPeaks and renderWave exactly: the mid ((L + R) * 0.5 in double, stored as float) per block of
+  256 frames; a column of the view reads the block peaks when it spans 512 frames or more, else the samples. They
+  are made on the message thread the first time a sound is shown (never the audio thread; one pass over the sound,
+  tens of milliseconds for a 10-minute stereo file) and kept in a cache of up to 8 sounds keyed by the sound's
+  samples, which it holds only weakly (the peaks of a 10-minute file are about 900 KB; the cache never keeps the
+  samples alive). The strip keeps the columns of its current view and width, so the heads redrawing 30 times a
+  second do not recompute them. Not on a worker: that would need a "peaks not ready" state for one pass of tens of
+  milliseconds.
+- **The Region box** follows stripDown, stripMove and stripUp: a drag across the wave (after 5 px) makes a new
+  Region, an edge within 7 px moves that edge, the band along the top (14 px) moves the whole Region, the minimum
+  width is max (0.002, 0.01 / seconds), and when zoomed in the bar along the bottom moves the view. Each edge being
+  dragged has one host gesture for the whole drag; every move writes the parameters (their floats) and the exact f64
+  edges in INST (plan 2.2), and letting go makes one undo step "Region" through the new
+  `StrandLockProcessor::pushUndoStep (label, params)`. At the end on the strip is one undo step "At the end: Hold"
+  (sl-ui.js). The tabs' knobs still make no undo step of their own, as in M0 (M6 makes the Sample tab).
+- **Listening on the wave.** Holding the mouse inside the Region pushes `UiCommand::auditionOn (root, 0.8,
+  startPos)`, and `auditionOff` when it lets go or the press becomes a drag, as stripDown does. Nothing drains the
+  command queue until the integration step, so nothing plays yet. Outside the Region the prototype plays the file
+  itself as recorded (rawAuditionStart); that needs an audio path of its own, so here the readout says "outside the
+  Region" and nothing plays (left for later, with M6's Preview). A short click with notes selected sets their Start
+  in the prototype; that needs the roll's selection (M4, M5).
+- **Heads** are drawn from `engine::DisplayFrame` as sl-ui.js drawStrip does (a line, a numbered circle and a
+  direction arrow per head, a dot per grain), from a copy of the newest frame kept behind a pointer (8.5 KB). The
+  processor now has `getDisplaySlot ()`, a `std::unique_ptr<engine::DisplaySlot>` that stays null: **the integration
+  step makes the slot and writes it**. The editor's timer already takes the newest frame from it and hands it to the
+  strip, and draws nothing while it is null. The tests hand the strip a frame directly.
+- **The sound menu** lists the 8 starters in `kStarterList` order (sawopen first) and, while a file plays, a separator
+  and "File: name" (the prototype writes a page emoji there; JUCE's fonts have none). Picking a starter toasts
+  "Loading name..." and calls `loadStarterSound (id, 1)`.
+- **Browse...** opens an async native FileChooser for the AudioFormatManager's formats (registerBasicFormats),
+  starting in the Music folder. CI cannot open a native dialog, so the tests call `WaveStrip::loadFile`, which the
+  chooser's callback calls.
+- **A drop** loads the first file dropped (sl-ui.js), rooted at C3. A path that is not absolute is not loaded
+  (juce::File asserts on one) and toasts "Could not read that file as sound". A drop no longer opens the Diagnostics
+  tab (M0 did, for checklist step 6); it is still recorded there. **For the integration step's M2 checklist
+  section:** step 6 now loads the sound too, and the Diagnostics tab is opened by hand to see the drop.
+- **Toasts.** `doc::LoadReport` has a new `name` (the sound asked for), so a load the person asked for says "Loaded
+  name"; a report with a message shows it (5 s for a failure, 2.6 s otherwise); a project's or Undo's sound that
+  loaded as it should says nothing. A project's missing file shows its toast when the window opens. A long toast
+  wraps onto up to three lines (the missing-file toast names the whole path).
+- **The file line**: "name · 3.00 s · root C3", then " +12 cents" when the cents are not 0 (fmtCents), " (built-in)"
+  for a starter, " · its first 10 minutes" for a cut file, " · the project's file X was not found" while a project's
+  file is missing. The middle dot is written in the code as a code point, so the sources stay ASCII.
+- **A banner for a clip too detailed to play** (P1's hand-off): "This clip is too detailed to play, so its notes are
+  silent: it needs fewer notes or simpler lanes", while `getSnapshotPublisher ().stats ().tooDetailed`, after the
+  state banner when both apply. Only a hand-made project can hold such a clip.
+- **The Diagnostics page** has an "Engines" row on its first card: "Tape plays now. Notes set to Voice or Cloud play
+  as Tape until the next build (M3)." The Copy report has the same line. The Sound tab's note now points at the
+  strip for the sound menu and Browse.
+- **The open sound menu in the snapshots** is drawn with the look and feel's own popup calls (its options for a
+  combo box, the background, each item, the chosen one ticked, one lit) above the box. A real JUCE menu opens in a
+  window of its own, which a component snapshot does not include. The test checks the menu box is 9 lines tall,
+  ends at the sound box, and that nothing outside it changed.
+
+### Tests (Tests/ui, group ui)
+
+- `test_strip.cpp`: stripPeaksAreRenderWave (every block, every column of a zoomed view against its samples, every
+  column of the whole sound against its blocks, silence, empty), stripPeaksCachedPerSound, stripLoadsSounds (the
+  menu, a file, a starter, a drop, a file that is not a sound: the file line, the menu and the toasts),
+  stripLoadToasts (a 601 s file cut to 10 minutes; a project's missing file), stripRegionGestures (drag across, an
+  edge, the band, the minimum width, Undo, a held press, outside the Region, At the end: the values, the exact INST
+  edges, what the audio thread reads, the gestures per edge, the undo labels, the audition commands), stripZoom (+,
+  -, Show all, the wheel around the pointer, the view bar, the 256-frame limit, the view kept in UIST and reopened, a
+  new sound shown whole), stripHeadsFromDisplayFrames (none without a slot; 4 heads and 4 grains; only what is in
+  view), and stripSnapshotsDraw.
+- `test_controls.cpp`: controlsFollowTheTimerNotAttachments. `test_view.cpp`: viewTooDetailedBanner.
+- Changed: `theme/themeTokensMatchFixture` and `theme/themeLaneContrast` (decision 2),
+  `alloc/hostChangesWithEditorOpen` (0, and the timer catches up), `ui/editorDropsAndDiagnostics` (the drop loads),
+  `ui/editorTabsBoundToParameters` (syncControls before the readout), `ui/editorLayout` (WaveStrip).
+- Snapshots (StrandLock-UI-Snapshots): strip_chord_dark_100, strip_chord_light_100, strip_chord_dark_900x560,
+  strip_chord_light_900x560 (a TestSignals C major chord, 3 s, with a Region dragged to 22 .. 58 %),
+  strip_menu_open_dark and _light, strip_zoomed_heads_dark and _light (zoomed to 12 .. 68 % with a display frame).
+  Looked at, with every M0 snapshot: nothing clipped or overlapping. The first round's menu picture was all menu
+  colour (the background fill had no clip): fixed, and its test now compares the pictures outside the menu.
+
+### Results (CI run 42747026146 on a472f86, all green)
+
+- Windows Release: 948 checks in 130 tests (ui 136 in 19, theme 32 in 3, alloc 29 in 4, doc 39, hostsync 24, state
+  127, params 71, probe 44, engine 97 (the contract's), model 221). Linux: 949 in 130. Linux sanitizers: contract,
+  model and engine 385 in 61; state 127 in 17. Debug-CRT allocation run 30 checks in 4 tests, 0 JUCE assertions;
+  Debug snapshots 0 assertions; pluginval strictness 10 SUCCESS; the fixture check passes.
