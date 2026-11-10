@@ -49,6 +49,9 @@ namespace sl::ui
 
         constexpr const char* kTryThis = "play C3 on your keyboard, then open the Diagnostics tab.";
 
+        // The banner when the clip's lanes would need more memory than a snapshot may hold (doc/SnapshotPublisher.h).
+        constexpr const char* kTooDetailed = "This clip is too detailed to play, so its notes are silent: it needs fewer notes or simpler lanes";
+
         const int kScales[] = { 75, 100, 125, 150, 175, 200 };
 
         Tok laneTok (core::LaneId id)
@@ -566,10 +569,13 @@ namespace sl::ui
             layoutPane();
         }
 
-        // The banner needs the state encoded, so it is checked twice a second, not on every tick.
+        // The banner needs the state encoded, so it is checked twice a second, not on every tick. It also says when
+        // the clip is too detailed to play (only a hand-made project can hold one: the document refuses such edits).
         if (ticks++ % 8 == 0)
         {
-            const auto banner = processor.getStateBanner();
+            auto banner = processor.getStateBanner();
+            if (processor.getSnapshotPublisher().stats().tooDetailed)
+                banner << (banner.isEmpty() ? "" : ". ") << kTooDetailed;
             if (banner != bannerText)
             {
                 bannerText = banner;

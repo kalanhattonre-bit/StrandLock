@@ -692,8 +692,9 @@ SL_TEST ("ui", stripHeadsFromDisplayFrames)
 namespace
 {
     /** Draws the sound menu open above its box, as JUCE's PopupMenu draws a combo box's menu (the same look and
-        feel calls: background, then each item, the chosen one ticked, the one under the mouse lit). */
-    void paintMenuOpen (juce::Image& image, juce::Component& editor, juce::ComboBox& box, int hoverId)
+        feel calls: background, then each item, the chosen one ticked, the one under the mouse lit). Returns where
+        it drew, in the editor. */
+    juce::Rectangle<int> paintMenuOpen (juce::Image& image, juce::Component& editor, juce::ComboBox& box, int hoverId)
     {
         auto& lf = box.getLookAndFeel();
         juce::Label label;
@@ -717,8 +718,10 @@ namespace
         }
         const int menuW = width + 2 * border, menuH = height + 2 * border;
         const auto boxArea = editor.getLocalArea (&box, box.getLocalBounds());
+        const juce::Rectangle<int> area (boxArea.getX(), juce::jmax (0, boxArea.getY() - menuH), menuW, menuH);
         juce::Graphics g (image);
-        g.setOrigin ({ boxArea.getX(), juce::jmax (0, boxArea.getY() - menuH) });
+        g.setOrigin (area.getTopLeft());
+        g.reduceClipRegion (0, 0, menuW, menuH);   // the menu's own window: its background fill stops at its edges
         lf.drawPopupMenuBackgroundWithOptions (g, menuW, menuH, options);
         int y = border;
         std::size_t i = 0;
@@ -728,6 +731,7 @@ namespace
             lf.drawPopupMenuItemWithOptions (g, r, it.getItem().itemID == hoverId, it.getItem(), options);
             y += heights[i];
         }
+        return area;
     }
 
     struct StripShot
@@ -739,7 +743,7 @@ namespace
         bool heads = false;
     };
 
-    juce::Image stripShot (const StripShot& s)
+    juce::Image stripShot (const StripShot& s, juce::Rectangle<int>* menuArea = nullptr)
     {
         StrandLockProcessor proc;
         auto& settings = proc.getUserSettings();
@@ -766,7 +770,11 @@ namespace
             editor.refreshNow();
             image = editor.createComponentSnapshot (editor.getLocalBounds(), true, 1.0f);
             if (s.menuOpen)
-                paintMenuOpen (image, editor, strip.getSoundMenu(), 4);
+            {
+                const auto area = paintMenuOpen (image, editor, strip.getSoundMenu(), 4);
+                if (menuArea != nullptr)
+                    *menuArea = area;
+            }
         }
         resetUserSettings (proc);
         return image;
@@ -799,12 +807,23 @@ SL_TEST ("ui", stripSnapshotsDraw)
                     image.getHeight(), edges, wave));
     }
 
-    // The menu open: its 9 lines (8 starters and the file) drawn over the roll above the box.
+    // The menu open: its 9 lines (8 starters and the file) drawn over the roll above the box, and nothing else.
+    juce::Rectangle<int> menu;
     const auto plain = stripShot ({ ThemeId::dark });
-    const auto open = stripShot ({ ThemeId::dark, 0, 0, true });
-    const auto above = juce::Rectangle<int> (12, 300, 172, 270);
-    const int menuPixels = countNear (open, above, dark[Tok::menu], 2), rollPixels = countNear (plain, above, dark[Tok::menu], 2);
-    check (menuPixels > rollPixels + 10000, fmt ("the open menu covers the roll above the box (%d menu-coloured pixels, %d without it)", menuPixels, rollPixels));
+    const auto open = stripShot ({ ThemeId::dark, 0, 0, true }, &menu);
+    int inside = 0, outside = 0;
+    {
+        const juce::Image::BitmapData a (plain, juce::Image::BitmapData::readOnly), b (open, juce::Image::BitmapData::readOnly);
+        for (int y = 0; y < plain.getHeight() && y < open.getHeight(); ++y)
+            for (int x = 0; x < plain.getWidth() && x < open.getWidth(); ++x)
+                if (a.getPixelColour (x, y) != b.getPixelColour (x, y))
+                    (menu.contains (x, y) ? inside : outside) += 1;
+    }
+    const int menuPixels = countNear (open, menu, dark[Tok::menu], 2);
+    check (menu.getHeight() > 9 * 18 && menu.getBottom() <= 548 && menu.getWidth() >= 150 && menuPixels > menu.getWidth() * menu.getHeight() / 2
+               && inside > 10000 && outside < 50,
+           fmt ("the open menu is a %d x %d box ending at the sound box (y %d), mostly the menu colour (%d pixels); it changed %d pixels inside it and %d outside",
+                menu.getWidth(), menu.getHeight(), menu.getBottom(), menuPixels, inside, outside));
 }
 
 SL_SNAPSHOT (strip_chord_dark_100)        { return stripShot ({ ThemeId::dark }); }
