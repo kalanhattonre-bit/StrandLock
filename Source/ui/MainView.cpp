@@ -38,7 +38,7 @@ namespace sl::ui
         };
 
         const char* const kModeHints[] = {
-            "BUILD (1): the piano roll (new notes, moving and stretching them) arrives in M4. For now every note plays the starter Saw.",
+            "BUILD (1): the piano roll (new notes, moving and stretching them) arrives in M4. For now every note plays the loaded sound.",
             "PITCH (2): drawing a note's pitch line arrives in M4.",
             "VOLUME (3): drawing a note's volume line arrives in M4.",
             "VIBRATO (4): drawing a note's vibrato arrives in M4.",
@@ -274,7 +274,7 @@ namespace sl::ui
         }
 
         // What comes here, and when.
-        const juce::String message ("The piano roll arrives in M4. For now StrandLock plays the starter Saw on every note Cubase sends.");
+        const juce::String message ("The piano roll arrives in M4. For now StrandLock plays the loaded sound on every note Cubase sends.");
         const auto font = Theme::px (12.0f);
         const float w = juce::jmin ((float) grid.getWidth() - 24.0f, Theme::textWidth (font, message) + 28.0f);
         const auto box = juce::Rectangle<float> (w, 30.0f).withCentre (grid.toFloat().getCentre());

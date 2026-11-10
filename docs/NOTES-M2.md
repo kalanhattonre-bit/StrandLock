@@ -515,17 +515,15 @@ The plugin chain, part 1 (plan 7.4): the document, the sounds, the state and the
 
 ### Progress
 
-- Done: state (SMPL file record, CLIP through ClipCodec, shared payloads), doc/ (ClipDocument, EditHistory,
-  SnapshotPublisher, SampleManager, Sha256), ParamBridge::applyPatch, host/HostSync, host/MidiRouter, the processor
-  wiring, the tests (test_state_clip, test_doc, test_host_midi, the M0 tests updated), the decisions and the
-  hand-off below. CI run 42732142894: everything built; Linux passed every new test (2 failures: an M0 test with a
-  stale chunk index, fixed); Windows stopped in probe/levels (the stack, fixed below).
-- In progress: CI on the fixes.
-- Next: CI green, the CI figures here.
+- Done: everything in the P1 task: state (SMPL file record, CLIP through ClipCodec, shared payloads), doc/
+  (ClipDocument, EditHistory, SnapshotPublisher, SampleManager, Sha256), ParamBridge::applyPatch, host/HostSync,
+  host/MidiRouter, the processor wiring, the tests (test_state_clip, test_doc, test_host_midi, the M0 tests
+  updated), the decisions, the CI figures and the hand-off below. CI green on 4dd2f6b (run 42736942571).
+- Next (P2, on this branch and worktree): the UI (see the hand-off), then merge m2-plugin to main when green.
 
 ### Decisions and deviations
 
-- **A new instance opens on Strand Demo and the Saw that opens up.** BLUEPRINT 6: "Strand Demo clip and the
+- **A new instance opens on Strand Demo and the Saw that opens up.** BLUEPRINT 5: "Strand Demo clip and the
   saw-that-opens-up sound load on first open" (the prototype's `init()`; its `init` sound preset is
   `defaultInst()`). A state that holds no readable CLIP chunk (an M0 project, a damaged chunk) gets an empty 4-bar
   clip instead, the clip's default, as a parameter the state does not mention gets its default. So an M0 project
@@ -602,6 +600,27 @@ The plugin chain, part 1 (plan 7.4): the document, the sounds, the state and the
   no output (CI run 42732142894, twice; Linux has 8 MB). `doc/processorFootprint` now holds `sizeof
   (StrandLockProcessor)` to 128 KB. For the integration step: keep the DisplaySlot (three frames of about 8.5 KB)
   and anything else large behind a pointer too.
+
+### Results (CI run 42736942571 on 4dd2f6b, all green)
+
+- Windows Release: 874 checks in 120 tests (doc 39, hostsync 24, state 127, params 71, probe 44, ui 70). Linux: 875
+  in 120. Linux sanitizers: contract, model and engine 385 checks in 61 tests; state 127 in 17 (the two threads and
+  every state test under AddressSanitizer and UBSan). Debug CRT allocation run 29 checks in 4 tests, 0 JUCE
+  assertions; Debug snapshots 0 assertions; pluginval strictness 10 SUCCESS. Snapshots looked at: the strip shows
+  the Saw that opens up, 6.00 s, built in.
+- The fixture clips through the processor: 46 clips (441 notes), get, set, get byte-identical, every note bit for
+  bit, every parameter the float it was saved with. Forward compatibility (a)-(d) through the processor and (e)
+  pass. The largest editable clip (4096 notes, 33,554,431 bytes): accepted in 265 ms, saved and loaded in another
+  instance in 685 ms (Windows; 1.5 s and 4.9 s under AddressSanitizer).
+- `sizeof (StrandLockProcessor)` is 8,648 bytes on Windows (it was about 200 KB with the diagnostics ring inline).
+- **Timings against their targets (missed targets, for review; none past its gate).** `sawopen` made on the worker:
+  75.9 ms Windows, 66.1 ms Linux (target 60 ms, gate 300 ms; the JS takes 88 ms). It is off the message thread now,
+  so a new instance's constructor no longer waits for it. Corrupted-state loads, slowest of 10,000: single-byte
+  mutations 58.5 ms Windows, 65.1 ms Linux; with their CRCs fixed up 88.4 and 83.3 ms; under AddressSanitizer 77.2
+  and 182.0 ms (target 50 ms, gate 250 ms). The slow ones name a starter seed the worker has not made (a mutated
+  SMPL seed): the load waits about 70 ms for it (decision 3). The 182 ms under the sanitizers leaves the least room
+  of any gated figure. A state load naming a starter the worker makes: 31.2 ms Windows, 29.9 ms Linux; one in its
+  cache of 4: 0.13 and 0.11 ms.
 
 ### Hand-off for the UI builder (P2)
 

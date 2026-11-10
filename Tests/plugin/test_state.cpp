@@ -357,7 +357,7 @@ SL_TEST ("state", containerLayout)
                && std::isnan (inst.regionStartExact) && std::isnan (inst.regionEndExact) && inst.liveTemplate.empty() && inst.trailing.empty(),
            "INST holds defaultInst's state fields: seed 1, wheels vib/CC1 and tone/CC2, C Chromatic, no exact Region edges");
 
-    // A new instance opens on Strand Demo (BLUEPRINT 6) and the Saw that opens up (D9).
+    // A new instance opens on Strand Demo (BLUEPRINT 5) and the Saw that opens up (D9).
     const auto clip = model::decodeClip (parsed.chunks[2].payload, parsed.chunks[2].payloadLength);
     const auto demo = model::loadClipPreset ("strand-demo");
     check (clip.clip.has_value() && demo.has_value() && clip.clip->notes.size() == 26

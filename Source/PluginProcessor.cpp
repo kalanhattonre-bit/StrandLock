@@ -24,7 +24,7 @@ namespace
         std::atomic<int>& count;
     };
 
-    /** The clip a new instance opens on (BLUEPRINT 6: "Strand Demo clip and the saw-that-opens-up sound load on
+    /** The clip a new instance opens on (BLUEPRINT 5: "Strand Demo clip and the saw-that-opens-up sound load on
         first open"). */
     model::ClipPtr firstOpenClip()
     {
