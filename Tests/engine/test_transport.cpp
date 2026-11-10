@@ -148,7 +148,8 @@ SL_TEST ("engine", noteStartsOnTheBeat)
         for (int b = 0; b < 12; ++b)
             exact.push_back (b * spb);
         std::string why;
-        check (startsOnTime (soundStarts (L, R), exact, why), fmt ("%g bpm: 12 starts over 3 passes, each in [0, 1) sample of its beat %s", bpm, why.c_str()));
+        const bool onTime = startsOnTime (soundStarts (L, R), exact, why);
+        check (onTime, fmt ("%g bpm: 12 starts over 3 passes, each in [0, 1) sample of its beat %s", bpm, why.c_str()));
     }
 
     // a step change 120 -> 87 at beat 3.5 (sample 84000), the host's beat sent with it
@@ -164,14 +165,16 @@ SL_TEST ("engine", noteStartsOnTheBeat)
         for (int b = 0; b < 12; ++b)
             exact.push_back (b < 4 ? b * 24000.0 : 84000 + (b - 3.5) * spb87);
         std::string why;
-        check (startsOnTime (soundStarts (L, R), exact, why), "after 120 -> 87 at beat 3.5: every start in [0, 1) sample of its beat " + why);
+        const bool onTime = startsOnTime (soundStarts (L, R), exact, why);
+        check (onTime, "after 120 -> 87 at beat 3.5: every start in [0, 1) sample of its beat " + why);
 
         // a no-op is not a pass: the same starts measured against the old tempo are thousands of samples off
         std::vector<double> stale;
         for (int b = 0; b < 12; ++b)
             stale.push_back (b * 24000.0);
         std::string why2;
-        check (! startsOnTime (soundStarts (L, R), stale, why2), "negative control: against 120 bpm throughout the same starts fail (" + why2 + ")");
+        const bool staleFails = ! startsOnTime (soundStarts (L, R), stale, why2);
+        check (staleFails, "negative control: against 120 bpm throughout the same starts fail (" + why2 + ")");
     }
 }
 
@@ -204,7 +207,8 @@ SL_TEST ("engine", hostJitterChangesNothing)
     for (int b = 0; b < 256; ++b)
         exact.push_back (b * 24000.0);
     std::string why;
-    check (startsOnTime (starts, exact, why), fmt ("256 starts (%zu found), each in [0, 1) sample of its beat %s", starts.size(), why.c_str()));
+    const bool onTime = startsOnTime (starts, exact, why);
+    check (onTime, fmt ("256 starts (%zu found), each in [0, 1) sample of its beat %s", starts.size(), why.c_str()));
     check (L1 == L0 && R1 == R0, "the jittered render is the unjittered one, bit for bit");
     check (maxVoices == 1, fmt ("never more than one voice at a block start (%d): no note started twice", maxVoices));
 }
@@ -413,7 +417,8 @@ SL_TEST ("engine", reAnchorForwardAndBack)
                 exact.push_back (static_cast<double> (w.at) + (b - w.hostBeat) * spb100);
         }
         std::string why;
-        check (startsOnTime (soundStarts (L, R), exact, why) && maxVoices == 1,
+        const bool onTime = startsOnTime (soundStarts (L, R), exact, why);
+        check (onTime && maxVoices == 1,
                fmt ("%s: 5 starts, each once and on time (most voices at once %d) %s", w.label, maxVoices, why.c_str()));
         // the note at beat 2 plays its length after the re-anchor (moved back, the clock is behind its start for a
         // moment: it must not release, as the JS rule for a note edited to start later would)

@@ -337,16 +337,173 @@ chase cost, tempo drift, stopped processing, determinism, voice steal, stability
   44f47b11, every window within 0), while the same voice paths are bit for bit on the test signals. Not proven case
   by case. E2 should expect the same in renders.json on the starters: hashes printed, windows within 1e-5.
 
+
 ## E2
 
-The engine chain, part 2 of 2: the Engine itself (plan 7.4). Branch `m2-engine`, on top of E1.
+The engine chain, part 2 of 2: the Engine itself (plan 7.4). Branch `m2-engine`, on top of E1; it merges the engine
+chain to main.
 
 ### Progress
 
 - Done: `engine/Engine.cpp` (the stub replaced), `EngineSchedule.cpp`, `EnginePlan.cpp`, `EngineDisplay.cpp`, the
-  private part of `Engine.h`. Tests `Tests/engine/test_parity_renders.cpp` (renders.json, the 36 tape cases) with the
-  harness `Tests/engine/EngineRender.*`. CI run 42740787541 on 435dfd8: green; 36 of 36 tape cases within tolerance
-  (Windows 22 bit for bit, Linux 13).
-- In progress: the engine-level M2 rows: `test_tuning_tape`, `test_transport`, `test_chase_cost`,
-  `test_determinism`, `test_live`, `test_stability`, `test_alloc_engine`, `test_cpu`.
-- Next: CI green on them, the rest of this section, the Engine summary, rebase and fast-forward main.
+  private part of `Engine.h`, `Voice::reanchorSlack`. Tests: `test_parity_renders`, `test_tuning_tape`,
+  `test_transport`, `test_chase_cost`, `test_determinism`, `test_live`, `test_stability`, `test_alloc_engine`,
+  `test_cpu`, with the harness `Tests/engine/EngineRender.*`. CI green (see "Results").
+- In progress: nothing.
+- Next: the integration step (I): HostSync, MidiRouter and the processor's audio path on this Engine.
+
+### Tests
+
+| Test | Group | What it checks (the M2 row) |
+|---|---|---|
+| `fixtureEngineRendersTape` | engine | every renders.json case with needs "tape" (36, counted against the file), section 5's tolerances; bit-for-bit share printed; a window sample 2e-5 off and a stats row one voice off both fail |
+| `tapeTuning` | engine | MIDI 36/60/84 against a C3 root at 44.1/48/96 kHz and a 44.1 kHz sample at 48 kHz: f0 within +-3 cents; control: a sample declared at the wrong rate measures about 147 cents off |
+| `noteStartsOnTheBeat` | engine | 120, 87, 133 bpm, 3 loop passes, and a step 120 -> 87: every start in [0, 1) sample of its beat (1e-6 of rounding allowed below 0); control: against the old tempo the same starts fail |
+| `hostJitterChangesNothing` | engine | +-0.003 beat jitter every 512-sample block for 64 bars: 256 starts on time, never 2 voices, the render bit-identical to the unjittered one |
+| `preRollStaysSilent` | engine | Play from beat -2, loop on and off: rms before beat 0 is 0, the first sound at the exact sample of beat 0; control: Play at beat 6.5 sounds the last note at once |
+| `tempoRampFollowsHost` | engine | the host ramps 120 -> 60 bpm over 8 bars (ppq integrated per sample), tempo and beat per 512-sample block: all 32 starts within 1 sample, the last within 2; control: with the beat left out (the prototype's own clock) the last start is far off |
+| `scatterWhileStopped` | engine | stopped, Scatter 1/8T on a live key: 11 jumps, each 0..32 samples after its 1/3-beat grid line of the free clock |
+| `chaseStartsMidNote` | engine | Play at beat 1.37 inside a Tape note, plain and with a moving Volume lane: the first sample not 0, rms (0-2.5 ms) / rms (12.5-15 ms) in 0.02..0.3, after 20 ms equal to the straight render within 1e-4 |
+| `reAnchorForwardAndBack` | engine | a tempo change with the host 0.05 beat ahead starts the note it jumped over at once; 0.05 beat behind, no note starts twice and the note that just started keeps sounding |
+| `chainOnOneVoice` | engine | C3 -> G3 through the Engine: at most 1 voice, sound without a gap; control: Restart on the second note gives 2 voices |
+| `chaseCostBounded` | engine | Play inside 16 x 16-beat and 16 x 64-beat 8-head Tape notes at 48 kHz: no 32-sample stretch above 4096 + 256 chase ticks, all 16 voices sounding within 0.35 s, chased playheads within 0.002 of the straight ones (the straight formula itself checked against 16 notes played from their start); the chase block's time printed; the stepped chase bit-identical in 32- and 7-sample blocks |
+| `deterministicAcrossBlocksAndStarts` | engine | 10 s of Strand Demo, chase at 1.7, live keys, Scatter, Skip, a jump: blocks 1, 37, 128, 700, 4096 and random 1..700 bit-identical; started after 0, 7 and 1000 stopped samples bit-identical; rms > 0.01; control: Play at 1.75 differs |
+| `liveVelocityGain`, `liveBendRange`, `liveSustain`, `liveModWheelTravel` | engine | velocity gain within 1e-6 (0.5, 0.2, MIDI 100); bend +1 at range 7 within +-3 cents of G3; sustain holds a released key until it lifts (control: without it the key ends); mod1 -> Travel at 0.25 plays -1x within 1e-6, 0.5 stops, control 0.75 plays +1x |
+| `voiceStealSmooth` | engine | 20 keys at polyphony 16: 16 voices, 4 steals, largest step within 10 ms of a steal / steady < 1.5; the step a cut would make is printed and checked to be far above 1.5 |
+| `sampleSwapFadesOnOldSample` | engine | 220 -> 330 Hz swap under a sounding key: step / steady < 1.5, the stolen voice holds the old sample's epoch through its fade; control: the 330 Hz sample steps 1.5 times as far |
+| `stabilityStrandDemoChords` | engine | Strand Demo, 8 heads Tape, 16 live chords, 10 s: nonFinite = filterResets = 0, pre-limiter peak > 0.05, rms > 0.01, peak <= 0.98 |
+| `healthCountersCount` | engine | a 1e7 source trips the output guard (nonFinite > 0), a NaN in the source resets the filters (filterResets > 0), the output stays finite, resetStats clears both |
+| `deferredStartsAndPoolCuts` | engine | 300 notes at one sample: 256 start, 44 start at the next segment (deferredStarts = 44); steals and pool cuts counted exactly |
+| `editsFollowAndEpochs` | engine | a deleted note's voice holds its snapshot epoch while it releases, then the new one only; a Volume edit is heard within two ticks on the same voice; no snapshot: no epoch |
+| `tapeStandInsCounted` | engine | Voice and Cloud keys count in tapeStandIns (until M3: the expectation follows `playedEngine`), the display shows the engine asked for |
+| `engineNoAllocations` (also `alloc`) | engine, alloc | 0 allocations and frees in 10 s of everything at once (parameter sweeps with ramps, bypass, wheels, chords, a jump, a bounded chase, a sample swap, snapshot swaps, stop and start, display, stats, reset) |
+| `engineTapeCpu`, `scanStartsCpu` | cpu | 16 voices x 8 heads Tape at 96 kHz in 64-sample blocks (target 8x, gate > 1x); scanStarts on 4096 notes before any voice sounds (target 0.5 % of a core, gate 2.5 %); gated on Windows only |
+
+### Files
+
+| File | What it is |
+|---|---|
+| `engine/Engine.h` (private part) | the pool, the voice list (pool slots in insertion order), the clock, the smoother, the context, the start list, the scan rules, the planner's arrays |
+| `engine/Engine.cpp` | prepare, forgetVersions, reset, setSample, setInst, setSnapshot, setTransport (1.10, 8.2 #3, #4, #21), noteOn, noteOff, allNotesOff, the controllers, process (32-sample segments on the control grid), the output stage, minEpochInUse, the ramp calls |
+| `engine/EngineSchedule.cpp` | the pool (allocVoice, the cut), addVoice (admit + start), scanStarts (binary search, 256 starts, deferral, scan rules, catch-up), startClip, doChase, the per-32 chase continuation |
+| `engine/EnginePlan.cpp` | plan and measure, ported whole |
+| `engine/EngineDisplay.cpp` | fillDisplay, stats, resetStats |
+| `Tests/engine/EngineRender.*` | the renders.json harness, and `Script`: actions at exact samples, host blocks, a hook per block |
+
+### Decisions and deviations
+
+- **The private part of Engine.h is new.** It includes `Voice.h`, `Clock.h` and `InstSmoother.h` (the contract's
+  forward declarations stay). The contract's private `inst`, `transport` and `bypassed` are gone: the smoother holds
+  the instrument (`ctx.inst` points at `smoother.current ()`), the Clock the transport. The public API is unchanged.
+- **The output stage runs per 32-sample segment**, inside the segment loop. The limiter works sample by sample, so
+  this is the JS loop over the whole call. It lets outGain and the bypass fade move per sample between the grid
+  values (2.3): the gain at grid position c is g0 + (g1 - g0) (c + 1) / 32, in linear gain between 10^(dB / 20) of
+  the values before and after the step. A value that does not move is that exact gain, so static settings play the
+  JS numbers. A value set between two boundaries with no ramp (ramp time 0, the parity tests) applies at once.
+- **The scan horizon of 8.2 #3 is a rule per re-anchor.** At a tempo or loop change the engine keeps the old clock
+  (anchor, rate) and the sample kR. A start whose kOf (U) under the old clock is before kR was emitted already and is
+  not emitted again. When the clock moved forward, the first scan after kR also takes the starts the new clock has
+  passed (kOf below kR, not emitted by the old clock) and starts them at kR. Exact in samples, so no start is doubled
+  or lost by rounding. Up to 8 rules are kept; each expires once the scan has passed its horizon (a tempo ramp
+  re-anchors every block and holds 1 or 2). Beyond 8, the oldest is dropped.
+- **A backward re-anchor keeps just-started notes sounding (`Voice::reanchorSlack`).** Found while testing the rule
+  above: moved back by up to 0.1 beat, the clock is behind a note that has just started, and the JS rule
+  `u < U - 1e-6 -> release` (meant for a note edited to start later) released it at once. With Cubase reporting a
+  cycle wrap a little late at a tempo change, that cuts the downbeat. The engine sets the slack to U - u for every
+  clip voice the clock is now behind; the tick tolerates that much and clears it once the clock reaches U. Without a
+  backward re-anchor the slack is 0 and the rule is the JS's.
+- **The tempo re-anchor also fixes a JS sliver.** The JS re-anchors at cur and scans from u - 2 db, so after a tempo
+  increase a note with U in (cur - db_new, cur - db_old] started twice (found by reading the code; a sliver of
+  about 1e-7 beat, not measured). The rule above suppresses it.
+- **Starts past 256 in one segment.** scanStarts keeps the 256 earliest by the JS key (kS, s, p), made total with the
+  note index (the JS sort is stable on note order) and the pass, in a sorted fixed array. The rest are counted in
+  deferredStarts and started at the next segment's first sample (found again with the key of the last one started).
+  A new snapshot or a re-anchor ends a deferral (its keys are note indices and old-clock samples): a pathological
+  case only (more than 256 starts in 32 samples at that very moment).
+- **Binary search with the JS tests.** scanStarts finds candidates for each loop pass m by binary search on s
+  (widened by 1e-6 beat), then runs each through the JS tests exactly as written (the clip range, mA..mB, U in the
+  window, kOf, playStartK). So the starts are the JS's bit for bit. A snapshot whose notes are not all kept by the
+  JS filter, or not start-sorted (a raw one), falls back to the JS walk over every note.
+- **The bounded chase.** One chase moment (doChase) runs up to 4096 ticks, shared in doChase order: each voice
+  begins (1 tick) and runs with what is left. A voice that catches up is added exactly as the JS (chase, ffChain,
+  addVoice): every fixture case. A voice that does not is admitted to the voice list at once (steals, polyphony,
+  setSnapshot following and minEpochInUse see it) but stays `chasing`: render skips it, plan () passes it over (no
+  grants), the display does not show it, stats ().voices counts it. At every boundary of the control grid (not the
+  chase moment's own) the chasing voices get 256 ticks, in list order; one that has caught up runs chaseEnd,
+  ffChain, startAt and plan () there, with its 10 ms fade-in. A voice that got no budget at the chase moment begins
+  on the grid: the engine marks it `chasing` with `chaseK = INT64_MIN` ("not begun"). Released or stolen while
+  chasing, a voice is done at once (it never sounded). So any 32 samples run at most 4096 + 256 ticks.
+- **startClip with a bounded chase.** Two checks that never fire on the JS paths (the JS chase ends before the
+  starts of its sample are scanned): a chain note whose chain a voice is still chasing does nothing (the chase hands
+  over by itself), and a note a just-finished chase already handed over to at this very sample does not start a
+  second voice.
+- **doChase returns when u < 0** (8.2 #4: before bar 1 nothing is sounding), besides the plan's wrap () and the jump
+  anchor (Clock::loopBeat already had it).
+- **reset () re-chases.** AudioProcessor::reset stops every voice at once; while the transport plays, the clip
+  notes that were sounding come back through a chase at the next sample (pendingChase), so a host reset in the
+  middle of a song does not leave the held notes silent until the next note start.
+- **Stopping clears a pending chase** (the JS leaves it, and its doChase returns while stopped: the same).
+- **The display's head position is a fraction of the voice's own sample** (the JS uses the engine's current one):
+  the same except for a voice fading on the sample before a swap (8.2 #23).
+- **minEpochInUse ignores epoch 0** (a version given without an epoch). The VersionExchange always stamps 1 or more.
+- **The pool.** A new voice takes the first free pool object; compaction (the JS's at the end of each segment) also
+  runs before taking one, so a done voice's object is reused at once. With all 64 busy, the oldest stealing voice is
+  cut (stats ().cuts); if none is stealing (not reachable with polyphony at most 32) the oldest voice.
+- **Test expectations learned on CI.** A voice stolen before it ever sounded (env 0) ends at its first sample, so 300
+  simultaneous starts leave 32 voices, not 64; and the biquads' own guard zeroes values beyond 1e9, so the output
+  guard's control uses a 1e7 source.
+- **What the engine-level tests do not cover** (the integration step's, plan 7.4): HostSync's cycle wraps inside a
+  block and the tempo-and-cycle row, MidiRouter's CC 32 -> -0.98236x, setNonRealtime, edits while publishing 1,000
+  snapshots a second and the exchange row, the processor's allocation row.
+
+### Results (CI)
+
+- Run 42744115791 on a80ea2d (the last code commit), green on both jobs. Windows Release: 934 checks in 144 tests,
+  0 failed (engine 48 tests, 264 checks; alloc 6, 34; cpu 2, 4). Debug CRT `--only alloc`: 35 checks in 6 tests, 0
+  failed, 0 JUCE assertions. pluginval strictness 10: SUCCESS. Fixture check: passed. Linux Release: 933 checks in 144
+  tests (engine 48, 264; alloc 6, 35; cpu 2, 2). Linux sanitizers: contract, model and engine 552 checks in 98 tests
+  (engine 48, 263); state 79 checks in 10 tests.
+- renders.json, needs tape: 36 of 36 within tolerance on both platforms; bit for bit 22 on Windows, 13 on Linux.
+  Every case that is not bit for bit plays the Saw starter (14 on Windows), which is itself not bit for bit with
+  SLSounds (E1); every case on a test signal is bit for bit.
+- Figures (Windows; Linux in brackets). CPU, 16 voices x 8 heads Tape at 96 kHz: 10.5x real time (9.2x), target 8x.
+  scanStarts on 4096 notes: 0.063 % of a core (0.069 %), target 0.5 %. Chase cost: the most ticks in one 32-sample
+  stretch 4096 (the chase moment); 70,958 ticks in all for 16 x 16 beats and 107,030 for 16 x 64 beats; all 16
+  voices sounding by 0.175 s and 0.269 s; chased playheads within 3e-8 of the straight ones. Tuning: the worst of 12
+  is 0.12 cents. Tempo ramp: every start on the host's sample (the prototype's own clock: 240 samples off, as the
+  plan says). Voice steal: step ratio 0.68. Sample swap: 0.81. Stability: a pre-limiter peak of 3.18 (the limiter
+  holds the output at 0.90).
+- For review (no target in the plan, printed only): the chase moment's own 32-sample block takes about 1.7 ms on the
+  CI runner, while a 32-sample block lasts 0.67 ms at 48 kHz. Cubase's buffer is larger than 32 samples (a 256-sample
+  block lasts 5.3 ms), so the one-off cost of 4096 ticks fits; the plan's 270 ms worst case is gone. Every timing
+  target of the M2 table was met.
+
+## Engine summary
+
+For whoever builds on the engine (integration, M3).
+
+- **What it is.** `sl::engine::Engine` is the port of sl-engine.js's Engine with every plan change of 8.2 (#3, #4,
+  #6, #8, #21, #22, #23, #29, #32). It plays every note as Tape until M3 (`playedEngine` in Voice.h is the one
+  switch; `Stats::tapeStandIns` and the display's `engine` field say which notes stood in).
+- **Proof.** renders.json: all 36 Tape cases within section 5's tolerances on both platforms, most bit for bit; the
+  rest are on the Saw starter, which is itself not bit for bit with SLSounds (E1). defs.json 6 of 6.
+- **Calling it (the processor, plan 1.3).** prepare (sr) once per prepareToPlay (it allocates the 64-voice pool the
+  first time only), then per block: setSnapshot / setSample when the exchanges hand over a version, setInst with the
+  parameters, setBypass; MIDI, commands and transport each at its sample with process () for the stretches between;
+  setInUse (minEpochInUse (...)) for both kinds; fillDisplay every displayEvery (sr) samples. releaseResources:
+  forgetVersions () first. Nothing on the audio thread allocates (gated with everything running).
+- **The transport (1.10).** setTransport once per block and at a cycle wrap (HostSync's split). A beat more than 0.1
+  away from the engine's clock (modulo the clip) is a jump: clip voices release, the notes sounding there are
+  chased. A smaller difference changes nothing unless the tempo or loop changed; then the clock re-anchors to the
+  host's beat with the scan rules (no start doubled or lost) and the just-started notes keep sounding. Negative
+  beats never wrap: pre-roll is silent. While stopped, pass the beat only when it moved (the free clock runs).
+- **The control grid** counts from the last transport start: two renders that start playing at the same song
+  position are bit-identical, whatever ran before, at any block size.
+- **Chase cost.** A Play inside long notes runs at most 4096 ticks at once, then 256 per 32 samples; the 16 x 64-beat
+  case sounds after about 0.28 s. The chase moment's own block is the expensive one (printed by chaseCostBounded).
+- **For M3.** runGrains and runLock go into Voice::renderRun's dispatch (VoiceRender.cpp) and `playedEngine` becomes
+  `return wanted;`. The planner (EnginePlan.cpp) is already the whole JS planner: the grain units only change what
+  the heads estimate (`est`) and measure (`segPeak`). The display already writes grains (Voice and Cloud slots,
+  Lock captures). `tapeStandInsCounted` follows `playedEngine` and needs no edit. The 37 grains cases of
+  renders.json run through the same harness (`render::renderFixtureCase`): drop the `needs == "tape"` filter in
+  test_parity_renders.cpp (the raw-snapshot case needs a raw-snapshot reader in the harness; it says so now).
