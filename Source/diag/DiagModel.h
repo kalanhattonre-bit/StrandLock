@@ -74,6 +74,10 @@ namespace sl::diag
         /** Any thread: a state of this many bytes was loaded; readable is false when it was kept unread. */
         void stateLoaded (std::size_t bytes, bool readable) noexcept;
 
+        /** Audio thread: a block played while the sound a state load asked for was not there yet (plan 7.4
+            decision 3: the load waited 10 s for it, and clip notes stay silent until it arrives). */
+        void audioWaitingForSound() noexcept;
+
         //==========================================================================================
         // Message thread.
 
@@ -141,6 +145,7 @@ namespace sl::diag
             std::uint64_t stateSaves = 0, stateLoads = 0;
             long long lastSavedBytes = -1, lastLoadedBytes = -1;   // -1 before the first
             bool lastLoadReadable = true;
+            std::uint64_t blocksWaitingForSound = 0;
 
             std::vector<BlockStart> blockStarts;   // recent, oldest first
             std::vector<Wrap> wraps;
@@ -195,6 +200,7 @@ namespace sl::diag
         std::atomic<std::uint64_t> stateSaves { 0 }, stateLoads { 0 };
         std::atomic<long long> lastSavedBytes { -1 }, lastLoadedBytes { -1 };
         std::atomic<bool> lastLoadReadable { true };
+        std::atomic<std::uint64_t> blocksWaitingForSound { 0 };
 
         // The audio thread's own state (only it touches these, or prepare while no audio runs).
         std::uint64_t blockIndex = 0;

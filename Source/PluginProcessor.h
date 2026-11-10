@@ -2,12 +2,19 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "core/Snapshot.h"
 #include "diag/DiagModel.h"
+#include "doc/ClipDocument.h"
+#include "doc/CommandQueue.h"
+#include "doc/EditHistory.h"
+#include "doc/SampleManager.h"
+#include "doc/SnapshotPublisher.h"
+#include "engine/SampleData.h"
 #include "host/HostInfo.h"
 #include "params/ParamBridge.h"
 #include "params/ParameterLayout.h"
 #include "probe/ProbeSynth.h"
-#include "probe/SoundSlot.h"
+#include "rt/VersionExchange.h"
 #include "state/StateChunks.h"
 #include "state/StateFormat.h"
 #include "state/UserSettings.h"
@@ -16,16 +23,23 @@
 #include <atomic>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
 
-/** StrandLock's processor (M0, the probe build): a VST3 instrument with the 50 v1 parameters, the binary state
-    (PARM, INST, SMPL, UIST; CLIP and unknown chunks kept as they are), the diagnostics model, and the probe
-    voice playing the starter Saw from MIDI. M2 replaces the probe with the engine.
+/** StrandLock's processor: a VST3 instrument with the 50 v1 parameters, the document (the clip and the INST
+    state, with undo), the binary state (PARM, INST, CLIP through model::ClipCodec, SMPL starter and file
+    records, UIST; unknown chunks kept as they are), the sound loader and the diagnostics. Until M2's
+    integration step the probe voice plays the loaded sound from MIDI; the clip is compiled and handed to the
+    audio thread already, but nothing plays it yet.
 
-    Threads (PLUGIN-PLAN 1.3): processBlock is the audio thread and only reads atomics, takes the sound with one
-    atomic exchange and feeds the diagnostics lock-free. Everything named "message thread" below is for the
-    editor and the host's state calls. */
+    Threads (PLUGIN-PLAN 1.3): processBlock is the audio thread and only reads atomics and takes versions with one
+    atomic exchange. The SnapshotPublisher compiles clips on its thread, the SampleManager makes and decodes sounds
+    on its worker. Everything named "message thread" below is for the editor and the host's state calls. */
 class StrandLockProcessor final : public juce::AudioProcessor,
-                                  private juce::AudioProcessorParameter::Listener
+                                  private juce::AudioProcessorParameter::Listener,
+                                  private juce::AsyncUpdater
 {
 public:
     StrandLockProcessor();
@@ -59,6 +73,9 @@ public:
 
     juce::AudioProcessorParameter* getBypassParameter() const override;
 
+    /** How long a state load (and prepareToPlay) waits for the sound and the clip it asked for (decision 3). */
+    static constexpr int kLoadWaitMs = 10000;
+
     //==============================================================================================
     // For the editor and the tests (message thread unless it says otherwise).
 
@@ -75,19 +92,73 @@ public:
     const sl::host::HostInfo& getHostInfo() const noexcept { return hostInfo; }
     sl::state::UserSettings& getUserSettings() noexcept { return *userSettings; }
 
-    /** The loaded sound (the waveform strip draws it): the newest one, shared; never nullptr after construction. */
-    std::shared_ptr<const sl::sounds::StarterSound> getLoadedSound() const { return soundSlot.latest(); }
+    //----------------------------------------------------------------------------------------------
+    // The document.
 
-    /** Loads a starter (synchronously: tens of milliseconds the first time, shared afterwards) and records it in SMPL. */
-    void loadStarter (sl::sounds::StarterId id, std::int32_t seed = 1);
+    /** The clip and the INST state (any thread reads; edits through editClip). */
+    sl::doc::ClipDocument& getDocument() noexcept { return clipDoc; }
+    const sl::doc::ClipDocument& getDocument() const noexcept { return clipDoc; }
 
-    sl::state::InstState getInstState() const;
-    void setInstState (const sl::state::InstState& s);
+    /** An edit of the clip as one undo step called label, through the document's caps (4096 notes, 32 MiB, the
+        snapshot budget). A refused edit changes nothing and its outcome holds the toast. */
+    sl::doc::EditOutcome editClip (const std::string& label, sl::model::EditResult proposed);
+    sl::doc::EditOutcome editClip (const std::string& label, sl::model::Clip proposed);
+
+    /** Undo and Redo of the document (clip, INST state, sound, and the parameters the steps changed). */
+    bool undo();
+    bool redo();
+    bool canUndo() const;
+    bool canRedo() const;
+    std::optional<std::string> undoLabel() const;
+    std::optional<std::string> redoLabel() const;
+
+    sl::state::InstState getInstState() const { return clipDoc.instState(); }
+    void setInstState (const sl::state::InstState& s) { clipDoc.setInstState (s); }
 
     sl::state::UiState getUiState() const;
     void setUiState (const sl::state::UiState& s);
 
-    sl::state::SampleRef getSampleRef() const;
+    /** The sound the project names (SMPL): a starter, or a file (kept as it was when the file is missing). */
+    sl::state::SampleRef getSampleRef() const { return clipDoc.soundRef(); }
+
+    //----------------------------------------------------------------------------------------------
+    // Sounds (doc/SampleManager.h).
+
+    /** The sound that plays now: what the waveform strip draws (its samples, name, whether the project's file
+        is missing). Null only until the first sound is ready, a few tens of milliseconds after construction. */
+    std::shared_ptr<const sl::doc::SoundView> getCurrentSound() const { return sampleManager->current(); }
+
+    /** The user picked a starter (the menu) or a file (Browse, a drop). The worker makes or decodes it; when it
+        is ready the processor sets the root, the cents and the Region (host-visible edits), records the sound,
+        makes one undo step and publishes it, on the message thread (handleAsyncUpdate, or deliverSoundLoads). */
+    std::uint64_t loadStarterSound (sl::sounds::StarterId id, std::int32_t seed = 1);
+    std::uint64_t loadSoundFile (const juce::File& file);
+
+    /** Message thread: applies the user loads that are ready (called by the processor's AsyncUpdater; the tests,
+        which run no message loop, call it themselves). Returns how many were published. */
+    int deliverSoundLoads();
+
+    /** Waits until the sound loads asked for so far are made (at most timeoutMs), then delivers the user ones
+        (message thread). For the tests and the editor snapshots. */
+    bool waitForSounds (int timeoutMs = kLoadWaitMs);
+
+    /** The load reports since the last call (the toasts: a missing file, a file cut to 10 minutes, a failure). */
+    std::vector<sl::doc::LoadReport> takeSoundReports();
+
+    sl::doc::SampleManager& getSampleManager() noexcept { return *sampleManager; }
+    sl::doc::SnapshotPublisher& getSnapshotPublisher() noexcept { return *publisher; }
+
+    /** Waits until the newest clip version is compiled and handed to the audio thread (at most timeoutMs). */
+    bool waitForSnapshot (int timeoutMs = kLoadWaitMs);
+
+    /** UI -> audio commands (doc/CommandQueue.h; the integration step drains it in processBlock). */
+    sl::doc::CommandQueue& getCommandQueue() noexcept { return commands; }
+
+    /** Frees every snapshot and sample version the audio thread no longer reads (plan 1.3's 10 Hz collect). */
+    void collectVersions();
+
+    //----------------------------------------------------------------------------------------------
+    // Theme, banner, diagnostics.
 
     /** The theme to draw: the per-user choice when there is one, else the project's UIST copy. */
     sl::state::Theme getTheme() const;
@@ -106,17 +177,22 @@ public:
     const sl::probe::ProbeSynth::Stats& getProbeStats() const noexcept { return probe.stats(); }
     void resetProbeStats() noexcept { probe.resetStats(); }
 
-    /** The probe's sound slot (the tests check what it holds). */
-    const sl::probe::SoundSlot& getSoundSlot() const noexcept { return soundSlot; }
+    /** The sample and the snapshot the audio thread took last (read them while it is not processing). */
+    const sl::engine::SampleData* getAudioSample() const noexcept { return samples.current(); }
+    const sl::core::Snapshot* getAudioSnapshot() const noexcept { return snapshots.current(); }
 
 private:
     void parameterValueChanged (int parameterIndex, float newValue) override;
     void parameterGestureChanged (int parameterIndex, bool gestureIsStarting) override;
+    void handleAsyncUpdate() override;
 
     sl::state::Payloads currentPayloads() const;   // under stateLock
-    void applyInstToAtomics (const sl::state::InstState& s) noexcept;
-    void handleMidi (const juce::uint8* data, int size, int samplePosition) noexcept;
+    sl::state::PayloadPtr clipPayload() const;     // under stateLock: the current clip's CLIP payload, encoded once per version
     void loadState (const void* data, std::size_t size);
+    sl::doc::ParamValues currentParamValues() const;
+    void resetHistory();
+    void applyStep (const sl::doc::EditHistory::Step& step);
+    void writeParams (const std::vector<std::pair<int, float>>& values);
 
     sl::params::TextContext textContext;
     juce::AudioProcessorValueTreeState apvts;
@@ -125,23 +201,33 @@ private:
     sl::params::NonParamAtomics nonParam;
 
     sl::probe::ProbeSynth probe;
-    sl::probe::SoundSlot soundSlot;
     sl::diag::DiagModel diag;
     sl::host::HostInfo hostInfo;
     std::shared_ptr<sl::state::UserSettings> userSettings;
 
-    // The state outside the parameters, and what the last load kept (message side, under stateLock).
+    // The document and its hand-offs. Declared before the two threads below, so they outlive them.
+    sl::doc::ClipDocument clipDoc { nonParam };
+    sl::rt::VersionExchange<sl::core::Snapshot> snapshots;
+    sl::rt::VersionExchange<sl::engine::SampleData> samples;
+    sl::doc::CommandQueue commands;
+    mutable std::mutex historyLock;
+    sl::doc::EditHistory history;
+    std::unique_ptr<sl::doc::SnapshotPublisher> publisher;
+    std::unique_ptr<sl::doc::SampleManager> sampleManager;
+
+    // The state outside the parameters and the document, and what the last load kept (under stateLock).
     mutable std::mutex stateLock;
-    sl::state::InstState instState;
     sl::state::UiState uiState;
-    sl::state::SampleRef sampleRef;
     std::vector<sl::state::ParmEntry> parmExtras;   // PARM entries for parameters this version does not have
     sl::state::Bytes parmTrailing;
     sl::state::KeptLayout kept;
+    mutable sl::model::ClipPtr encodedClip;          // the clip encodedClipPayload was made from
+    mutable sl::state::PayloadPtr encodedClipPayload;
 
     // Diagnostics: which parameters a StrandLock control is changing now (a gesture), and loads in progress.
     std::array<std::atomic<bool>, sl::params::kNumParams> inGesture {};
     std::atomic<int> loadingState { 0 };
+    std::atomic<std::uint64_t> awaitedSound { 0 };   // the sound request the last state load waits for
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StrandLockProcessor)
 };

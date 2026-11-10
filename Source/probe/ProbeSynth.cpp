@@ -45,7 +45,7 @@ namespace sl::probe
         firstBlock = true;
     }
 
-    void ProbeSynth::setSound (const sounds::StarterSound* s) noexcept
+    void ProbeSynth::setSound (const engine::SampleData* s) noexcept
     {
         if (s == sound)
             return;
@@ -91,7 +91,7 @@ namespace sl::probe
 
     double ProbeSynth::rateFor (int note) const noexcept
     {
-        const double soundRate = sound != nullptr ? sound->sampleRate : sounds::kStarterSampleRate;
+        const double soundRate = sound != nullptr && sound->sr > 0.0 ? sound->sr : sounds::kStarterSampleRate;
         const double semis = static_cast<double> (note) - root + bend * bendRange + pitch;
         const double r = std::pow (2.0, semis / 12.0) * soundRate / sr;
         return std::isfinite (r) ? r : 1.0;
@@ -255,10 +255,10 @@ namespace sl::probe
 
     void ProbeSynth::render (float* left, float* right, int n) noexcept
     {
-        const bool playable = sound != nullptr && sound->frames() >= 4 && sound->right.size() == sound->frames();
-        const float* srcL = playable ? sound->left.data() : nullptr;
-        const float* srcR = playable ? sound->right.data() : nullptr;
-        const std::size_t frames = playable ? sound->frames() : 0;
+        const bool playable = sound != nullptr && sound->n >= 4 && sound->L != nullptr && sound->R != nullptr;
+        const float* srcL = playable ? sound->L : nullptr;
+        const float* srcR = playable ? sound->R : nullptr;
+        const std::size_t frames = playable ? static_cast<std::size_t> (sound->n) : 0;
         const double framesD = static_cast<double> (frames);
         const double bypassStep = 1.0 / (kRampSeconds * sr);
 

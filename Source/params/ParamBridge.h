@@ -1,17 +1,21 @@
 #pragma once
 
-// From the parameters to the engine's instrument (PLUGIN-PLAN 2.4). readInst runs on the audio thread at the
+// Between the parameters and the instrument (PLUGIN-PLAN 2.4). readInst runs on the audio thread at the
 // start of every block: lock-free atomic loads only, no allocation. A non-finite host value falls back to the
 // default (GrainLock's readParameters), a choice index is rounded and kept in its list, and the result goes
-// through core::clampForEngine.
+// through core::clampForEngine. applyPatch goes the other way, on the message thread: an InstPatch (a sound
+// load, a sound preset, a recipe, Dice, Detect, Undo) sets the parameters it names as host-visible edits.
 
 #include "ParamIds.h"
 #include "core/Inst.h"
+#include "state/StateChunks.h"
 
 #include <array>
 #include <atomic>
 #include <cstdint>
 #include <limits>
+#include <utility>
+#include <vector>
 
 namespace juce
 {
@@ -54,4 +58,24 @@ namespace sl::params
 
     /** The host bypass switch (parameter 49), which is not part of the instrument. */
     bool readBypass (const ParameterRefs& refs) noexcept;
+
+    //==============================================================================================
+    /** One parameter's new plain value (its index in the frozen order). */
+    using ParamChange = std::pair<int, float>;
+
+    /** The plain value the patch gives each parameter it names, in parameter order, made legal (clamped, a
+        choice's index, a switch's 0 or 1, a whole number rounded). Nothing is set. The INST-state fields (seed,
+        the wheels, key, scale, scale lock) are not parameters and are not in the list. */
+    std::vector<ParamChange> patchValues (const core::InstPatch& patch);
+
+    /** Message thread (PLUGIN-PLAN 2.4): sets every parameter of patchValues (patch) whose value differs, each
+        in a gesture of its own (beginChangeGesture, the new value notifying the host, endChangeGesture), as
+        GrainLock's applyPreset does, so Cubase records and shows them as edits. A float parameter takes the
+        exact float (FloatParameter keeps it). Returns the parameters it changed, with their new values. */
+    std::vector<ParamChange> applyPatch (juce::AudioProcessorValueTreeState& apvts, const core::InstPatch& patch);
+
+    /** The patch's INST-state fields written into s (plan 2.2: they go to the document, not to parameters): the
+        seed, each wheel's target (its lane id, or "off") and CC, the key, the scale's name and the scale lock.
+        True when the patch named any of them. */
+    bool applyStateFields (state::InstState& s, const core::InstPatch& patch);
 }

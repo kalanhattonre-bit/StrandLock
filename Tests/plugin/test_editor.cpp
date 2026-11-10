@@ -128,6 +128,7 @@ namespace
     juce::Image shoot (const Shot& s)
     {
         StrandLockProcessor proc;
+        proc.waitForSounds();   // the default sound is made on the worker (M2): the strip draws it once it is there
         auto& settings = proc.getUserSettings();
         settings.setTheme (s.theme);
         settings.setUiScalePercent (s.scalePercent);
@@ -297,6 +298,7 @@ SL_TEST ("ui", editorLayout)
 
     StrandLockProcessor proc;
     resetUserSettings (proc);
+    proc.waitForSounds();   // the default sound is made on the worker (M2)
     StrandLockEditor editor (proc);
     editor.refreshNow();
     auto& view = editor.getView();
@@ -329,9 +331,9 @@ SL_TEST ("ui", editorLayout)
            fmt ("mode 8 with the Grain chip: UIST \"%s\"", proc.getUiState().subLane.c_str()));
     view.setMode (1);
 
-    // The waveform strip draws the loaded starter.
-    const auto loaded = proc.getLoadedSound();
-    check (view.getStrip().shownSound() == loaded.get() && view.getStrip().headerText().startsWith ("Saw"),
+    // The waveform strip draws the loaded starter (the Saw that opens up, D9).
+    const auto loaded = proc.getCurrentSound();
+    check (loaded != nullptr && view.getStrip().shownSound() == loaded.get() && view.getStrip().headerText().startsWith ("Saw that opens up"),
            fmt ("the strip shows the loaded sound (\"%s\")", view.getStrip().headerText().toRawUTF8()));
     // The prototype draws the wave at 80 % over the strip's background (sl-ui.js renderWave: globalAlpha 0.8).
     const auto blended = dark[Tok::stripBg].interpolatedWith (dark[Tok::wave], ui::StripView::waveAlpha);

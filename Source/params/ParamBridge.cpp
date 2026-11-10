@@ -1,10 +1,13 @@
 #include "ParamBridge.h"
 
 #include "ParameterLayout.h"
+#include "core/Music.h"
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include <algorithm>
 #include <cmath>
+#include <string>
 
 namespace sl::params
 {
@@ -129,5 +132,131 @@ namespace sl::params
     bool readBypass (const ParameterRefs& refs) noexcept
     {
         return Reader { refs }.toggle (P::bypass);
+    }
+
+    //==============================================================================================
+    std::vector<ParamChange> patchValues (const core::InstPatch& patch)
+    {
+        std::vector<ParamChange> out;
+        auto put = [&out] (P p, double plain) { out.emplace_back (index (p), legalPlain (index (p), (float) plain)); };
+        auto putIf = [&put] (P p, const std::optional<double>& v) { if (v) put (p, *v); };
+        auto putFlag = [&put] (P p, const std::optional<bool>& v) { if (v) put (p, *v ? 1.0 : 0.0); };
+        auto putEnum = [&put] (P p, const auto& v) { if (v) put (p, (double) static_cast<int> (*v)); };
+
+        if (patch.macros)
+            for (int m = 0; m < core::kNumMacros; ++m)
+                put (static_cast<P> (index (P::macro1) + m), (*patch.macros)[(std::size_t) m]);
+        putIf (P::ampOffset, patch.offsets.amp);
+        putIf (P::vibOffset, patch.offsets.vib);
+        putIf (P::toneOffset, patch.offsets.tone);
+        putIf (P::formantOffset, patch.offsets.formant);
+        putIf (P::hollowOffset, patch.offsets.hollow);
+        putIf (P::outGain, patch.outGain);
+        putEnum (P::engine, patch.engine);
+        putFlag (P::lock, patch.lock);
+        putEnum (P::motion, patch.motion);
+        putIf (P::speed, patch.speed);
+        putIf (P::heads, patch.heads);
+        putIf (P::spread, patch.spread);
+        putIf (P::grainVoice, patch.grainVoice);
+        putIf (P::grainCloud, patch.grainCloud);
+        putIf (P::grainLock, patch.grainLock);
+        putIf (P::spray, patch.spray);
+        putIf (P::drift, patch.drift);
+        putIf (P::pitch, patch.pitch);
+        putFlag (P::tape, patch.tape);
+        putFlag (P::reverseGrains, patch.rev);
+        putEnum (P::headTune, patch.headTune);
+        putEnum (P::jump, patch.jump);
+        putEnum (P::refreshMode, patch.refresh.mode);
+        putIf (P::refreshMs, patch.refresh.ms);
+        putEnum (P::refreshRate, patch.refresh.rate);
+        putFlag (P::refreshBeatLock, patch.refresh.lockToBeat);
+        putIf (P::refreshSkip, patch.refresh.skip);
+        putIf (P::regionStart, patch.region.start);
+        putIf (P::regionEnd, patch.region.end);
+        putEnum (P::atEnd, patch.region.atEnd);
+        putIf (P::loopXfade, patch.region.xfadeMs);
+        putEnum (P::glideMode, patch.glideMode);
+        putIf (P::glideTime, patch.glideTime);
+        putIf (P::vibRate, patch.vibRate);
+        if (patch.vibSync)
+            put (P::vibSync, *patch.vibSync == core::kVibSyncFree ? 0.0 : (double) *patch.vibSync + 1.0);
+        putIf (P::bendRange, patch.bendRange);
+        putIf (P::velSens, patch.velSens);
+        putIf (P::polyphony, patch.polyphony);
+        putFlag (P::liveLegato, patch.liveLegato);
+        putIf (P::rootNote, patch.root);
+        putIf (P::rootCents, patch.cents);
+
+        std::stable_sort (out.begin(), out.end(), [] (const ParamChange& a, const ParamChange& b) { return a.first < b.first; });
+        return out;
+    }
+
+    std::vector<ParamChange> applyPatch (juce::AudioProcessorValueTreeState& apvts, const core::InstPatch& patch)
+    {
+        std::vector<ParamChange> changed;
+        for (const auto& [i, v] : patchValues (patch))
+        {
+            auto* p = apvts.getParameter (kParams[i].id);
+            if (p == nullptr || juce::exactlyEqual (plainValueOf (*p), v))
+                continue;
+            p->beginChangeGesture();
+            setPlainValue (*p, i, v);
+            p->endChangeGesture();
+            changed.emplace_back (i, plainValueOf (*p));
+        }
+        return changed;
+    }
+
+    bool applyStateFields (state::InstState& s, const core::InstPatch& patch)
+    {
+        auto targetId = [] (std::int8_t lane)
+        {
+            return lane >= 0 && lane < core::kNumLanes ? std::string (core::kLanes[lane].code) : std::string ("off");
+        };
+
+        bool any = false;
+        if (patch.seed)
+        {
+            s.seed = *patch.seed;
+            any = true;
+        }
+        if (patch.mod1.target)
+        {
+            s.mod1Target = targetId (*patch.mod1.target);
+            any = true;
+        }
+        if (patch.mod1.cc)
+        {
+            s.mod1Cc = static_cast<std::uint8_t> (std::clamp (*patch.mod1.cc, 0, 127));
+            any = true;
+        }
+        if (patch.mod2.target)
+        {
+            s.mod2Target = targetId (*patch.mod2.target);
+            any = true;
+        }
+        if (patch.mod2.cc)
+        {
+            s.mod2Cc = static_cast<std::uint8_t> (std::clamp (*patch.mod2.cc, 0, 127));
+            any = true;
+        }
+        if (patch.key)
+        {
+            s.key = static_cast<std::uint8_t> (std::clamp (*patch.key, 0, 11));
+            any = true;
+        }
+        if (patch.scale)
+        {
+            s.scale = core::kScales[*patch.scale < core::kNumScales ? *patch.scale : 0].name;
+            any = true;
+        }
+        if (patch.scaleLock)
+        {
+            s.scaleLock = *patch.scaleLock ? 1 : 0;
+            any = true;
+        }
+        return any;
     }
 }

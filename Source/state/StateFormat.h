@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -171,11 +172,18 @@ namespace sl::state
     Bytes makeContainer (const Bytes& chunks);
 
     //==============================================================================================
-    /** The payloads of the chunks this version writes, for one moment of the state: tag -> payload. */
-    using Payloads = std::map<std::uint32_t, Bytes>;
+    /** One payload, shared and never changed once made: the CLIP payload can be 32 MiB, and the processor
+        keeps it encoded once per clip version, so a save or a banner check never copies it. */
+    using PayloadPtr = std::shared_ptr<const Bytes>;
 
-    /** The tags this version writes, in the order it writes them into a new container. */
-    inline constexpr std::uint32_t kWrittenTags[] = { kTagParm, kTagInst, kTagSmpl, kTagUist };
+    /** The payloads of the chunks this version writes, for one moment of the state: tag -> payload. */
+    using Payloads = std::map<std::uint32_t, PayloadPtr>;
+
+    /** A payload to put in Payloads. */
+    inline PayloadPtr payload (Bytes b) { return std::make_shared<const Bytes> (std::move (b)); }
+
+    /** The tags this version writes, in the order it writes them into a new container (plan 3's table order). */
+    inline constexpr std::uint32_t kWrittenTags[] = { kTagParm, kTagInst, kTagClip, kTagSmpl, kTagUist };
 
     /** The chunk version this version writes for a tag. */
     std::uint16_t writtenVersion (std::uint32_t tag) noexcept;
@@ -211,7 +219,7 @@ namespace sl::state
             Bytes raw;                 // the chunk exactly as it was loaded
             bool written = false;      // a tag this version writes, and the first chunk with it
             bool decoded = false;      // read into the state
-            Bytes atLoad;              // written: this version's payload for that part right after the load
+            PayloadPtr atLoad;         // written: this version's payload for that part right after the load
             std::uint16_t version = 0, flags = 0;
             bool unreadable = false;   // kept because it could not be read (bad CRC, past a limit, damaged, undecodable)
             bool truncated = false;    // the cut end of the container: always written last, so it frames nothing after it
@@ -224,7 +232,7 @@ namespace sl::state
 
         static Bytes standardContainer (const Payloads& now);
 
-        /** Whether a chunk holds the project's content (PARM, INST, SMPL; later CLIP and SAUD), not UIST. */
+        /** Whether a chunk holds the project's content (PARM, INST, CLIP, SMPL; later SAUD), not UIST. */
         static bool isProjectContent (std::uint32_t tag) noexcept;
 
         /** Whole blob: every content payload of now equals the one right after the load. */

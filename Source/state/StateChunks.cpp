@@ -1,6 +1,8 @@
 #include "StateChunks.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace sl::state
 {
@@ -143,19 +145,88 @@ namespace sl::state
     }
 
     //==============================================================================================
+    namespace
+    {
+        std::uint64_t u64Of (ByteReader& r) { return r.u64(); }
+        std::uint32_t u32Of (ByteReader& r) { return r.u32(); }
+        std::string str16Of (ByteReader& r) { return r.str16(); }
+
+        std::array<std::uint8_t, 32> digestOf (ByteReader& r)
+        {
+            std::array<std::uint8_t, 32> d {};
+            if (const auto* p = r.take (d.size()))
+                std::memcpy (d.data(), p, d.size());
+            return d;
+        }
+
+        /** The analysis cache's parts: u8 count, then each part. The count is checked against the bytes left
+            (a part is at least 27 bytes) before anything is reserved. */
+        std::vector<AnalysisPart> partsOf (ByteReader& r)
+        {
+            const std::size_t count = r.u8();
+            std::vector<AnalysisPart> parts;
+            if (! r.ok() || count > r.remaining() / 27)
+            {
+                (void) r.take (r.remaining() + 1);   // marks the reader damaged
+                return parts;
+            }
+            parts.reserve (count);
+            for (std::size_t i = 0; i < count && r.ok(); ++i)
+            {
+                AnalysisPart p;
+                p.kind = static_cast<std::uint8_t> (r.u8());
+                p.start = r.f64();
+                p.end = r.f64();
+                p.bpm = r.f64();
+                p.tempoFound = static_cast<std::uint8_t> (r.u8());
+                p.label = r.str8();
+                parts.push_back (std::move (p));
+            }
+            return parts;
+        }
+    }
+
     bool decodeSmpl (const std::uint8_t* payload, std::size_t size, SampleRef& out)
     {
         ByteReader head (payload, size);
         const auto kind = head.u8();
-        if (! head.ok() || kind != 0)
-            return false;   // a file reference (M7) or a kind this version does not know
+        if (! head.ok() || kind > kSampleFile)
+            return false;   // a kind this version does not know
 
         SampleRef s;
-        s.kind = 0;
-        s.starterId.clear();
+        s.kind = static_cast<std::uint8_t> (kind);
         RecordReader rr (payload + 1, size - 1);
-        rr.field (s.starterId, str8Of)
-          .field (s.seed, i32Of);
+        if (kind == kSampleStarter)
+        {
+            s.starterId.clear();
+            rr.field (s.starterId, str8Of)
+              .field (s.seed, i32Of);
+        }
+        else
+        {
+            s.starterId.clear();
+            auto& f = s.file;
+            auto& c = f.cache;
+            rr.field (f.path, str16Of)
+              .field (f.fileSize, u64Of)
+              .field (f.sha256, digestOf)
+              .field (f.fileSampleRate, f64Of)
+              .field (f.channels, u32Of)
+              .field (f.fileFrames, u64Of)
+              .field (f.loadedStartFrame, u64Of)
+              .field (f.loadedFrames, u64Of)
+              .field (f.displayName, str16Of)
+              .field (f.keepInProject, u8Of)
+              .field (f.embedAnswer, u8Of)
+              .field (c.analysed, u8Of)
+              .field (c.hasPitch, u8Of)
+              .field (c.midi, f64Of)
+              .field (c.cents, f64Of)
+              .field (c.hasKey, u8Of)
+              .field (c.key, u8Of)
+              .field (c.scale, str8Of)
+              .field (c.parts, partsOf);
+        }
         if (! rr.finish (s.trailing))
             return false;
         out = std::move (s);
@@ -167,10 +238,58 @@ namespace sl::state
         Bytes out;
         ByteWriter w (out);
         w.u8 (s.kind);
-        w.str8 (s.starterId);
-        w.i32 (s.seed);
+        if (s.kind == kSampleFile)
+        {
+            const auto& f = s.file;
+            const auto& c = f.cache;
+            w.str16 (f.path);
+            w.u64 (f.fileSize);
+            w.bytes (f.sha256.data(), f.sha256.size());
+            w.f64 (f.fileSampleRate);
+            w.u32 (f.channels);
+            w.u64 (f.fileFrames);
+            w.u64 (f.loadedStartFrame);
+            w.u64 (f.loadedFrames);
+            w.str16 (f.displayName);
+            w.u8 (f.keepInProject);
+            w.u8 (f.embedAnswer);
+            w.u8 (c.analysed);
+            w.u8 (c.hasPitch);
+            w.f64 (c.midi);
+            w.f64 (c.cents);
+            w.u8 (c.hasKey);
+            w.u8 (c.key);
+            w.str8 (c.scale);
+            const std::size_t parts = std::min<std::size_t> (c.parts.size(), 255);
+            w.u8 (static_cast<std::uint32_t> (parts));
+            for (std::size_t i = 0; i < parts; ++i)
+            {
+                const auto& p = c.parts[i];
+                w.u8 (p.kind);
+                w.f64 (p.start);
+                w.f64 (p.end);
+                w.f64 (p.bpm);
+                w.u8 (p.tempoFound);
+                w.str8 (p.label);
+            }
+        }
+        else
+        {
+            w.str8 (s.starterId);
+            w.i32 (s.seed);
+        }
         w.bytes (s.trailing);
         return out;
+    }
+
+    bool sameSound (const SampleRef& a, const SampleRef& b) noexcept
+    {
+        if (a.kind != b.kind)
+            return false;
+        if (a.kind == kSampleFile)
+            return a.file.path == b.file.path && a.file.fileSize == b.file.fileSize && a.file.sha256 == b.file.sha256
+                && a.file.loadedStartFrame == b.file.loadedStartFrame && a.file.loadedFrames == b.file.loadedFrames;
+        return a.starterId == b.starterId && a.seed == b.seed;
     }
 
     //==============================================================================================

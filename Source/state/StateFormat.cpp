@@ -39,11 +39,28 @@ namespace sl::state
             return s.substr (0, n);
         }
 
-        const Bytes& payloadOf (const Payloads& p, std::uint32_t tag)
+        const Bytes& bytesOf (const PayloadPtr& p)
         {
             static const Bytes none;
+            return p != nullptr ? *p : none;
+        }
+
+        const Bytes& payloadOf (const Payloads& p, std::uint32_t tag)
+        {
             const auto it = p.find (tag);
-            return it != p.end() ? it->second : none;
+            return it != p.end() ? bytesOf (it->second) : bytesOf (nullptr);
+        }
+
+        PayloadPtr payloadPtrOf (const Payloads& p, std::uint32_t tag)
+        {
+            const auto it = p.find (tag);
+            return it != p.end() ? it->second : nullptr;
+        }
+
+        /** The same bytes (the same shared payload, or equal content; a missing payload is empty). */
+        bool samePayload (const PayloadPtr& a, const PayloadPtr& b)
+        {
+            return a == b || bytesOf (a) == bytesOf (b);
         }
     }
 
@@ -362,14 +379,14 @@ namespace sl::state
         k.blob.assign (b, b + size);
         for (const auto tag : kWrittenTags)
             if (isProjectContent (tag))
-                k.contentAtLoad[tag] = payloadOf (atLoad, tag);
+                k.contentAtLoad[tag] = payloadPtrOf (atLoad, tag);
         return k;
     }
 
     bool KeptLayout::contentUnchanged (const Payloads& now) const
     {
         for (const auto tag : kWrittenTags)
-            if (isProjectContent (tag) && payloadOf (now, tag) != payloadOf (contentAtLoad, tag))
+            if (isProjectContent (tag) && ! samePayload (payloadPtrOf (now, tag), payloadPtrOf (contentAtLoad, tag)))
                 return false;
         return true;
     }
@@ -392,7 +409,7 @@ namespace sl::state
             {
                 s.written = true;
                 s.decoded = i < decoded.size() && decoded[i];
-                s.atLoad = payloadOf (atLoad, c.tag);
+                s.atLoad = payloadPtrOf (atLoad, c.tag);
                 s.unreadable = ! s.decoded;
             }
             else
@@ -427,8 +444,9 @@ namespace sl::state
             }
 
             emitted.insert (s.tag);
-            const Bytes& payload = payloadOf (now, s.tag);
-            if (payload == s.atLoad)
+            const PayloadPtr payloadNow = payloadPtrOf (now, s.tag);
+            const Bytes& payload = bytesOf (payloadNow);
+            if (samePayload (payloadNow, s.atLoad))
             {
                 if (s.truncated)
                     cutEnd = &s.raw;
@@ -453,7 +471,7 @@ namespace sl::state
         if (wholeBlob)
             return contentUnchanged (now);
         for (const Slot& s : slots)
-            if (s.unreadable && (! s.written || payloadOf (now, s.tag) == s.atLoad))
+            if (s.unreadable && (! s.written || samePayload (payloadPtrOf (now, s.tag), s.atLoad)))
                 return true;
         return false;
     }

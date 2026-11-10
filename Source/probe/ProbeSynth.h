@@ -16,6 +16,7 @@
 // host splits its blocks. No allocation, lock or system call after prepare().
 
 #include "core/Inst.h"
+#include "engine/SampleData.h"
 #include "sounds/StarterSounds.h"
 
 #include <array>
@@ -37,9 +38,10 @@ namespace sl::probe
         /** Silences everything at once (all voices off, ramps and limiter at rest). */
         void reset() noexcept;
 
-        /** The sound to play (nullptr = silence). A different sound stops every voice at once (M0's probe has no
-            steal tail across a sound change). The sound must stay alive while it is set. */
-        void setSound (const sounds::StarterSound* sound) noexcept;
+        /** The sound to play (nullptr = silence): since M2 the SampleData the processor takes from its sample
+            exchange. A different sound stops every voice at once (the probe has no steal tail across a sound
+            change). The sound must stay alive while it is set. */
+        void setSound (const engine::SampleData* sound) noexcept;
 
         /** The instrument for this block (velSens, outGain, polyphony, root, cents, pitch, bendRange). */
         void setInst (const core::Inst& inst) noexcept;
@@ -95,7 +97,7 @@ namespace sl::probe
         void updateRates() noexcept;
 
         std::array<Voice, kVoices> voices {};
-        const sounds::StarterSound* sound = nullptr;
+        const engine::SampleData* sound = nullptr;
         double sr = 48000.0;
         std::uint64_t nextAge = 0;
 

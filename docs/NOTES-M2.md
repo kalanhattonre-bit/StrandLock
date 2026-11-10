@@ -515,7 +515,8 @@ The plugin chain, part 1 (plan 7.4): the document, the sounds, the state and the
 
 ### Progress
 
-- Done: nothing yet.
-- In progress: state (SMPL file record, CLIP through ClipCodec), doc/ (ClipDocument, EditHistory,
-  SnapshotPublisher, SampleManager), ParamBridge::applyPatch, host/HostSync, host/MidiRouter.
-- Next: processor wiring, test_state_clip.cpp, HostSync and MidiRouter tests, CI green, the hand-off below.
+- Done (first CI round pending): state (SMPL file record, CLIP through ClipCodec, shared payloads), doc/
+  (ClipDocument, EditHistory, SnapshotPublisher, SampleManager, Sha256), ParamBridge::applyPatch, host/HostSync,
+  host/MidiRouter, the processor wiring, tests (test_state_clip, test_doc, test_host_midi, updated M0 tests).
+- In progress: CI on m2-plugin.
+- Next: CI green, the NOTES bullets (decisions, figures) and the hand-off for P2.

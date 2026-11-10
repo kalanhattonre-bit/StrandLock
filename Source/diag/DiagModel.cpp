@@ -319,6 +319,11 @@ namespace sl::diag
         bump (stateLoads);
     }
 
+    void DiagModel::audioWaitingForSound() noexcept
+    {
+        bump (blocksWaitingForSound);
+    }
+
     //==============================================================================================
     void DiagModel::drain()
     {
@@ -470,6 +475,7 @@ namespace sl::diag
         s.lastSavedBytes = lastSavedBytes.load (relaxed);
         s.lastLoadedBytes = lastLoadedBytes.load (relaxed);
         s.lastLoadReadable = lastLoadReadable.load (relaxed);
+        s.blocksWaitingForSound = blocksWaitingForSound.load (relaxed);
 
         s.blockStarts = listOf (blockStartHistory);
         s.wraps = listOf (wrapHistory);
@@ -581,6 +587,8 @@ namespace sl::diag
         if (s.lastLoadedBytes >= 0)
             stateLine << ", last " << (juce::int64) s.lastLoadedBytes << " bytes ("
                       << (s.lastLoadReadable ? "read" : "could not be read: kept as it was") << ")";
+        if (s.blocksWaitingForSound > 0)
+            stateLine << "; " << (juce::int64) s.blocksWaitingForSound << " blocks played before the loaded sound was ready";
         lines.add (stateLine);
 
         // Keys and drops.

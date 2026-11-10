@@ -1,6 +1,8 @@
-// The plugin state (PLUGIN-PLAN 3, M0): the binary container, the PARM, INST, SMPL and UIST chunks, CLIP kept
-// as opaque bytes, unknown chunks and unreadable blobs written back unchanged, and loads that never crash,
-// never read past the data and never leave a parameter out of range, whatever the bytes are.
+// The plugin state (PLUGIN-PLAN 3, M0, and M2's full state): the binary container, the PARM, INST, CLIP, SMPL
+// and UIST chunks, unknown chunks and unreadable blobs written back unchanged, and loads that never crash,
+// never read past the data and never leave a parameter out of range, whatever the bytes are. The clip round
+// trips over every preset and fixture clip, forward compatibility through the processor and the SMPL file
+// record are in test_state_clip.cpp.
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -8,6 +10,10 @@
 #include "core/Lanes.h"
 #include "core/Music.h"
 #include "core/Version.h"
+#include "model/Clip.h"
+#include "model/ClipCodec.h"
+#include "model/Node.h"
+#include "model/Presets.h"
 #include "params/ParameterLayout.h"
 #include "sounds/StarterSounds.h"
 #include "state/Crc32.h"
@@ -207,12 +213,35 @@ namespace
         return state::makeContainer (framed);
     }
 
-    /** The four chunks this version writes, for these values (as the processor would encode them). */
+    /** The CLIP payload of an empty 4-bar clip (what a state with no CLIP chunk loads). */
+    const Bytes& emptyClipBytes()
+    {
+        static const Bytes b = model::encodeClip (model::newClip (4.0));
+        return b;
+    }
+
+    /** A small clip (two notes, one drawn lane) for the reference blobs: about 1.5 KB encoded. */
+    const Bytes& smallClipBytes()
+    {
+        static const Bytes b = []
+        {
+            model::Clip c = model::newClip (2.0);
+            model::Note n1 = model::mkNote (60.0, 0.0, 1.0, "ref-1");
+            n1.lane (core::LaneId::amp) = { model::mkNode (0.0, 0.2), model::mkNode (1.0, 0.9, model::NodeShape::linear) };
+            c.notes.push_back (std::make_shared<const model::Note> (n1));
+            c.notes.push_back (std::make_shared<const model::Note> (model::mkNote (64.0, 1.0, 1.0, "ref-2")));
+            return model::encodeClip (c);
+        }();
+        return b;
+    }
+
+    /** The five chunks this version writes, for these values (as the processor would encode them). */
     std::vector<Chunk> ownChunks (const std::array<float, params::kNumParams>& values, const state::InstState& inst,
-                                  const state::SampleRef& smpl, const state::UiState& ui)
+                                  const state::SampleRef& smpl, const state::UiState& ui, const Bytes& clip = emptyClipBytes())
     {
         return { { state::kTagParm, state::encodeParm (values, {}, {}) },
                  { state::kTagInst, state::encodeInst (inst) },
+                 { state::kTagClip, clip },
                  { state::kTagSmpl, state::encodeSmpl (smpl) },
                  { state::kTagUist, state::encodeUist (ui) } };
     }
@@ -245,13 +274,14 @@ namespace
         put32 (b, 12, state::crc32 (b.data(), 12));
     }
 
-    /** A blob of exactly totalSize bytes: the given parameters and a CLIP chunk of seeded bytes filling the rest. */
+    /** A blob of exactly totalSize bytes: the given parameters, a small clip, the default starter, and an unknown
+        chunk of seeded bytes (kept verbatim) after PARM filling the rest. */
     Bytes referenceBlob (const std::array<float, params::kNumParams>& values, std::size_t totalSize, std::uint64_t seed)
     {
-        auto chunks = ownChunks (values, state::InstState {}, starterRef (sounds::StarterId::saw, 1), state::UiState {});
+        auto chunks = ownChunks (values, state::InstState {}, starterRef (sounds::StarterId::sawopen, 1), state::UiState {}, smallClipBytes());
         const std::size_t base = containerOf (chunks).size();
         Rng rng { seed };
-        chunks.insert (chunks.begin() + 1, Chunk { state::kTagClip, randomBytes (rng, totalSize - base - state::kChunkHeaderSize) });
+        chunks.insert (chunks.begin() + 1, Chunk { state::fourCC ("FILL"), randomBytes (rng, totalSize - base - state::kChunkHeaderSize) });
         return containerOf (chunks);
     }
 
@@ -281,7 +311,7 @@ SL_TEST ("state", crc32Reference)
 
 SL_TEST ("state", containerLayout)
 {
-    section ("State: a new instance saves the header, then PARM, INST, SMPL, UIST (PLUGIN-PLAN 3)");
+    section ("State: a new instance saves the header, then PARM, INST, CLIP, SMPL, UIST (PLUGIN-PLAN 3)");
 
     StrandLockProcessor p;
     const Bytes b = saveOf (p);
@@ -303,9 +333,9 @@ SL_TEST ("state", containerLayout)
         framesGood = framesGood && c.crcOk && c.withinLimits && ! c.truncated && c.version == 1 && c.flags == 0
                   && c.rawLength % 4 == 0;
     }
-    check (tags == "PARM INST SMPL UIST ", fmt ("chunks in order: %s", tags.c_str()));
+    check (tags == "PARM INST CLIP SMPL UIST ", fmt ("chunks in order: %s", tags.c_str()));
     check (framesGood, "every chunk is version 1, flags 0, CRC good, padded to 4");
-    if (parsed.chunks.size() != 4)
+    if (parsed.chunks.size() != 5)
         return;
 
     state::ParmChunk parm;
@@ -327,13 +357,20 @@ SL_TEST ("state", containerLayout)
                && std::isnan (inst.regionStartExact) && std::isnan (inst.regionEndExact) && inst.liveTemplate.empty() && inst.trailing.empty(),
            "INST holds defaultInst's state fields: seed 1, wheels vib/CC1 and tone/CC2, C Chromatic, no exact Region edges");
 
+    // A new instance opens on Strand Demo (BLUEPRINT 6) and the Saw that opens up (D9).
+    const auto clip = model::decodeClip (parsed.chunks[2].payload, parsed.chunks[2].payloadLength);
+    const auto demo = model::loadClipPreset ("strand-demo");
+    check (clip.clip.has_value() && demo.has_value() && clip.clip->notes.size() == 26
+               && Bytes (parsed.chunks[2].payload, parsed.chunks[2].payload + parsed.chunks[2].payloadLength) == model::encodeClip (*demo),
+           fmt ("CLIP holds Strand Demo through the clip codec (%d notes)", clip.clip.has_value() ? (int) clip.clip->notes.size() : -1));
+
     state::SampleRef smpl;
-    check (state::decodeSmpl (parsed.chunks[2].payload, parsed.chunks[2].payloadLength, smpl) && smpl.kind == 0
-               && smpl.starterId == "saw" && smpl.seed == 1,
-           fmt ("SMPL names the starter the probe plays: \"%s\" seed %d", smpl.starterId.c_str(), (int) smpl.seed));
+    check (state::decodeSmpl (parsed.chunks[3].payload, parsed.chunks[3].payloadLength, smpl) && smpl.kind == 0
+               && smpl.starterId == "sawopen" && smpl.seed == 1,
+           fmt ("SMPL names the default starter: \"%s\" seed %d", smpl.starterId.c_str(), (int) smpl.seed));
 
     state::UiState ui;
-    check (state::decodeUist (parsed.chunks[3].payload, parsed.chunks[3].payloadLength, ui) && ui.theme == 0
+    check (state::decodeUist (parsed.chunks[4].payload, parsed.chunks[4].payloadLength, ui) && ui.theme == 0
                && ui.uiScalePercent == 100 && ui.logicalWidth == 1100 && ui.logicalHeight == 680 && ui.mode == 1,
            fmt ("UIST: dark, 100 %%, 1100 x 680, mode 1 (%d, %d %%, %d x %d, mode %d)", ui.theme, ui.uiScalePercent,
                 ui.logicalWidth, ui.logicalHeight, ui.mode));
@@ -344,9 +381,9 @@ SL_TEST ("state", containerLayout)
     check (fresh.getStateBanner().isEmpty() && fresh.getUnknownChunkCount() == 0, "no banner, no unknown chunks");
 }
 
-SL_TEST ("state", roundTripWithOpaqueClip)
+SL_TEST ("state", roundTripWithStarters)
 {
-    section ("State: random parameters x opaque CLIP bytes (0..64 KB) x starters: get -> set -> get byte-identical");
+    section ("State: random parameters x clips x starters: get -> set -> get byte-identical, the starter made and playing");
 
     // Hold every starter the cases use, so each is made once.
     std::vector<std::shared_ptr<const sounds::StarterSound>> held;
@@ -357,7 +394,7 @@ SL_TEST ("state", roundTripWithOpaqueClip)
 
     Rng rng { 20261109 };
     const int cases = 32;
-    int sameBytes = 0, sameInFresh = 0, sameParams = 0, sameInst = 0, sameUi = 0, sameSample = 0, quiet = 0, soundsMatch = 0;
+    int sameBytes = 0, sameInFresh = 0, sameParams = 0, sameInst = 0, sameUi = 0, sameSample = 0, quiet = 0, soundsMatch = 0, sameClip = 0;
     for (int c = 0; c < cases; ++c)
     {
         const auto values = randomValues (rng);
@@ -367,9 +404,14 @@ SL_TEST ("state", roundTripWithOpaqueClip)
         const std::int32_t seed = (starter.id == sounds::StarterId::pad || starter.id == sounds::StarterId::beat) ? rng.range (1, 2) : 1;
         const auto smpl = starterRef (starter.id, seed);
 
-        auto chunks = ownChunks (values, inst, smpl, ui);
-        const std::size_t clipBytes = (std::size_t) (c == 0 ? 0 : c == 1 ? 65536 : rng.range (0, 65536));
-        chunks.insert (chunks.begin() + rng.range (0, 4), Chunk { state::kTagClip, randomBytes (rng, clipBytes) });
+        // A clip preset (or the empty clip), with the CLIP chunk moved to a random place in the container.
+        const auto& presets = model::clipPresets();
+        const int pick = rng.range (-1, (int) presets.size() - 1);
+        const Bytes clip = pick < 0 ? emptyClipBytes() : model::encodeClip (*model::loadClipPreset (presets[(std::size_t) pick].id));
+        auto chunks = ownChunks (values, inst, smpl, ui, clip);
+        const Chunk clipChunk = chunks[2];
+        chunks.erase (chunks.begin() + 2);
+        chunks.insert (chunks.begin() + rng.range (0, 4), clipChunk);
         const Bytes blob = containerOf (chunks);
 
         StrandLockProcessor a;
@@ -383,8 +425,9 @@ SL_TEST ("state", roundTripWithOpaqueClip)
         sameUi += state::encodeUist (a.getUiState()) == state::encodeUist (ui) ? 1 : 0;
         const auto gotSample = a.getSampleRef();
         sameSample += gotSample.starterId == smpl.starterId && gotSample.seed == smpl.seed ? 1 : 0;
-        const auto sound = a.getLoadedSound();
-        soundsMatch += sound != nullptr && sound->id == starter.id && sound->seed == seed ? 1 : 0;
+        const auto sound = a.getCurrentSound();   // the load waited for it (decision 3)
+        soundsMatch += sound != nullptr && sound->builtIn && sound->starter == starter.id && sound->seed == seed ? 1 : 0;
+        sameClip += model::encodeClip (*a.getDocument().current()) == clip ? 1 : 0;
         quiet += a.getStateBanner().isEmpty() && a.getUnknownChunkCount() == 0 ? 1 : 0;
 
         StrandLockProcessor b;
@@ -398,7 +441,8 @@ SL_TEST ("state", roundTripWithOpaqueClip)
     check (sameInst == cases, fmt ("INST read back field for field: %d of %d", sameInst, cases));
     check (sameUi == cases, fmt ("UIST read back field for field: %d of %d", sameUi, cases));
     check (sameSample == cases && soundsMatch == cases, fmt ("SMPL read back, and that starter loaded: %d and %d of %d", sameSample, soundsMatch, cases));
-    check (quiet == cases, fmt ("no banner and no unknown chunk (CLIP is a known tag kept as it is): %d of %d", quiet, cases));
+    check (sameClip == cases, fmt ("the document holds the clip the CLIP chunk carried (it encodes to the same bytes): %d of %d", sameClip, cases));
+    check (quiet == cases, fmt ("no banner and no unknown chunk: %d of %d", quiet, cases));
 }
 
 SL_TEST ("state", parametersByIdAndDefaults)
@@ -439,7 +483,7 @@ SL_TEST ("state", parametersByIdAndDefaults)
     std::string tags;
     for (const auto& c : first.chunks)
         tags += state::tagName (c.tag) + " ";
-    check (first.status == state::HeaderStatus::ok && first.chunks.size() == 4
+    check (first.status == state::HeaderStatus::ok && first.chunks.size() == 5
                && std::equal (blob.begin() + (std::ptrdiff_t) state::kHeaderSize, blob.end(), first.chunks[0].raw)
                && first.chunks[0].rawLength == blob.size() - state::kHeaderSize,
            fmt ("while nothing changed the PARM chunk is written back byte for byte, then the missing chunks (%s)", tags.c_str()));
@@ -509,7 +553,7 @@ SL_TEST ("state", unknownChunkKept)
     params::setPlainValue (p.getParam (params::P::speed), params::index (params::P::speed), 2.0f);
     const Bytes edited = saveOf (p);
     const auto parsed = state::parseContainer (edited.data(), edited.size());
-    bool keptInPlace = parsed.status == state::HeaderStatus::ok && parsed.chunks.size() == 5
+    bool keptInPlace = parsed.status == state::HeaderStatus::ok && parsed.chunks.size() == 6
                     && parsed.chunks[2].tag == state::fourCC ("CLPL") && parsed.chunks[2].version == 3
                     && parsed.chunks[2].payloadLength == unknown.size()
                     && std::equal (unknown.begin(), unknown.end(), parsed.chunks[2].payload);
@@ -541,7 +585,7 @@ SL_TEST ("state", newerChunkFieldsKept)
     const Bytes after = saveOf (p);
     const auto parsed = state::parseContainer (after.data(), after.size());
     state::InstState back;
-    const bool ok = parsed.status == state::HeaderStatus::ok && parsed.chunks.size() == 4
+    const bool ok = parsed.status == state::HeaderStatus::ok && parsed.chunks.size() == 5
                  && state::decodeInst (parsed.chunks[1].payload, parsed.chunks[1].payloadLength, back);
     check (ok && back.seed == 43 && back.trailing == inst.trailing && parsed.chunks[1].version == 2,
            "after editing the seed: INST is re-encoded with seed 43, still version 2, the 8 bytes still after it");
@@ -637,25 +681,26 @@ SL_TEST ("state", unreadableBlobsKept)
                "after a parameter edit PARM is written anew (CRC good) and the banner goes");
     }
 
-    // A CLIP with a bad CRC: M0 cannot edit a clip, so it stays kept (and the banner stays) through other edits.
+    // A CLIP with a bad CRC: kept (and the banner stays) through edits of other parts; replaced by a clip edit
+    // (test_state_clip.cpp, case (e)).
     {
-        Rng rng { 3 };
-        auto chunks = ownChunks (values, state::InstState {}, starterRef (sounds::StarterId::saw, 1), state::UiState {});
-        chunks.push_back ({ state::kTagClip, randomBytes (rng, 300) });
+        auto chunks = ownChunks (values, state::InstState {}, starterRef (sounds::StarterId::saw, 1), state::UiState {}, smallClipBytes());
         auto b = containerOf (chunks);
         const auto parsed = state::parseContainer (b.data(), b.size());
-        const std::size_t clipAt = (std::size_t) (parsed.chunks.back().raw - b.data());
+        const std::size_t clipAt = (std::size_t) (parsed.chunks[2].raw - b.data());
         b[clipAt + 12] ^= 0x01u;
         StrandLockProcessor p;
         loadInto (p, b);
-        check (parametersAre (p, values), "with a bad CLIP CRC the other chunks load (Drift 40 %)");
+        check (parametersAre (p, values) && p.getDocument().current()->notes.empty(),
+               "with a bad CLIP CRC the other chunks load (Drift 40 %) and the clip keeps its default (empty)");
         check (saveOf (p) == b && p.getStateBanner().isNotEmpty(), "the blob is re-saved byte-identically, with the banner");
         params::setPlainValue (p.getParam (params::P::pitch), params::index (params::P::pitch), 5.0f);
         const Bytes after = saveOf (p);
         const auto again = state::parseContainer (after.data(), after.size());
-        const bool clipKept = again.status == state::HeaderStatus::ok && ! again.chunks.empty() && again.chunks.back().tag == state::kTagClip
-                           && again.chunks.back().rawLength == parsed.chunks.back().rawLength
-                           && std::equal (b.begin() + (std::ptrdiff_t) clipAt, b.end(), again.chunks.back().raw);
+        const std::size_t clipRaw = parsed.chunks[2].rawLength;
+        const bool clipKept = again.status == state::HeaderStatus::ok && again.chunks.size() == 5 && again.chunks[2].tag == state::kTagClip
+                           && again.chunks[2].rawLength == clipRaw
+                           && std::equal (b.begin() + (std::ptrdiff_t) clipAt, b.begin() + (std::ptrdiff_t) (clipAt + clipRaw), again.chunks[2].raw);
         check (clipKept && after != b && p.getStateBanner().isNotEmpty(),
                "after a parameter edit the damaged CLIP is still written byte for byte (its part is unedited) and the banner stays");
     }
@@ -835,7 +880,7 @@ SL_TEST ("state", corruptionFuzz)
         check (t->overAlloc == 0 && t->overLive == 0,
                fmt ("%s: largest single allocation %zu bytes (limit 51 MiB), most live %lld bytes (limit 2 x blob + 64 MiB)",
                     what, t->largest, t->peakLive));
-        // A load that changes the starter makes it again on this thread (tens of ms): a missed target goes to NOTES-M0.
+        // A load that names another starter waits for the worker to make it (decision 3): a missed target goes to NOTES-M2.
         note (fmt ("%s: slowest load %.2f ms (target 50 ms, gate 250 ms)", what, t->worstMs));
         check (t->worstMs <= 250.0, fmt ("%s: no load slower than 250 ms (%.2f ms)", what, t->worstMs));
     }

@@ -10,6 +10,7 @@
 // drops; this view only shows them and reports clicks through its callbacks.
 
 #include "diag/DiagModel.h"
+#include "doc/SampleManager.h"
 #include "sounds/StarterSounds.h"
 #include "ui/Controls.h"
 #include "ui/DiagnosticsPage.h"
@@ -57,7 +58,7 @@ namespace sl::ui
         void refresh();
 
         /** The sound drawn now (for the tests). */
-        const sounds::StarterSound* shownSound() const noexcept { return sound.get(); }
+        const doc::SoundView* shownSound() const noexcept { return sound.get(); }
         const juce::String& headerText() const noexcept { return header; }
 
         void paint (juce::Graphics&) override;
@@ -70,10 +71,12 @@ namespace sl::ui
 
     private:
         void makePeaks();
+        juce::String soundName() const;
+        juce::String soundKind() const;   // " (built-in)", "" for a file, or that the project's file is missing
 
         const Theme& theme;
         StrandLockProcessor& processor;
-        std::shared_ptr<const sounds::StarterSound> sound;
+        std::shared_ptr<const doc::SoundView> sound;
         std::vector<float> peakMin, peakMax;   // the mid channel's min and max in kPeakBuckets slices
         float regionStart = 0.0f, regionEnd = 1.0f;
         int root = 60;

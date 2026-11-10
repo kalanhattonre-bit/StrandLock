@@ -1,9 +1,9 @@
 #pragma once
 
-// The chunks M0 reads and writes (PLUGIN-PLAN 3): PARM, INST, SMPL (a starter reference) and UIST. CLIP is
-// kept as opaque bytes until M2 wires the clip codec in. Every payload is an append-only record: a reader
-// takes the fields it knows, gives fields missing at the end their defaults, and keeps whatever follows
-// (a newer version's fields) as trailing bytes, which the encoder writes back after its own fields.
+// The chunks the processor reads and writes (PLUGIN-PLAN 3): PARM, INST, SMPL (a starter or a file reference)
+// and UIST here; CLIP is model::ClipCodec's. Every payload is an append-only record: a reader takes the fields
+// it knows, gives fields missing at the end their defaults, and keeps whatever follows (a newer version's
+// fields) as trailing bytes, which the encoder writes back after its own fields.
 
 #include "StateFormat.h"
 #include "params/ParamIds.h"
@@ -63,20 +63,69 @@ namespace sl::state
     Bytes encodeInst (const InstState& s);
 
     //==============================================================================================
-    // SMPL: u8 kind (0 starter, 1 file). Starter: str8 id, i32 seed. M0 reads starters; a file reference (M7)
-    // is not read yet, so that chunk is kept as it is and the built-in sound plays.
+    // SMPL: u8 kind (0 starter, 1 file).
+    //   Starter: str8 id, i32 seed.
+    //   File:    str16 path, u64 fileSize, 32-byte SHA-256 of the original bytes, f64 fileSampleRate, u32 channels,
+    //            u64 fileFrames, u64 loadedStartFrame, u64 loadedFrames, str16 displayName, u8 keepInProject,
+    //            u8 embedAnswer, then the analysis cache: u8 analysed, u8 hasPitch, f64 midi, f64 cents,
+    //            u8 hasKey, u8 key, str8 scale, u8 partCount, parts (u8 kind, f64 start, f64 end, f64 bpm,
+    //            u8 tempoFound, str8 label).
+    // Then (append-only) trailing bytes. M2 writes the file record with an empty analysis cache (M7 fills it);
+    // a cache it reads is kept and written back as it was.
+
+    struct AnalysisPart
+    {
+        std::uint8_t kind = 0;
+        double start = 0.0, end = 0.0, bpm = 0.0;
+        std::uint8_t tempoFound = 0;
+        std::string label;
+    };
+
+    struct AnalysisCache
+    {
+        std::uint8_t analysed = 0, hasPitch = 0;
+        double midi = 0.0, cents = 0.0;
+        std::uint8_t hasKey = 0, key = 0;
+        std::string scale;
+        std::vector<AnalysisPart> parts;
+    };
+
+    /** SMPL kind 1: a sound file, found again by its path (PLUGIN-PLAN 3, 7.4 decision 4). */
+    struct SampleFile
+    {
+        std::string path;                        // UTF-8, the full path
+        std::uint64_t fileSize = 0;
+        std::array<std::uint8_t, 32> sha256 {};  // of the original file's bytes
+        double fileSampleRate = 0.0;
+        std::uint32_t channels = 0;
+        std::uint64_t fileFrames = 0;
+        std::uint64_t loadedStartFrame = 0;      // the part loaded (0 and fileFrames for a whole file)
+        std::uint64_t loadedFrames = 0;
+        std::string displayName;
+        std::uint8_t keepInProject = 1;          // "Keep the sound in the project" (M7): on by default
+        std::uint8_t embedAnswer = 0;            // 0 not asked, 1 yes, 2 no, 3 just the Region (M7)
+        AnalysisCache cache;
+    };
+
+    inline constexpr std::uint8_t kSampleStarter = 0;
+    inline constexpr std::uint8_t kSampleFile = 1;
 
     struct SampleRef
     {
-        std::uint8_t kind = 0;
-        std::string starterId = "saw";   // M0 plays the starter Saw (the probe's sound); M2 makes sawopen the default
+        std::uint8_t kind = kSampleStarter;
+        std::string starterId = "sawopen";   // the default sound (D9)
         std::int32_t seed = 1;
+        SampleFile file;                     // kind 1
         Bytes trailing;
     };
 
-    /** True for a starter reference; false (out untouched) for a file reference or damaged data. */
+    /** True for a starter or a file reference (out filled); false (out untouched) for a kind this version does
+        not know or damaged data. */
     bool decodeSmpl (const std::uint8_t* payload, std::size_t size, SampleRef& out);
     Bytes encodeSmpl (const SampleRef& s);
+
+    /** The same sound: the same starter and seed, or the same file (path, size, SHA-256 and loaded part). */
+    bool sameSound (const SampleRef& a, const SampleRef& b) noexcept;
 
     //==============================================================================================
     // UIST: u8 theme (0 dark, 1 light), u16 uiScalePercent, u16 logicalWidth, u16 logicalHeight, u8 mode (1..8),

@@ -320,10 +320,12 @@ namespace sl::ui
     {
         peakMin.assign ((std::size_t) kPeakBuckets, 0.0f);
         peakMax.assign ((std::size_t) kPeakBuckets, 0.0f);
-        if (sound == nullptr || sound->frames() == 0)
+        if (sound == nullptr || sound->frames <= 0 || sound->left == nullptr)
             return;
 
-        const std::size_t n = sound->frames();
+        const auto n = (std::size_t) sound->frames;
+        const float* L = sound->left;
+        const float* R = sound->right != nullptr ? sound->right : sound->left;
         for (std::size_t b = 0; b < (std::size_t) kPeakBuckets; ++b)
         {
             const std::size_t from = b * n / (std::size_t) kPeakBuckets;
@@ -331,7 +333,7 @@ namespace sl::ui
             float lo = 1.0f, hi = -1.0f;
             for (std::size_t i = from; i < to && i < n; ++i)
             {
-                const float mid = 0.5f * (sound->left[i] + (i < sound->right.size() ? sound->right[i] : sound->left[i]));
+                const float mid = 0.5f * (L[i] + R[i]);
                 lo = juce::jmin (lo, mid);
                 hi = juce::jmax (hi, mid);
             }
@@ -340,9 +342,21 @@ namespace sl::ui
         }
     }
 
+    juce::String StripView::soundName() const
+    {
+        return sound != nullptr ? juce::String::fromUTF8 (sound->name.c_str()) : juce::String (sounds::starterInfo (sounds::kDefaultStarter).name);
+    }
+
+    juce::String StripView::soundKind() const
+    {
+        if (sound == nullptr || sound->missing)
+            return sound != nullptr ? " (the project's sound file is missing)" : " (built-in)";
+        return sound->builtIn ? " (built-in)" : "";
+    }
+
     void StripView::refresh()
     {
-        auto now = processor.getLoadedSound();
+        auto now = processor.getCurrentSound();
         const auto& apvts = processor.getApvts();
         const float start = apvts.getRawParameterValue (params::kParams[params::index (params::P::regionStart)].id)->load();
         const float end = apvts.getRawParameterValue (params::kParams[params::index (params::P::regionEnd)].id)->load();
@@ -361,12 +375,12 @@ namespace sl::ui
         regionEnd = end;
         root = rootNow;
 
-        const auto& info = sounds::starterInfo (sound != nullptr ? sound->id : sounds::kDefaultStarter);
+        const auto starter = sound != nullptr && sound->builtIn ? sound->starter : sounds::kDefaultStarter;
         for (int i = 0; i < sounds::kNumStarters; ++i)
-            if (sounds::kStarterList[i].id == info.id)
+            if (sounds::kStarterList[i].id == starter)
                 soundMenu.setSelectedId (i + 1, juce::dontSendNotification);
-        header = juce::String (info.name) + " - " + juce::String (sound != nullptr ? sound->seconds() : 0.0, 2) + " s - root "
-                 + juce::String (core::noteName (root)) + " (built-in)";
+        header = soundName() + " - " + juce::String (sound != nullptr ? sound->seconds() : 0.0, 2) + " s - root "
+                 + juce::String (core::noteName (root)) + soundKind();
         repaint();
     }
 
@@ -405,16 +419,15 @@ namespace sl::ui
         // The file line: the name in bold, then the length and the root.
         {
             auto line = juce::Rectangle<int> (columnWidth + 8, 0, juce::jmax (0, atEnd->getX() - columnWidth - 16), headerHeight);
-            const auto& info = sounds::starterInfo (sound != nullptr ? sound->id : sounds::kDefaultStarter);
             const auto bold = Theme::px (11.5f, true);
-            const juce::String name (info.name);
+            const juce::String name = soundName();
             const int nameWidth = juce::jmin (line.getWidth(), (int) std::ceil (Theme::textWidth (bold, name)) + 1);
             g.setColour (theme (Tok::txt));
             g.setFont (bold);
             g.drawText (name, line.removeFromLeft (nameWidth), juce::Justification::centredLeft, true);
             g.setColour (theme (Tok::dim));
             g.setFont (Theme::px (11.5f));
-            g.drawText (" - " + juce::String (sound != nullptr ? sound->seconds() : 0.0, 2) + " s - root " + juce::String (core::noteName (root)) + " (built-in)",
+            g.drawText (" - " + juce::String (sound != nullptr ? sound->seconds() : 0.0, 2) + " s - root " + juce::String (core::noteName (root)) + soundKind(),
                         line, juce::Justification::centredLeft, true);
         }
 
