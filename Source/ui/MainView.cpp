@@ -612,8 +612,9 @@ namespace sl::ui
 
     int MainView::toastTop() const noexcept
     {
-        // Under the roll's ruler, so the bar numbers stay readable (fix pass R2-6); on the pane when the roll is hidden.
-        return roll.isVisible() ? roll.getY() + RollPlaceholder::rulerHeight + 8 : paneArea.getY() + 10;
+        // Just under the roll's ruler, so the bar numbers stay readable (fix pass R2-6) and, in a 560 px window, the
+        // roll's note under it too; on the pane when the roll is hidden.
+        return roll.isVisible() ? roll.getY() + RollPlaceholder::rulerHeight + 4 : paneArea.getY() + 10;
     }
 
     const juce::String& MainView::getToastText() const noexcept

@@ -1059,16 +1059,20 @@ true, the correction is here.
   short: shell.html's `@media (max-height:720px)` sets `#hint{-webkit-line-clamp:1}` (two lines only up to 820 px;
   the review's `fresh1100.png` was a taller browser window). The hover text that shows the whole hint is M4's
   HintBar.
-- **R2-6 (a), (b).** The toast sits 8 px under the roll's ruler (it hid the bar 3 number). A Diagnostics label keeps
-  at least 8 px before its value, and a label wider than its column (at most half the card) wraps onto a second
-  line.
+- **R2-6 (a), (b).** The toast sits 4 px under the roll's ruler (it hid the bar 3 number); 4 and not 8, so that in
+  a 560 px window it also clears the roll's note, which is centred under it. A Diagnostics label keeps at least
+  8 px before its value, and a label wider than its column (at most half the card) wraps onto a second line.
 - **R2-7: the pane's scroll thumb.** JUCE draws no thumb in a scroll bar shorter than 32 px plus twice its
   thickness (LookAndFeel_V2: 48 px for our 8 px bar). The Sample tab's pane, cut to one row by the banner at
   900 x 560, was 36 px. An overflowing pane is now at least 48 px.
 - **R2-8: corruptionFuzz's slowest load.** A mutation that names another starter, or another seed, makes the
   worker build that sound inside the load (decision 3 waits for it). Those loads are now timed apart, against the
-  load's target plus sawopen's (50 + 60 ms, gate 550 ms by the timing rule); the other loads keep the 50 ms target
-  and the 250 ms gate.
+  load's target plus sawopen's (50 + 60 ms, gate 550 ms by the timing rule). The first CI run showed they are not
+  the slow ones (11 such loads, 72 to 95 ms): the slowest of the other CRC-fixed loads was 83 ms on Linux, 93 ms on
+  Windows and 195 ms under the sanitizers, against a 250 ms gate. So those loads are now gated at their 99.9th
+  percentile (the 10th slowest of 10,000), and the slowest is printed with the clip compile inside it, so the next
+  review can see where its time goes. The gate is still the timing rule's 5 x 50 ms; one slow load on a busy
+  runner no longer turns the build red.
 - **R2-9: the chase moment's block.** The plan sets no target for it. The CI runner took 2.2 ms for that one
   32-sample block (3.3 times its length); E2's notes said about 1.7 ms. Cubase's buffer is what matters: at 256
   samples (5.3 ms) the one-off cost fits, at 64 samples (1.3 ms) it could overrun once at Play. The M0 checklist
