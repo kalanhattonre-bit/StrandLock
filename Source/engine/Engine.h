@@ -26,10 +26,14 @@
 
 #include "core/Inst.h"
 #include "core/Snapshot.h"
+#include "engine/Clock.h"
 #include "engine/DisplayFrame.h"
 #include "engine/EngineConfig.h"
+#include "engine/InstSmoother.h"
 #include "engine/SampleData.h"
+#include "engine/Voice.h"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -227,18 +231,109 @@ namespace sl::engine
             void operator() (Voice* pool) const noexcept;   // Engine.cpp: delete[] once Voice is complete
         };
 
+        /** One start found by scanStarts (the JS {kS, X, U, m}). kKey is the sample the start belongs to (the
+            sort key, as the JS kS); kS is where it really starts (kKey, or the segment's first sample for a start
+            deferred past the 256 of a segment or caught up after a forward re-anchor). */
+        struct StartEvent
+        {
+            std::int64_t kS = 0, kKey = 0;
+            double U = 0, s = 0, p = 0;
+            std::int64_t m = 0;
+            std::int32_t index = 0;   // the note in snap->notes
+        };
+
+        /** A clock that was replaced at a tempo or loop change (8.2 #3): every start with kOf (U) < kR under
+            it was already emitted, so scanStarts never emits it again. Expires once the scan has passed it. */
+        struct ScanRule
+        {
+            double anchorBeat = 0, db = 1, horizonU = 0;
+            std::int64_t anchorK = 0, kR = 0;
+        };
+
+        static constexpr int kMaxScanRules = 8;
+        static constexpr std::int64_t kChaseNotBegun = std::numeric_limits<std::int64_t>::min();
+
+        //------------------------------------------------------------------------------------------
+        // Engine.cpp
+        Voice& voiceAt (int slot) noexcept { return voicePool[static_cast<std::size_t> (slot)]; }
+        const Voice& voiceAt (int slot) const noexcept { return voicePool[static_cast<std::size_t> (slot)]; }
+        void releaseClipVoices() noexcept;
+        void dropReleasedChases() noexcept;
+        void compactVoices() noexcept;
+        void clearScanState() noexcept;
+        void liveStackRemove (int p) noexcept;
+        bool liveStackHas (int p) const noexcept;
+        void outputStage (float* L, float* R, int from, int count, int gridPos) noexcept;
+        bool noteOk (const core::NoteSnap& X) const noexcept;
+
+        // EngineSchedule.cpp
+        Voice* allocVoice() noexcept;
+        void admitVoice (int slot) noexcept;
+        void addVoice (int slot, std::int64_t k0) noexcept;
+        void scanStarts (std::int64_t k0, std::int64_t k1) noexcept;
+        void collectStarts (double ua, double ub, std::int64_t k0, std::int64_t k1, std::int64_t lowK) noexcept;
+        void offerStart (std::int32_t index, std::int64_t m, double U, std::int64_t k0, std::int64_t k1, std::int64_t lowK) noexcept;
+        bool suppressed (double U) const noexcept;
+        void startClip (const StartEvent& e) noexcept;
+        void doChase (std::int64_t kNow) noexcept;
+        void continueChases (std::int64_t kNow) noexcept;
+        void finishChase (int slot, std::int64_t kNow) noexcept;
+
+        // EnginePlan.cpp
+        void plan() noexcept;
+        void measure() noexcept;
+
+        //------------------------------------------------------------------------------------------
         std::unique_ptr<Voice[], VoicePoolDeleter> voicePool;   // kVoicePool voices, made by the first prepare
+        std::array<std::uint8_t, kVoicePool> order {};          // the voice list: pool slots in insertion order
+        int numVoices = 0;
+        std::array<bool, kVoicePool> slotUsed {};
+        std::uint64_t serial = 0;
+        bool anyChasing = false;
 
         double sr = kDefaultSampleRate;
         std::int64_t k = 0;
-        core::Inst inst = core::defaultInst();
+        InstSmoother smoother;                  // what the voices read: ctx.inst points at smoother.current ()
+        VoiceContext ctx;
+        Clock clock;
         const core::Snapshot* snap = nullptr;
         std::uint64_t snapEpoch = 0;
+        int noteCount = 0;                      // notes the JS filter keeps (this.notes.length)
+        bool notesSearchable = false;           // every note kept and sorted by s: scanStarts may binary search
         const SampleData* src = nullptr;
         std::uint64_t srcEpoch = 0;
-        Transport transport;
+        VoiceSource source;                     // the current sample at its played rate (new voices get it)
+
+        // transport (JS pendingChase, playStartK) and the plugin's control grid origin (8.2 #21)
+        bool pendingChase = false;
+        std::int64_t playStartK = 0;
+        std::int64_t gridOrigin = 0;
+
+        // live input
+        std::array<std::uint8_t, 128> liveStack {};
+        int liveCount = 0;
+        bool sustain = false;
+
+        // scanStarts: the fixed start list, the deferral past 256 starts, the scan rules of re-anchors
+        std::array<StartEvent, kMaxStarts> starts {};
+        int numStarts = 0;
+        std::int64_t startCandidates = 0;
+        bool deferActive = false;
+        StartEvent deferCut {};                 // the last start emitted before the deferral (its key)
+        std::array<ScanRule, kMaxScanRules> rules {};
+        int numRules = 0;
+        bool catchUpPending = false;
+        double catchUpLowU = 0;
+
+        // plan (): the wait list holds (slot, head) pairs; scratch voice orders
+        std::array<std::uint16_t, kWaitList> waitList {};
+        std::array<std::uint8_t, kVoicePool> scratch {};
+
+        // output
+        int budget = kBudget48k;
+        double limG = 1, limRel = 0;
+        double cellOut0 = 0, cellOut1 = 0, cellByp0 = 1, cellByp1 = 1;   // outGain (dB) and bypass at the grid cell's ends
         double rampMs = kRampMs;
-        bool bypassed = false;
         Stats st;
         float peakL = 0.0f, peakR = 0.0f;
     };
