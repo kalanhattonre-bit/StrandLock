@@ -507,3 +507,15 @@ For whoever builds on the engine (integration, M3).
   Lock captures). `tapeStandInsCounted` follows `playedEngine` and needs no edit. The 37 grains cases of
   renders.json run through the same harness (`render::renderFixtureCase`): drop the `needs == "tape"` filter in
   test_parity_renders.cpp (the raw-snapshot case needs a raw-snapshot reader in the harness; it says so now).
+
+## P1
+
+The plugin chain, part 1 (plan 7.4): the document, the sounds, the state and the host plumbing. Branch
+`m2-plugin`. The audio path stays ProbeSynth until the integration step.
+
+### Progress
+
+- Done: nothing yet.
+- In progress: state (SMPL file record, CLIP through ClipCodec), doc/ (ClipDocument, EditHistory,
+  SnapshotPublisher, SampleManager), ParamBridge::applyPatch, host/HostSync, host/MidiRouter.
+- Next: processor wiring, test_state_clip.cpp, HostSync and MidiRouter tests, CI green, the hand-off below.
