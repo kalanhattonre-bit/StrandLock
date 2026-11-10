@@ -276,7 +276,7 @@ namespace sl::ui
         }
 
         // What comes here, and when.
-        const juce::String message ("The piano roll arrives in M4. For now StrandLock plays the loaded sound on every note Cubase sends.");
+        const juce::String message ("The piano roll arrives in M4. Until then StrandLock plays its demo clip with Cubase, and your keys.");
         const auto font = Theme::px (12.0f);
         const float w = juce::jmin ((float) grid.getWidth() - 24.0f, Theme::textWidth (font, message) + 28.0f);
         const auto box = juce::Rectangle<float> (w, 30.0f).withCentre (grid.toFloat().getCentre());

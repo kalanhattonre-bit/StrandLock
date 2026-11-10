@@ -803,6 +803,135 @@ processor-level M2 rows, the M2 section of the Cubase checklist. Branch `m2-inte
 - Done: the audio path in `PluginProcessor` (exchanges, parameters, commands, HostSync, MidiRouter, setInUse, the
   display slot, the engine's figures for the Diagnostics page, the 10 Hz collect timer); `Source/probe/` and
   `test_probe.cpp` deleted; tests `Tests/engine/test_hostsync.cpp`, `test_exchange.cpp`,
-  `Tests/plugin/test_audio_path.cpp`, the allocation tests and the strip's heads test updated.
-- In progress: the first CI run on `m2-integrate`.
-- Next: CI green, look at the snapshots, the checklist section, the notes below, merge to main.
+  `Tests/plugin/test_audio_path.cpp`, the allocation tests and the strip's heads test updated; two new strip
+  snapshots with real frames; `docs/CUBASE-CHECKLIST.md` "M2: the first real sound"; this section.
+- In progress: CI on the last commit, then the fast-forward of main.
+- Next: the review and the fix pass (plan 7.4).
+
+### The block, as built
+
+```
+diag: readHostBlock (once), audioBlock, audioMidi for each event
+decision 3: awaitedSound > finishedRequest -> clip notes silent (engine gets no snapshot), the block counted
+snapshots.acquire () -> setSnapshot (current, epoch)    (nullptr while silenced; the current one once the sound is there)
+samples.acquire ()   -> setSample (current, epoch)
+setInst (readInst), setBypass (readBypass); snapRamps on the first block after prepare and after a state load
+CommandQueue: audition on / off, let go, all notes off (Preview M6 and MIDI Learn M8 are taken and ignored)
+HostSync::plan (offsetBeats and loop of the current snapshot) -> MidiRouter::renderBlock (transport at 0, the
+  events and the cycle wrap each at its sample, process () between)
+setInUse (minEpochInUse) for both kinds
+every displayEvery (sr) samples (the worklet's count): fillDisplay into the slot, the engine's figures to diag
+```
+
+prepareToPlay: Engine::prepare, setInst, setBypass, snapRamps, HostSync::prepare, the display count reset, the
+waits of P1, then both exchanges prepared. releaseResources: forgetVersions, then both not prepared (the direct
+swap). reset: Engine::reset and HostSync::reset. A juce::Timer on the processor calls collectVersions 10 times a
+second on the message thread.
+
+### Decisions and deviations
+
+- **Decision 3's "clip notes are silent" hands the engine no snapshot.** While the sound a state load asked for is
+  still being made after its 10 s wait, the engine gets `setSnapshot (nullptr)`: clip voices release, live keys
+  still play the sound there is. When the worker finishes, the current snapshot goes back to the engine at the next
+  block. Not tested at the processor level: making a sound take more than 10 s in a test needs a hook in the
+  SampleManager. Listed under "Not covered".
+- **The MIDI counts for the Diagnostics page are taken in a pass of their own** before the block renders.
+  `MidiRouter::renderBlock` has no hook per event, and the counts do not depend on where the block is split.
+- **Ramps snap on the first block after prepareToPlay and on the first block after a state load** (plan 2.3: "on
+  prepareToPlay, reset, state load and the first block"). A load sets `snapRampsPending`; the audio thread snaps
+  after `setInst`. Engine::reset snaps by itself.
+- **The collect timer is the processor's.** P2's editor also calls `collectVersions` every third tick; both stay.
+  Collect takes the exchange's mutex and frees only what the audio thread said it no longer reads, so two callers
+  are harmless. Without the processor's timer, a project with no editor open would keep the versions of the last
+  edits until the next one.
+- **Additions to the processor, for the tests**: `getEngine`, `getEngineStats`, `getSnapshotExchange`,
+  `getSampleExchange`, `getDisplayFramesWritten`. `kPoisonFreedVersions` turns the exchanges' poison on in the
+  test runner in every build (Release included), so the exchange test's check that no freed version is read works
+  on both CI runners and not only in Debug and the sanitizer build.
+- **Addition to Engine.h**: `forEachVersionRead (f)`, read-only, the versions the engine and its voices read with
+  their epochs. The exchange test checks each one is alive and is the version its epoch says. E2 owns Engine.h;
+  the template sits in the public part and changes nothing else.
+- **The Diagnostics page shows the engine.** `DiagModel::audioEngine` takes the engine's voices, the voices playing
+  as Tape instead of Voice or Cloud (`Stats::tapeStandIns`), steals, cuts, non-finite samples and filter resets with
+  every display frame. The page's first card has two new rows ("Voices", "Engine health"), the report a new
+  "Engine:" line. The top bar says "Test build 0.1.0" and the page "0.1.0 (test build: Tape engine)" instead of
+  "probe build". The roll's placeholder now says the demo clip plays with Cubase.
+- **Test groups.** The "probe" group is gone. `silenceWithoutMidi` and `pluginType` moved to a new group "plugin"
+  with the processor-level audio tests. `test_hostsync.cpp` is group "hostsync". `test_exchange.cpp` (the exchange
+  row and edits while playing) is group "engine", so the sanitizer job runs it. `stateSavedAndLoadedWhilePlaying`
+  is group "state", which the sanitizer job also runs.
+- **Every M0 row still has a check.** Probe tuning: `engine/tapeTuning` (the M2 row) and
+  `plugin/parametersReachTheEngine` (C3 in tune, root, cents, Pitch and bend through the parameters). Probe levels:
+  `plugin/parametersReachTheEngine` (velocity, Velocity Sensitivity 0, Output Gain, bypass). Probe stability:
+  `engine/stabilityStrandDemoChords` (E2) and `plugin/stabilityThroughProcessBlock` (latency, buses and MIDI there
+  too, and in `plugin/pluginType`). Block sizes: `plugin/determinismThroughProcessBlock`. Allocations:
+  `alloc/processBlockAllocatesNothing` and `alloc/hostChangesWithEditorOpen`. The rest (parameters, defaults,
+  ranges, state, theme, starters, diagnostics, snapshots, pluginval) did not use the probe and run as before.
+- **The level checks run at Output Gain -12 dB** (-18 for the -6 dB step). The engine's limiter (ceiling 0.9)
+  would otherwise bend the loud reference; the probe's had the same limiter but a lower level.
+- **The cycle tests play at 87.890625 bpm**, exactly 2^15 samples a beat at 48 kHz, so every host position and
+  every split sample is exact in double and "the wrap 1, 200 and 2047 samples into a block" are those samples. The
+  host starts w samples before beat 0 (silent pre-roll), so every wrap falls w samples into its block.
+- **"No note after the cycle end starts"** is checked with a note at the cycle end itself (song beat 7 of a
+  cycle from beat 1 to 7): it would sound at the end of every wrap's block had it started, and it is seen at the
+  end of the block where it does play (song beat 3), so the look can see it.
+- **"Every note starts exactly once per pass"** runs twice: a host that ends its block at the cycle end (Cubase
+  with ASIO-Guard off) and one that does not (HostSync splits). The first block after the first wrap is reported
+  0.003 beat late, after the second 0.003 early, while the tempo falls 120 -> 90 bpm. Negative control: a cycle that
+  really starts past the downbeat (beat 0.3) counts 10 starts, not 12.
+- **The exchange stress paces itself on audio time**: the publisher puts out one snapshot per 48 samples of audio
+  (1,000 a second) and the audio thread never runs more than 2 ms ahead of it. Both run as fast as the machine
+  allows, so 10 s of audio take a fraction of a second; most snapshots are replaced in the mailbox before a block
+  takes them (the plan's "nothing piles up"). The message thread collects every 4800 samples of audio.
+- **The exchange's "no version freed while a voice holds its epoch"** is checked after every block on the audio
+  thread: every version the engine reads is not poisoned and its own `epoch` equals the epoch the voice holds,
+  and no epoch held is below the exchange's in-use value. Negative control: in about 70 blocks of the 3,750 a
+  releasing voice held an older snapshot than the current one, so the M0 probe's rule (in use = current) would have
+  freed it under the voice.
+- **Edits while playing go through the document** (`editClip`, the SnapshotPublisher's thread, the exchange), not
+  straight into the exchange: the row is about the whole path. The 1,000-a-second part of "a deleted note releases"
+  is the last 0.5 s of the exchange stress: every note deleted, empty clips still coming at 1,000 a second, 0
+  voices and silence 100 ms later.
+- **The sample-swap step is measured through the processor** (the swap published between two blocks under a held
+  key). Its negative control is a second processor playing the 330 Hz sine from the start, because the swap
+  steals the held key (the JS rule): nothing plays on the new sample until the next key.
+- **The editor-open allocation run opens and closes the editor** on the message thread while the audio thread
+  plays, and runs the editor's timer work (refreshNow, collect) 30 times a second of audio. The last check moves
+  three knobs from the message thread and asks the next tick to move them (the M0 version relied on the editor
+  never having ticked).
+- **The heads on the strip come from real frames.** `ui/stripHeadsFromDisplayFrames` now plays 1 s through the
+  processor: one frame per 7 blocks of 256 (the worklet's count, 26 in all), and the editor draws the newest
+  frame's 3 heads. Two new snapshots, `strip_playing_dark` and `_light`, show Strand Demo and a held chord on the
+  chord file with 4 heads and Spread 0.6.
+
+### Tests (the integration step's)
+
+| Test | Group | What it checks |
+|---|---|---|
+| `noteStartsThroughHostSync` | hostsync | 120, 87 and 133 bpm, 3 passes with the clip looping and with the host cycling round it; a step 120 -> 87: every start in [0, 1) sample of its beat; control: against 120 throughout they fail |
+| `jitterThroughHostSync` | hostsync | the play head off by up to +-0.003 beat every block for 64 bars: 256 starts on time, never 2 voices, the render bit-identical to the unjittered one |
+| `cycleWrapInsideBlocks` | hostsync | wraps 1, 200 and 2047 samples into 2048-sample blocks: HostSync splits there; a 2-length cycle equals the uncycled render bit for bit (control: 1.5 lengths differs); a 1.5-length cycle chases at the wrap sample (playhead within 0.002 of the straight render and of the formula, then 4 blocks later); the note at the cycle end never starts |
+| `tempoAndCycleTogether` | hostsync | a tempo ramp across 3 passes, the wrap reported +0.003 then -0.003 beat off, host splitting and not: 12 starts, never 2 voices; control as above |
+| `preRollThroughHostSync` | hostsync | from ppq -2, the clip's loop on and off: rms before ppq 0 = 0, the first sound on ppq 0's sample; control: from 6.5 it sounds at once |
+| `tempoDriftThroughHostSync` | hostsync | 120 -> 60 bpm over 8 bars, the position integrated per sample: 32 starts within 1 sample, the last within 2; control: a host that sends no position drifts |
+| `stoppedProcessingThroughHostSync` | hostsync | live Scatter 1/8T while stopped (free clock) and while playing from beat 0.37 (the song's beat): every jump 0..32 samples after its grid line |
+| `exchangeUnderLoad` | engine | the exchange row: 10,000 snapshots and 2 sample swaps while processBlock renders 10 s on its own thread; 0 allocations and frees on the audio thread; no freed version read; the deleted notes release under the stream; 1 version of each kind 100 ms after the last publish; 50 edits with no block: the pool does not grow, and the first block after Play takes and plays the newest |
+| `exchangeSampleSwapStep` | engine | 220 -> 330 Hz under a held key through the processor: step / steady < 1.5; control: the 330 Hz sine steps about 1.5 times as far |
+| `editsWhilePlaying` | engine | a Volume edit through the document heard from the next tick: ratio 0.2500 (expected 0.2500, within 0.01), the same voice (id, not released, envelope 1); a deleted note releases, then silence |
+| `clipPlaysWithTheHost` | plugin | Strand Demo plays while the host plays and is silent 0.2 s after Stop; the audio thread plays the document's clip; display frames written |
+| `parametersReachTheEngine` | plugin | the M0 probe's tuning and level checks through the parameters, on the engine |
+| `liveThroughMidiRouter` | plugin | CC 1 at 32 on a Travel wheel: -0.982360x (within 1e-4 of -0.98236); control: 96 plays forward; bend +1 at range 7 = G3; sustain holds until CC 64 lifts (control: without it the key ends) |
+| `editorCommandsPlay` | plugin | audition on with a start position (head at the Region's middle), off (releases, ends), all notes off (stolen within 5 ms), Preview and MIDI Learn taken and ignored |
+| `determinismThroughProcessBlock` | plugin | 10 s of Strand Demo from beat 1.7 with live MIDI, Scatter and Skip: blocks 1, 37, 700, 4096, random 1..700, setNonRealtime (true) (fixed and random blocks), 7 and 1000 stopped samples before Play: all bit-identical to 128-sample blocks; rms > 0.01; control: Play at 1.75 differs |
+| `stabilityThroughProcessBlock` | plugin | Strand Demo, 8 heads Tape, 16-note live chords for 10 s: nonFinite = filterResets = 0, pre-limiter peak > 0.05, rms > 0.01, peak <= 0.98 |
+| `voiceAndCloudPlayAsTape` | plugin | Voice and Cloud: 2 of 2 voices stand in as Tape and the report says so; Tape: 0 |
+| `stateSavedAndLoadedWhilePlaying` | state | processBlock on its own thread while the message thread saves (equal to the save while stopped), edits, and loads 10 states: the last one loaded is the state, the audio thread plays its clip and parameters, 0 allocations on the audio thread |
+| `processBlockAllocatesNothing` | alloc | as M0, with Strand Demo cycling, live keys, 8 parameters moved now and then and 9 swept every 8th block (10 min Release, 3 min Debug CRT) |
+| `hostChangesWithEditorOpen` | alloc | 1 min on an audio thread with host changes while the editor opens and closes and its timer work runs |
+| `stripHeadsFromDisplayFrames` | ui | the slot exists from construction; real frames: 26 in 1 s of 256-sample blocks, the newest frame's 3 heads drawn |
+
+### Not covered (for the review)
+
+- Decision 3's silent clip notes while a loaded sound is late (see above): implemented, not tested.
+- The CPU row stays E2's engine-level test; the processor adds a little per block (the play head read, the
+  diagnostics) that no test times.
