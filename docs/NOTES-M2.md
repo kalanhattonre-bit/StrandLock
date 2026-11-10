@@ -969,3 +969,119 @@ true, the correction is here.
 - Done: the code and test changes for every finding listed as fixed below; the checklist corrections.
 - In progress: CI on `m2-fixes`.
 - Next: CI green, these notes with the CI figures, rebase on main if it moved, fast-forward main.
+
+### The findings, and what was done
+
+| Finding | Severity | Done | Test (fails without the change) |
+|---|---|---|---|
+| engine-parity:M2-ENG-1 | medium | fixed: the catch-up is armed at every tempo or loop re-anchor | `engine/tempoDropKeepsTheNoteOnIt` |
+| engine-parity:M2-ENG-2 | low | documented below: a deliberate deviation from the JS, no code change | - |
+| realtime-threads:RT2-1 | medium | fixed: a stale user load is skipped before its patch | `state/userLoadOvertakenByStateLoad` |
+| realtime-threads:RT2-2 | low | fixed: the wait is set before the clip goes out, read after the snapshot | none (a race of a few ms; see below) |
+| realtime-threads:RT2-3 | low | fixed: a compile that throws publishes silence and the thread lives on | `doc/snapshotPublisherOrderAndFailure` |
+| realtime-threads:RT2-4 | low | fixed: submit drops a version older than one handed over | `doc/snapshotPublisherOrderAndFailure` |
+| realtime-threads:RT2-5 | low | fixed: prepareToPlay waits only for sounds the worker publishes itself | `doc/prepareWaitsOnlyForSelfPublished` |
+| host-midi-state:HMS-1 | medium | fixed: the test now moves the clock back over a sounding downbeat | `hostsync/tempoAndCycleTogether` |
+| host-midi-state:HMS-2 | low | fixed: a full rule list drops its lowest horizon | `engine/manyReAnchorsKeepTheOldestHorizon` |
+| host-midi-state:HMS-3 | low | fixed: Engine::rechase when the late sound arrives | `state/lateSoundSilencesClipNotes` |
+| tests-ui:R2-1 | medium | fixed: the checklist no longer asks about Ctrl+Z | - |
+| tests-ui:R2-2 | low | fixed: "step 10" | - |
+| tests-ui:R2-3 | low | fixed: the checklist says where the toast is | - |
+| tests-ui:R2-4 | low | deferred to the architect (plan-level, below) | - |
+| tests-ui:R2-5 | low | fixed: the level is checked over the second tick | `engine/editsWhilePlaying` |
+| tests-ui:R2-6 | low | (a) and (b) fixed; (c) rejected (below) | snapshots looked at |
+| tests-ui:R2-7 | low | fixed: an overflowing pane keeps room for its scroll thumb | `ui/editorStateBanner` |
+| tests-ui:R2-8 | low | fixed: loads that make a starter are timed apart; figures below | `state/corruptionFuzz` |
+| tests-ui:R2-9 | low | figures below; a checklist question; a smaller chase share deferred | - |
+| tests-ui:R2-10 | low | fixed: the test the Integration notes asked for | `state/lateSoundSilencesClipNotes` |
+
+### Decisions and deviations
+
+- **M2-ENG-1: the catch-up reaches back at every re-anchor.** Checked: with d <= 0 and a falling tempo, a note in
+  the last (1 - new / old bpm) of a sample before the re-anchor was never started, in the JS too (the JS anchor is
+  cur, the C++ one cur + d, the same when d = 0). The old clock put it at kR, so it had not started; the new, slower
+  clock puts it before kR. Now every re-anchor arms the catch-up from cur - 2 db (the lower of the two when two
+  re-anchors come before a scan). The scan rules already keep out what the old clock emitted, so only such notes
+  start, at kR, less than a sample late. A node model of the C++ scan (scratch `scanmodel.js`) reproduced the
+  review's losses (120 -> 87 bpm with the note 0.8 and 0.99 sample early, 120 -> 60 from 0.5) and showed one start
+  with the change. This corrects E2's "exact in samples, so no start is doubled or lost by rounding": that held for
+  the doubled start, not for this lost one. The fixture `tempo-120-to-87` re-anchors on beat 1 exactly, where
+  nothing changes.
+- **M2-ENG-2: startClip's second check is a deviation from the JS, not only a chase guard.** Checked by reading
+  startClip. A chained note (it has a chain prev) moved later by less than one control tick while it sounds, with
+  its new start scanned before its voice's next tick: the JS starts a second voice for it (its voice plays the note
+  itself, not the prev, and has not yet ticked its release); the C++ finds the voice already playing that note and
+  starts nothing, so one voice follows the edit. Kept: no double attack is the better sound. This corrects E2's
+  "two checks that never fire on the JS paths": the second one fires on this path too.
+- **HMS-2: which rule goes when 8 are live.** Each rule keeps back every start U that its old clock put before its
+  kR, which is every U below its horizon less about one of its samples. So together the rules keep back everything
+  below the highest such line, and any other rule can go without changing what is kept back. The engine now drops
+  the rule with the lowest (horizonU - db). The old code dropped the oldest, which after a backward move is the
+  one with the highest horizon. The node model showed the second start (sample 49304) with 12 re-anchors in 12
+  samples, and none with the change.
+- **HMS-3: `Engine::rechase ()` is an addition to the public API** (E2 owned Engine.h; the fix pass may touch it):
+  every clip voice releases and, while playing, the notes sounding now are chased at the next sample. The processor
+  calls it on the block where decision 3's silence ends, after setSnapshot (current). Before, the notes under way
+  stayed silent until their next start (up to a clip pass).
+- **RT2-1: the check comes first.** deliverSoundLoads asks `SampleManager::isNewest (request)` before it applies the
+  patch or writes the document. commit () still refuses a stale load. What is left is a newer request made on
+  another thread between the two calls (a state load on a host thread at that very moment): then the patch is
+  applied and refused, as before. Cubase loads state on the message thread, the one that delivers, so it does not
+  reach this.
+- **RT2-2: the order of the wait.** loadState stores awaitedSound right after loadRef, before setNonParam and the
+  clip's replace, and processBlock reads it after snapshots.acquire (). The store comes before the clip goes to the
+  compiler, which comes before its snapshot is published, which comes before the audio thread takes it; so a block
+  that takes the new clip also sees the wait (it used to read the wait before taking the snapshot, which could leave
+  one block of the new clip on the old sound). Not tested: the window was the clip's encode time, a race no test
+  can place.
+- **RT2-3: what a failed compile plays.** The clip's settings with no notes (what a clip too detailed to play
+  gets); publishedVersion moves on and the waiters wake. stats ().tooDetailed is set, so the view's banner says the
+  clip's notes are silent. If even the empty snapshot cannot be made, the snapshot before plays on. The cache is
+  cleared (the compile may have stopped half way). `failNextCompile ()` is the tests' hook.
+- **RT2-4: the publisher drops old versions.** submit ignores a version lower than the newest it was given
+  (stats ().stale). ClipDocument::replace still calls onClipChanged after its lock; the publisher is the one place
+  that sees every version, so the check is there.
+- **RT2-5: `SampleManager::waitForSelfPublished`.** It waits for the newest request that is not a user load (a
+  project, an Undo, a new instance's default). A user load ends in takePending and only the message thread
+  publishes it, so prepareToPlay's wait for it could only delay the host (up to 10 s while a long file decodes).
+  `SampleManager::setHeld` is the tests' hook that keeps the worker from taking a request.
+- **HMS-1: the backward half of "tempo and cycle together".** Checked by replaying the host schedule in node
+  (scratch `tc-search.js`): the -0.003 report never put the clock behind a note that had started. Now the host that
+  does not split starts with a 100-sample block, so the second wrap falls 32 samples (0.0011 beat) before its block
+  ends, and the next block, reported 0.003 beat early, moves the clock back over the sounding downbeat. The test
+  checks that this really happens (from the measured start of that downbeat), that the note starts once (12 starts,
+  never 2 voices) and that it still sounds 0.2 beat on (not cut by the release rule). The host that splits keeps
+  the forward half: its downbeat had not started when the late report came, so the catch-up starts it.
+- **R2-1: Undo has no key or button in M2.** Shortcuts come with M4's KeyRouter (plan M4: "shortcuts work only with
+  Keys on"), and the top bar has no Undo button. The checklist now says Undo comes later and that Ctrl+Z goes to
+  Cubase.
+- **R2-6 (c) rejected: the hint bar keeps to one line at 900 x 560.** The prototype does the same in a window that
+  short: shell.html's `@media (max-height:720px)` sets `#hint{-webkit-line-clamp:1}` (two lines only up to 820 px;
+  the review's `fresh1100.png` was a taller browser window). The hover text that shows the whole hint is M4's
+  HintBar.
+- **R2-6 (a), (b).** The toast sits 8 px under the roll's ruler (it hid the bar 3 number). A Diagnostics label keeps
+  at least 8 px before its value, and a label wider than its column (at most half the card) wraps onto a second
+  line.
+- **R2-7: the pane's scroll thumb.** JUCE draws no thumb in a scroll bar shorter than 32 px plus twice its
+  thickness (LookAndFeel_V2: 48 px for our 8 px bar). The Sample tab's pane, cut to one row by the banner at
+  900 x 560, was 36 px. An overflowing pane is now at least 48 px.
+- **R2-8: corruptionFuzz's slowest load.** A mutation that names another starter, or another seed, makes the
+  worker build that sound inside the load (decision 3 waits for it). Those loads are now timed apart, against the
+  load's target plus sawopen's (50 + 60 ms, gate 550 ms by the timing rule); the other loads keep the 50 ms target
+  and the 250 ms gate.
+- **R2-9: the chase moment's block.** The plan sets no target for it. The CI runner took 2.2 ms for that one
+  32-sample block (3.3 times its length); E2's notes said about 1.7 ms. Cubase's buffer is what matters: at 256
+  samples (5.3 ms) the one-off cost fits, at 64 samples (1.3 ms) it could overrun once at Play. The M0 checklist
+  already asks the buffer size (step 1); the M2 checklist now asks whether pressing Play inside the clip crackles
+  (step 11). A smaller first share than plan 1.8's 4096 ticks is the architect's call (Kalan's answer 9 kept the
+  bounded chase as planned): deferred until his buffer size is known.
+
+### For the architect (plan-level)
+
+- **R2-4: the light theme's 3:1 is measured against white.** Decision 2 asks for at least 3:1 "against the
+  background the M0 contrast test uses", which is the roll token #ffffff, and the theme test also gates "no darker
+  than needed" (under 3.1:1). The roll never draws #ffffff: its rows are #fbfbfd and #eef0f5. On those the light
+  playhead (#ed7100) and the Tone (#d78000) and Sample (#b68f39) lines are 2.64 to 2.92:1, and the playhead is
+  2.53:1 on the strip's #e8ebf6. Not changed here, because the decision and its test say exactly what was built.
+  If 3:1 should hold on what is on screen, the three tokens need darkening to at least 3:1 against #eef0f5 (and the
+  test's reference and its "under 3.1" bound changing with them).
