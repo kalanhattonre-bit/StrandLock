@@ -336,3 +336,17 @@ chase cost, tempo drift, stopped processing, determinism, voice steal, stability
   the Saw starter itself is not bit for bit with SLSounds (test_sounds prints hash 2c2dfee3 against the prototype's
   44f47b11, every window within 0), while the same voice paths are bit for bit on the test signals. Not proven case
   by case. E2 should expect the same in renders.json on the starters: hashes printed, windows within 1e-5.
+
+## E2
+
+The engine chain, part 2 of 2: the Engine itself (plan 7.4). Branch `m2-engine`, on top of E1.
+
+### Progress
+
+- Done: `engine/Engine.cpp` (the stub replaced), `EngineSchedule.cpp`, `EnginePlan.cpp`, `EngineDisplay.cpp`, the
+  private part of `Engine.h`. Tests `Tests/engine/test_parity_renders.cpp` (renders.json, the 36 tape cases) with the
+  harness `Tests/engine/EngineRender.*`. CI run 42740787541 on 435dfd8: green; 36 of 36 tape cases within tolerance
+  (Windows 22 bit for bit, Linux 13).
+- In progress: the engine-level M2 rows: `test_tuning_tape`, `test_transport`, `test_chase_cost`,
+  `test_determinism`, `test_live`, `test_stability`, `test_alloc_engine`, `test_cpu`.
+- Next: CI green on them, the rest of this section, the Engine summary, rebase and fast-forward main.
