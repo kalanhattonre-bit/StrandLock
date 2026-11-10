@@ -378,11 +378,23 @@ namespace sl::engine
             if (bpm == C.bpm && loop == C.loop)
                 return;   // re-sent unchanged: the clock stays exactly as it is
             // 8.2 #3: a tempo or loop change re-anchors to the host, cur + d. The old clock emitted every start with
-            // kOf (U) < k: a rule keeps those from starting again (d < 0), and the first scan after this starts at
-            // once the ones the new clock has already passed (d > 0).
+            // kOf (U) < k: a rule keeps those from starting again. The first scan after this starts at once the
+            // starts the new clock has already passed and the old one had not emitted: the notes the clock jumped
+            // over (d > 0), and, at any d, a note in the last fraction of a sample before k when the tempo falls
+            // (the old clock put it at k, the slower new one before k: the JS loses it).
             if (numRules == kMaxScanRules)
             {
+                // Full: drop the rule with the lowest horizon. Each rule keeps back every start below its horizon
+                // (less about one of its samples), so the rule with the highest horizon covers it exactly.
+                int lowest = 0;
                 for (int r = 1; r < numRules; ++r)
+                {
+                    const ScanRule& a = rules[static_cast<std::size_t> (r)];
+                    const ScanRule& b = rules[static_cast<std::size_t> (lowest)];
+                    if (a.horizonU - a.db < b.horizonU - b.db)
+                        lowest = r;
+                }
+                for (int r = lowest + 1; r < numRules; ++r)
                     rules[static_cast<std::size_t> (r - 1)] = rules[static_cast<std::size_t> (r)];
                 --numRules;
             }
@@ -392,11 +404,10 @@ namespace sl::engine
             rule.db = C.db;
             rule.kR = k;
             rule.horizonU = cur;
-            if (d > 0)
-            {
-                catchUpPending = true;
-                catchUpLowU = cur - 2 * C.db;
-            }
+            // the rules keep every start the old clock emitted out of the catch-up, so it may reach back each time
+            const double lowU = cur - 2 * C.db;
+            catchUpLowU = catchUpPending ? jsMin (catchUpLowU, lowU) : lowU;
+            catchUpPending = true;
             deferActive = false;   // a deferral's keys are samples of the old clock
             C.anchorBeat = cur + d;
             C.anchorK = k;
@@ -739,5 +750,11 @@ namespace sl::engine
         smoother.snap();
         cellOut0 = cellOut1 = smoother.value (InstSmoother::outGain);
         cellByp0 = cellByp1 = smoother.value (InstSmoother::bypass);
+    }
+
+    void Engine::rechase() noexcept
+    {
+        releaseClipVoices();
+        pendingChase = clock.playing;
     }
 }

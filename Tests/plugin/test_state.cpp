@@ -817,11 +817,14 @@ SL_TEST ("state", corruptionFuzz)
         int loads = 0, escaped = 0, illegal = 0, unsound = 0, overAlloc = 0, overLive = 0;
         std::size_t largest = 0;
         long long peakLive = 0;
-        double worstMs = 0.0;
+        double worstMs = 0.0;          // loads that made no starter sound
+        int making = 0;                // loads that named a starter the worker had to make (decision 3 waits for it)
+        double worstMakingMs = 0.0;
     };
 
     auto run = [&p] (const Bytes& b, Tally& t)
     {
+        const auto madeBefore = p.getSampleManager().startersMade();
         alloc::reset();
         const double t0 = nowMs();
         bool ok = false;
@@ -829,8 +832,17 @@ SL_TEST ("state", corruptionFuzz)
             const alloc::Scope counting;
             ok = loadInto (p, b);
         }
-        t.worstMs = std::max (t.worstMs, nowMs() - t0);
+        const double ms = nowMs() - t0;
         const auto c = alloc::counts();
+        if (p.getSampleManager().startersMade() > madeBefore)
+        {
+            ++t.making;
+            t.worstMakingMs = std::max (t.worstMakingMs, ms);
+        }
+        else
+        {
+            t.worstMs = std::max (t.worstMs, ms);
+        }
         ++t.loads;
         t.escaped += ok ? 0 : 1;
         t.illegal += parametersLegal (p) ? 0 : 1;
@@ -880,9 +892,12 @@ SL_TEST ("state", corruptionFuzz)
         check (t->overAlloc == 0 && t->overLive == 0,
                fmt ("%s: largest single allocation %zu bytes (limit 51 MiB), most live %lld bytes (limit 2 x blob + 64 MiB)",
                     what, t->largest, t->peakLive));
-        // A load that names another starter waits for the worker to make it (decision 3): a missed target goes to NOTES-M2.
-        note (fmt ("%s: slowest load %.2f ms (target 50 ms, gate 250 ms)", what, t->worstMs));
-        check (t->worstMs <= 250.0, fmt ("%s: no load slower than 250 ms (%.2f ms)", what, t->worstMs));
+        // A load that names a starter the worker must make waits for it (decision 3), so it is timed apart, against
+        // the load's and sawopen's targets together (fix pass R2-8). A missed target goes to NOTES-M2.
+        note (fmt ("%s: slowest load %.2f ms (target 50 ms, gate 250 ms); %d loads made a starter, slowest %.2f ms (target 50 + 60 ms, gate 550 ms)",
+                   what, t->worstMs, t->making, t->worstMakingMs));
+        check (t->worstMs <= 250.0, fmt ("%s: no load that made no starter slower than 250 ms (%.2f ms)", what, t->worstMs));
+        check (t->worstMakingMs <= 550.0, fmt ("%s: no load that made a starter slower than 550 ms (%.2f ms)", what, t->worstMakingMs));
     }
     check (fixedReadable > 9000, fmt ("most fixed-up mutations still read as a container, so the chunk decoders saw them (%d of 10000)", fixedReadable));
     note (fmt ("allocation sizes are counted %s", alloc::coverage()));

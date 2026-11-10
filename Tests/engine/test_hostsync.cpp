@@ -453,13 +453,18 @@ SL_TEST ("hostsync", tempoAndCycleTogether)
     // integrated per sample and reported at each block start. The first block after the first wrap reports its
     // position `late` beat late, the first after the second wrap `early` beat early. A host that splits ends a
     // block at the cycle end (Cubase with ASIO-Guard off); one that does not leaves the split to HostSync.
+    // Blocks are 512 samples after a first one of `firstBlock`.
     struct Result
     {
         std::size_t starts = 0;
         int mostVoices = 0;
         int splits = 0;
+        std::vector<std::int64_t> startAt;   // the first sample of each note's sound
+        std::int64_t earlyAt = -1;           // the first sample of the block reported `early`
+        double earlyBps = 0;                 // the host's beats per sample there
+        std::vector<float> L;
     };
-    auto run = [&clip] (bool hostSplits, double late, double early, double loopStart) {
+    auto run = [&clip] (bool hostSplits, double late, double early, double loopStart, int firstBlock) {
         Rig rig (tapeInst(), dcSample (8.0), &clip);
         std::vector<float> L, R;
         Result r;
@@ -475,7 +480,8 @@ SL_TEST ("hostsync", tempoAndCycleTogether)
             const double remaining = std::floor ((12.0 - songBeat) / bps);
             if (remaining < 1)
                 break;
-            int len = remaining < 512 ? static_cast<int> (remaining) : 512;
+            const int want = k == 0 ? firstBlock : 512;
+            int len = remaining < want ? static_cast<int> (remaining) : want;
             if (hostSplits)
             {
                 const double toEnd = std::ceil ((4.0 - ppq) / bps);
@@ -488,6 +494,11 @@ SL_TEST ("hostsync", tempoAndCycleTogether)
             s.cycling = true;
             s.loopStart = loopStart;
             s.loopEnd = 4;
+            if (justWrapped && wrapsSoFar == 2)
+            {
+                r.earlyAt = k;
+                r.earlyBps = bps;
+            }
             justWrapped = false;
             L.resize (static_cast<std::size_t> (k + len));
             R.resize (static_cast<std::size_t> (k + len));
@@ -506,22 +517,39 @@ SL_TEST ("hostsync", tempoAndCycleTogether)
             }
             k += len;
         }
-        r.starts = soundStarts (L, R).size();
+        r.startAt = soundStarts (L, R);
+        r.starts = r.startAt.size();
         r.splits = rig.wraps;
+        r.L = std::move (L);
         return r;
     };
 
+    // The host that does not split starts with a block of 100 samples, so the second wrap falls 32 samples
+    // (0.0011 beat) before its block ends (fix pass, HMS-1): the downbeat of pass 3 has started when the next
+    // block says the song is 0.003 beat earlier, so the clock moves back over a note that is sounding. That is
+    // the backward re-anchor of plan 1.10: the note must neither start again nor be cut.
     for (const bool hostSplits : { true, false })
     {
-        const Result r = run (hostSplits, 0.003, -0.003, 0.0);
+        const Result r = run (hostSplits, 0.003, -0.003, 0.0, hostSplits ? 512 : 100);
         check (r.starts == 12 && r.mostVoices == 1 && (hostSplits || r.splits == 2),
                fmt ("%s: %zu note starts in 3 passes (12 expected), never two voices at once (most %d), HostSync split %d blocks",
                     hostSplits ? "the host splits its block at the cycle end" : "the host does not split", r.starts, r.mostVoices, r.splits));
+        if (hostSplits)
+            continue;
+        const bool found = r.startAt.size() >= 9 && r.earlyAt >= 0;
+        const std::int64_t downbeat = found ? r.startAt[8] : 0;
+        const double before = found ? static_cast<double> (r.earlyAt - downbeat) * r.earlyBps : -1.0;
+        check (found && before > 0 && before < 0.003,
+               fmt ("the host does not split: pass 3's downbeat started %.5f beat before the block reported 0.003 beat early, so the clock moves back over it",
+                    before));
+        const auto later = static_cast<std::size_t> (downbeat + static_cast<std::int64_t> (0.2 / r.earlyBps));
+        check (later < r.L.size() && ! juce::exactlyEqual (r.L[later], 0.0f),
+               "the host does not split: that downbeat still sounds 0.2 beat after its start (not cut when the clock moved back)");
     }
 
     // a no-op is not a pass: a host whose cycle starts at beat 0.3 (past the 0.25-beat downbeat) really skips the
     // downbeat of passes 2 and 3, and the count shows it
-    const Result lost = run (true, 0.0, 0.0, 0.3);
+    const Result lost = run (true, 0.0, 0.0, 0.3, 512);
     check (lost.starts == 10, fmt ("negative control: a cycle from beat 0.3 skips 2 downbeats (%zu starts)", lost.starts));
 }
 

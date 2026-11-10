@@ -62,7 +62,8 @@ namespace sl::ui
 
         std::vector<Placed> placeCards (int width, int& totalHeight) const;
         int cardHeight (const Card& card, int width) const;
-        static int rowLines (const Row& row, int valueWidth);
+        static int rowLines (const Row& row, int labelWidth, int valueWidth);
+        static int labelLines (const Row& row, int labelWidth);
         static int labelWidthFor (const Card& card, int cardWidth);
 
         const Theme& theme;
@@ -74,5 +75,6 @@ namespace sl::ui
         static constexpr int headerHeight = 40;
         static constexpr int cardGap = 8;
         static constexpr int lineHeight = 16;
+        static constexpr int labelGap = 8;   // at least this much between a label and its value (fix pass R2-6)
     };
 }

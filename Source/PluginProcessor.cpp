@@ -110,8 +110,9 @@ void StrandLockProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     diag.prepare (sampleRate, samplesPerBlock);
 
     // The sound and the clip asked for before (a new instance's default, a state load still on its way) are
-    // there for the first block. The worker never needs this thread, so the wait cannot deadlock.
-    sampleManager->waitIdle (kLoadWaitMs);
+    // there for the first block. The worker never needs this thread, so the wait cannot deadlock. A sound the
+    // user picked is not waited for: only this thread can publish it, after this returns (fix pass RT2-5).
+    sampleManager->waitForSelfPublished (kLoadWaitMs);
     publisher->waitForVersion (clipDoc.version(), kLoadWaitMs);
 
     // From here the audio thread may run: the first acquire () hands the engine the current versions again
@@ -164,21 +165,27 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     for (const auto meta : midi)
         diag.audioMidi (meta.data, meta.numBytes, juce::jlimit (0, n, meta.samplePosition));
 
-    // Decision 3: while the sound a state load asked for is not there yet, clip notes are silent.
-    const bool waitingForSound = awaitedSound.load (std::memory_order_relaxed) > sampleManager->finishedRequest();
-    if (waitingForSound)
-        diag.audioWaitingForSound();
-
     // The newest versions (one atomic exchange each), the parameters and the editor's commands.
     auto& eng = *engine;
     const bool newSnapshot = snapshots.acquire();
+
+    // Decision 3: while the sound a state load asked for is not there yet, clip notes are silent. Read after the
+    // snapshot: a load names its sound before it hands its clip to the compiler, so a block that takes the new
+    // clip also sees the wait (fix pass RT2-2).
+    const bool waitingForSound = awaitedSound.load (std::memory_order_acquire) > sampleManager->finishedRequest();
+    if (waitingForSound)
+        diag.audioWaitingForSound();
     if (newSnapshot || waitingForSound != clipSilenced)
     {
+        const bool soundArrived = clipSilenced && ! waitingForSound;
         clipSilenced = waitingForSound;
         if (clipSilenced)
             eng.setSnapshot (nullptr, 0);
         else
             eng.setSnapshot (snapshots.current(), snapshots.currentEpoch());
+        // the clip notes under way come in where they are, not at their next start (fix pass HMS-3)
+        if (soundArrived)
+            eng.rechase();
     }
     if (samples.acquire())
         eng.setSample (samples.current(), samples.currentEpoch());
@@ -447,7 +454,10 @@ int StrandLockProcessor::deliverSoundLoads()
     int published = 0;
     for (auto& p : sampleManager->takePending())
     {
-        if (p.view == nullptr)
+        // A load that a newer request overtook (a project or an Undo that came in meanwhile, another pick) changes
+        // nothing: not the parameters, not the document. commit () would refuse it, but only after the patch
+        // (fix pass RT2-1).
+        if (p.view == nullptr || ! sampleManager->isNewest (p.request))
             continue;
         // The sound's own root and cents and its Region, as host-visible edits (plan 2.4), then the sound.
         const auto changed = params::applyPatch (apvts, p.patch);
@@ -700,6 +710,10 @@ void StrandLockProcessor::loadState (const void* data, std::size_t size)
         if (! same)
             request = sampleManager->loadRef (np.sound, doc::LoadOrigin::project);
     }
+    // Before the clip goes to the compiler: from here the audio thread keeps clip notes silent until the sound is
+    // there, so the new clip never plays on the old sound (fix pass RT2-2).
+    if (request != 0)
+        awaitedSound.store (request, std::memory_order_release);
 
     clipDoc.setNonParam (np);
     clipDoc.replace (clip ? std::make_shared<const model::Clip> (std::move (*clip)) : defaultClip());
@@ -717,10 +731,7 @@ void StrandLockProcessor::loadState (const void* data, std::size_t size)
     // offline export started right after it, plays the loaded sound and clip. If the sound is late the
     // diagnostics count the blocks that play without it.
     if (request != 0)
-    {
-        awaitedSound.store (request, std::memory_order_relaxed);
         sampleManager->waitFor (request, kLoadWaitMs);
-    }
     publisher->waitForVersion (clipDoc.version(), kLoadWaitMs);
 
     // Plan 2.3: the loaded parameters play at once, with no ramp from the values before the load.

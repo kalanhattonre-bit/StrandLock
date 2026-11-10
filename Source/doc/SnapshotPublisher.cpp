@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <new>
 #include <utility>
 
 namespace sl::doc
@@ -112,6 +113,14 @@ namespace sl::doc
         {
             const std::lock_guard<std::mutex> hold (lock);
             ++st.submitted;
+            if (version < newestSubmitted)
+            {
+                // Older than one already handed over (a state load and an edit on two threads can hand their
+                // versions over in the wrong order): it would replace the newer one (fix pass RT2-4).
+                ++st.stale;
+                return;
+            }
+            newestSubmitted = version;
             if (hasPending)
                 ++st.skipped;   // the thread never took the one waiting: only the newest is compiled
             pendingClip = std::move (clip);
@@ -164,13 +173,67 @@ namespace sl::doc
                 wait (-1.0);
                 continue;
             }
-            compileAndPublish (clip, version);
+            try
+            {
+                compileAndPublish (clip, version);
+            }
+            catch (...)
+            {
+                // Out of memory, most likely (up to 256 MiB of lane tables). The thread must live on, and the
+                // waits for this version must end (fix pass RT2-3).
+                publishFailed (*clip, version);
+            }
         }
+    }
+
+    void SnapshotPublisher::failNextCompile()
+    {
+        failNext.store (true);
+    }
+
+    void SnapshotPublisher::publishFailed (const model::Clip& clip, std::uint64_t version)
+    {
+        // What a clip too detailed to play gets: its settings and no notes, so its notes are silent, not stale.
+        cache.clear();
+        bool silent = false;
+        try
+        {
+            model::Clip empty;
+            empty.bars = clip.bars;
+            empty.beatsPerBar = clip.beatsPerBar;
+            empty.offsetBeats = clip.offsetBeats;
+            empty.loop = clip.loop;
+            empty.tieAcrossLoop = clip.tieAcrossLoop;
+            auto snap = model::compileSnapshot (empty, 8);
+            if (snap != nullptr)
+            {
+                snap->clipVersion = version;
+                exchange.publish (std::move (snap));
+                exchange.collect();
+                silent = true;
+            }
+        }
+        catch (...)
+        {
+            // still no memory: the snapshot before plays on
+        }
+        {
+            const std::lock_guard<std::mutex> hold (lock);
+            ++st.failed;
+            st.publishedVersion = std::max (st.publishedVersion, version);
+            st.lastRes = 0;
+            st.lastTableBytes = 0;
+            st.tooDetailed = silent;
+            st.cachedNotes = 0;
+        }
+        published.notify_all();
     }
 
     void SnapshotPublisher::compileAndPublish (const model::ClipPtr& clip, std::uint64_t version)
     {
         const auto t0 = std::chrono::steady_clock::now();
+        if (failNext.exchange (false))
+            throw std::bad_alloc();
 
         int res = sizer.resolutionFor (*clip);
         std::unique_ptr<core::Snapshot> snap;

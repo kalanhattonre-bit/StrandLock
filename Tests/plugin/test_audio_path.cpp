@@ -511,3 +511,105 @@ SL_TEST ("state", stateSavedAndLoadedWhilePlaying)
     p.releaseResources();
     p.setPlayHead (nullptr);
 }
+
+SL_TEST ("state", lateSoundSilencesClipNotes)
+{
+    section ("Decision 3: while a loaded state's sound is still being made, clip notes are silent, live keys play and the blocks are counted; when it arrives the note under way comes in at once (fix pass HMS-3, R2-10)");
+
+    // The state: the Saw and a 4-bar clip of one note as long as the clip, so it always sounds and starts again
+    // only every 16 beats (8 s at 120 bpm).
+    juce::MemoryBlock saved;
+    {
+        StrandLockProcessor maker;
+        useSaw (maker);
+        model::Clip whole = model::newClip (4);
+        whole.notes.push_back (std::make_shared<const model::Note> (model::mkNote (60, 0, 16, "whole")));
+        maker.editClip ("whole", whole);
+        maker.waitForSnapshot();
+        maker.getStateInformation (saved);
+    }
+
+    StrandLockProcessor p;
+    harness::FakePlayHead head;
+    p.setPlayHead (&head);
+    p.setPlayConfigDetails (0, 2, kSr, 256);
+    p.prepareToPlay (kSr, 256);
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    midi.ensureSize (64);
+    long long played = 0;
+    // One block of the song (120 bpm from ppq 0), with a key going down or up at its start; its peak.
+    auto block = [&] (int keyOn, int keyOff) {
+        head.info.setIsPlaying (true);
+        head.info.setBpm (120.0);
+        head.info.setPpqPosition ((double) played * 256.0 / 24000.0);
+        midi.clear();
+        if (keyOn >= 0)
+            midi.addEvent (juce::MidiMessage::noteOn (1, keyOn, (juce::uint8) 100), 0);
+        if (keyOff >= 0)
+            midi.addEvent (juce::MidiMessage::noteOff (1, keyOff), 0);
+        p.processBlock (buffer, midi);
+        ++played;
+        return juce::jmax (buffer.getMagnitude (0, 0, 256), buffer.getMagnitude (1, 0, 256));
+    };
+    auto peakFor = [&block] (double seconds) {
+        float peak = 0.0f;
+        for (int i = 0; i < (int) (seconds * kSr / 256.0); ++i)
+            peak = juce::jmax (peak, block (-1, -1));
+        return peak;
+    };
+    auto waitedBlocks = [&p] { return p.getDiag().snapshot().blocksWaitingForSound; };
+
+    const float demo = peakFor (0.5);
+
+    // The project's sound cannot be made yet (the worker is held): the host loads the state on its own thread,
+    // which waits for the sound, while the audio thread plays on.
+    p.getSampleManager().setHeld (true);
+    std::atomic<bool> loaded { false };
+    std::thread host ([&p, &saved, &loaded] {
+        p.setStateInformation (saved.getData(), (int) saved.getSize());
+        loaded.store (true);
+    });
+    for (int spins = 0; waitedBlocks() == 0 && ! loaded.load() && spins < 100000; ++spins)
+    {
+        block (-1, -1);
+        std::this_thread::yield();
+    }
+    const auto waitingAtStart = waitedBlocks();
+    for (int spins = 0; (p.getAudioSnapshot() == nullptr || p.getAudioSnapshot()->notes.size() != 1) && spins < 100000; ++spins)
+    {
+        block (-1, -1);
+        std::this_thread::yield();
+    }
+    const bool newClip = p.getAudioSnapshot() != nullptr && p.getAudioSnapshot()->notes.size() == 1;
+    peakFor (0.1);   // Strand Demo's voices fade out (60 ms)
+    const float silent = peakFor (0.3);
+    block (64, -1);
+    const float live = peakFor (0.1);
+    block (-1, 64);
+    peakFor (0.1);
+    const float silentAgain = peakFor (0.1);
+    const auto waitingNow = waitedBlocks();
+    const bool stillLoading = ! loaded.load();
+
+    p.getSampleManager().setHeld (false);
+    host.join();
+    const auto waitingAtArrival = waitedBlocks();
+    const double beatAtArrival = (double) played * 256.0 / 24000.0;
+    const float first = peakFor (0.05);
+    const float on = peakFor (0.2);
+    const auto waitingAfter = waitedBlocks();
+
+    check (demo > 0.01 && stillLoading && newClip && waitingAtStart > 0 && juce::exactlyEqual (silent, 0.0f) && juce::exactlyEqual (silentAgain, 0.0f),
+           fmt ("while the sound is made: Strand Demo played before (peak %.3f); the loaded clip's note is silent (peak %g, and %g after a live key)", demo,
+                (double) silent, (double) silentAgain));
+    check (live > 0.01, fmt ("a live key plays meanwhile, on the sound there is (peak %.3f)", (double) live));
+    check (waitingNow > waitingAtStart + 100,
+           fmt ("the Diagnostics page counts the blocks played without the sound (%llu)", (unsigned long long) waitingNow));
+    check (first > 0.01 && on > 0.01,
+           fmt ("once the Saw is there (beat %.2f), the note under way sounds within 50 ms (peak %.3f), not at its next start (beat 16)", beatAtArrival,
+                (double) first));
+    check (waitingAfter == waitingAtArrival, fmt ("the count stops when the sound is there (%llu)", (unsigned long long) waitingAfter));
+    p.releaseResources();
+    p.setPlayHead (nullptr);
+}

@@ -19,6 +19,8 @@ namespace sl::ui
         constexpr int kSideMargin = 12, kTopMargin = 8;
         constexpr int kTopBarHeight = 40, kBannerHeight = 28, kSelRowHeight = 36, kTabsHeight = 30;
         constexpr int kHintHeight = 30;
+        constexpr int kPaneScrollBar = 8;
+        constexpr int kMinScrollingPane = 32 + 2 * 2 * kPaneScrollBar;   // LookAndFeel_V2: minimum thumb = 2 x thickness
         constexpr int kBarPadX = 8, kItemHeight = 26, kGap = 5, kModeGap = 4;
 
         const char* const kTabNames[] = { "Sample", "Macros", "Note settings", "Slides", "Copy / Paste", "Mod wheels", "Sound", "Diagnostics" };
@@ -358,7 +360,7 @@ namespace sl::ui
             if (panel != nullptr)
                 paneContent.addChildComponent (*panel);
         paneViewport.setScrollBarsShown (true, false);
-        paneViewport.setScrollBarThickness (8);
+        paneViewport.setScrollBarThickness (kPaneScrollBar);
         paneViewport.setViewedComponent (&paneContent, false);
         addChildComponent (paneViewport);
 
@@ -603,9 +605,15 @@ namespace sl::ui
         const int want = toast->preferredWidth();
         const int lines = want <= most ? 1 : juce::jmin (3, (want + most - 1) / most);
         const int w = juce::jmin (want, most);
-        const int top = (roll.isVisible() ? roll.getY() : paneArea.getY()) + 10;
+        const int top = toastTop();
         toast->setBounds (card.getCentreX() - w / 2, top, w, 14 + 16 * lines);
         toast->toFront (false);
+    }
+
+    int MainView::toastTop() const noexcept
+    {
+        // Under the roll's ruler, so the bar numbers stay readable (fix pass R2-6); on the pane when the roll is hidden.
+        return roll.isVisible() ? roll.getY() + RollPlaceholder::rulerHeight + 8 : paneArea.getY() + 10;
     }
 
     const juce::String& MainView::getToastText() const noexcept
@@ -763,6 +771,10 @@ namespace sl::ui
                                 down = e;
                         }
                         paneHeight = up > 0 && area.getHeight() - up >= 110 ? up : down;
+                        // It scrolls: JUCE draws no thumb in a scroll bar shorter than 32 px plus twice its
+                        // thickness, so a pane cut to one row (the state banner at 900 x 560) would hide that
+                        // there is more (fix pass R2-7).
+                        paneHeight = juce::jmax (paneHeight, kMinScrollingPane);
                     }
                 }
             }
@@ -774,7 +786,7 @@ namespace sl::ui
         }
 
         if (toast->isVisible())
-            toast->setBounds (toast->getBounds().withY ((roll.isVisible() ? roll.getY() : paneArea.getY()) + 10));
+            toast->setBounds (toast->getBounds().withY (toastTop()));
     }
 
     void MainView::paint (juce::Graphics& g)

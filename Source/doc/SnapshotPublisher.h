@@ -71,7 +71,8 @@ namespace sl::doc
         ~SnapshotPublisher() override;
 
         /** Any thread but the audio thread: the newest clip version (version counts up with every change). The
-            thread wakes, takes the newest version handed to it and compiles that one only. */
+            thread wakes, takes the newest version handed to it and compiles that one only. A version older than
+            one handed over before is dropped (stats ().stale). */
         void submit (model::ClipPtr clip, std::uint64_t version);
 
         /** Waits until a version at least this new has been published, at most timeoutMs. True when it was. */
@@ -88,6 +89,8 @@ namespace sl::doc
             double lastCompileMs = 0.0;
             bool tooDetailed = false;         // the last clip did not fit even at res 8 (an empty snapshot plays)
             std::size_t cachedNotes = 0;      // the SnapshotCache after the last compile
+            std::uint64_t stale = 0;          // versions dropped because a newer one had been handed over (fix pass)
+            std::uint64_t failed = 0;         // compiles that threw (out of memory): an empty snapshot played instead
         };
 
         Stats stats() const;
@@ -95,9 +98,13 @@ namespace sl::doc
         /** For the tests: while held, the thread takes nothing new (a compile already running finishes). */
         void setHeld (bool held);
 
+        /** For the tests: the next compile throws std::bad_alloc, as one that runs out of memory would. */
+        void failNextCompile();
+
     private:
         void run() override;
         void compileAndPublish (const model::ClipPtr& clip, std::uint64_t version);
+        void publishFailed (const model::Clip& clip, std::uint64_t version);   // after a compile threw
 
         rt::VersionExchange<core::Snapshot>& exchange;
 
@@ -107,7 +114,9 @@ namespace sl::doc
         std::uint64_t pendingVersion = 0;
         bool hasPending = false;
         bool held = false;
+        std::uint64_t newestSubmitted = 0;
         Stats st;
+        std::atomic<bool> failNext { false };
 
         // The compiler thread's own.
         model::SnapshotCache cache;

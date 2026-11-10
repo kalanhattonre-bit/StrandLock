@@ -108,6 +108,7 @@ namespace sl::ui
         juce::Rectangle<int> getRollArea() const noexcept { return roll.getBounds(); }
         juce::Rectangle<int> getStripArea() const noexcept { return strip.getBounds(); }
         juce::Rectangle<int> getPaneArea() const noexcept { return paneArea; }
+        juce::Viewport& getPaneViewport() noexcept { return paneViewport; }
         juce::Rectangle<int> getLogoArea() const noexcept { return logoArea; }
         juce::Rectangle<int> getWordmarkArea() const noexcept { return wordmarkArea; }
 
@@ -125,6 +126,7 @@ namespace sl::ui
         void updateHint();
         void saveUiState();
         void layoutPane();
+        int toastTop() const noexcept;   // where the toast sits
 
         const Theme& theme;
         StrandLockProcessor& processor;

@@ -607,6 +607,19 @@ SL_TEST ("ui", editorStateBanner)
     check (proc.getStateBanner().isNotEmpty() && editor.getView().getBannerText() == proc.getStateBanner(),
            fmt ("the banner reads \"%s\"", editor.getView().getBannerText().substring (0, 60).toRawUTF8()));
 
+    // At 900 x 560 the banner leaves the Sample tab's pane little room: the rest of its controls scroll, and the
+    // scroll bar must be long enough for JUCE to draw its thumb (fix pass R2-7).
+    editor.setLogicalSize (900, 560);
+    editor.refreshNow();
+    auto& pane = editor.getView().getPaneViewport();
+    auto& bar = pane.getVerticalScrollBar();
+    const auto* content = pane.getViewedComponent();
+    const int contentHeight = content != nullptr ? content->getHeight() : 0;
+    const int shortest = 32 + bar.getLookAndFeel().getMinimumScrollbarThumbSize (bar);
+    check (contentHeight > pane.getHeight() && bar.isVisible() && bar.getHeight() >= shortest,
+           fmt ("900 x 560 with the banner: the pane is %d px of %d px of controls; its scroll bar is %d px (a thumb needs %d)", pane.getHeight(),
+                contentHeight, bar.getHeight(), shortest));
+
     StrandLockProcessor clean;
     StrandLockEditor quiet (clean);
     quiet.refreshNow();

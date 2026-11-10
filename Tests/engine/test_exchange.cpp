@@ -448,10 +448,17 @@ SL_TEST ("engine", editsWhilePlaying)
     const auto soft2 = clipWith (0.3);
     const auto edited = play (clipWith (0.6), &soft2, editAt, total);
     const double before = meanOf (edited.L, editAt - 4000, editAt);
-    const double after = meanOf (edited.L, editAt + 64, editAt + 64 + 2048);   // one tick (32 samples) after the block that took it
+    // The block that takes the edit starts on a tick (24000 = 750 x 32): the gain moves to the new value over that
+    // tick and holds it from the next one, 32 samples after the edit.
+    const double after = meanOf (edited.L, editAt + 32, editAt + 32 + 2048);
     const double ratio = after / before;
     check (std::abs (expected - 1.0) > 0.1 && std::abs (ratio - expected) <= 0.01,
            fmt ("the level from the tick after the edit is %.4f of before (expected %.4f, from the two values played from the start)", ratio, expected));
+    // Within one tick (fix pass R2-5): the 32 samples right after the edit's tick already play the new level. An
+    // edit heard one tick late would still be ramping there (about 0.62 of before).
+    const double secondTick = meanOf (edited.L, editAt + 32, editAt + 64) / before;
+    check (std::abs (secondTick - expected) <= 0.01,
+           fmt ("samples 32-64 after the edit play %.4f of before (expected %.4f): the edit is heard within one tick", secondTick, expected));
     check (edited.voicesBefore == 1 && edited.voicesAfter == 1 && edited.idAfter == edited.idBefore && ! edited.releasedAfter && edited.envAfter > 0.999f,
            fmt ("the same voice plays on: %d voice before, %d after, same note id, not released, envelope %.4f (no new attack)", edited.voicesBefore,
                 edited.voicesAfter, edited.envAfter));

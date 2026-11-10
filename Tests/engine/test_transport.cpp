@@ -426,6 +426,80 @@ SL_TEST ("engine", reAnchorForwardAndBack)
     }
 }
 
+SL_TEST ("engine", tempoDropKeepsTheNoteOnIt)
+{
+    section ("a tempo drop re-anchored on a block start (host beat = the engine's clock): a note a fraction of a sample before it starts once (fix pass, M2-ENG-1)");
+
+    // A note at beat 4, eps samples before sample 96000 at 120 bpm. The old clock puts it at 96000, so it had not
+    // started; a slower new clock puts it before 96000. The JS loses it when eps > newBpm / 120 (the M2 review).
+    const model::Clip clip = clipOf (2, { { 60, 4, 1 } });
+    struct Case
+    {
+        double eps, bpm;
+    };
+    const Case cases[] = { { 0.8, 87 }, { 0.99, 87 }, { 0.5, 60 }, { 0.99, 60 }, { 0.1, 87 }, { 0.8, 119 } };
+    for (const Case& c : cases)
+    {
+        Rig rig (48000, tapeInst(), dcSample(), &clip);
+        const double db = 120.0 / 60 / 48000;
+        const double b0 = c.eps * db;
+        const double cur = b0 + 96000.0 * db;   // the engine's clock there: uAt (96000), computed as it does
+        render::Script script;
+        script.at (0, [b0] (engine::Engine& e) { e.setTransport (playAt (120, b0)); });
+        script.at (96000, [c, cur] (engine::Engine& e) { e.setTransport (playAt (c.bpm, cur)); });
+        int maxVoices = 0;
+        std::vector<float> L, R;
+        script.run (*rig.e, 96000 + 24000, render::fixedBlocks (128), L, R,
+                    [&maxVoices] (engine::Engine& e, std::int64_t) { maxVoices = std::max (maxVoices, e.stats().voices); });
+        std::string why;
+        const bool onTime = startsOnTime (soundStarts (L, R), { 96000.0 - c.eps }, why);
+        check (onTime && maxVoices == 1,
+               fmt ("eps %.2f, 120 -> %g bpm: the note starts once (most voices %d), in [0, 1) sample of its time %s", c.eps, c.bpm, maxVoices,
+                    why.c_str()));
+    }
+}
+
+SL_TEST ("engine", manyReAnchorsKeepTheOldestHorizon)
+{
+    section ("12 tempo re-anchors in 12 samples, each moving the clock back, just after a note started: it starts once (fix pass, HMS-2)");
+
+    // The note at beat 2 starts at sample 48000. At 48480 (beat 2.02) the host says 1.97 at 119 bpm, then on each
+    // of the next 11 samples one more bpm down and a sample's worth further back. The first rule (horizon 2.02)
+    // is the one that keeps the note from starting again; the other 11 rules lie below beat 2. More than 8 rules
+    // are live at once, so one must go: dropping the oldest (the first) let the note start a second time when
+    // the clock reached beat 2 again (a node model of the scan put it at sample 49304).
+    const model::Clip clip = clipOf (1, kFourShort);
+    Rig rig (48000, tapeInst(), dcSample(), &clip);
+    render::Script script;
+    script.at (0, [] (engine::Engine& e) { e.setTransport (playAt (120, 0)); });
+    constexpr int kMoves = 12;
+    for (int j = 0; j < kMoves; ++j)
+        script.at (48480 + j, [j] (engine::Engine& e) { e.setTransport (playAt (119.0 - j, 1.97 - j / 24000.0)); });
+    const double lastBeat = 1.97 - (kMoves - 1) / 24000.0, lastBpm = 119.0 - (kMoves - 1);
+    const double spbLast = 60.0 / lastBpm * 48000;
+    const double lastAt = 48480.0 + (kMoves - 1);
+    int maxVoices = 0;
+    double clockAfter = 0;
+    auto frame = std::make_unique<engine::DisplayFrame>();
+    std::vector<float> L, R;
+    script.run (*rig.e, static_cast<std::int64_t> (lastAt + (3.5 - lastBeat) * spbLast), render::fixedBlocks (32), L, R,
+                [&maxVoices, &clockAfter, &frame] (engine::Engine& e, std::int64_t k) {
+                    maxVoices = std::max (maxVoices, e.stats().voices);
+                    if (k == 48512)
+                    {
+                        e.fillDisplay (*frame);
+                        clockAfter = frame->beat;
+                    }
+                });
+    std::string why;
+    const bool onTime = startsOnTime (soundStarts (L, R), { 0, 24000, 48000, lastAt + (3 - lastBeat) * spbLast }, why);
+    check (clockAfter > 1.96 && clockAfter < 2.0,
+           fmt ("the engine's clock at sample 48512 is beat %.5f: the moves put it behind the note at beat 2, which had started", clockAfter));
+    check (onTime && maxVoices == 1,
+           fmt ("beats 0, 1, 2 and 3 start once each (most voices at once %d) and on time %s", maxVoices, why.c_str()));
+    check (L[52000] != 0.0f, "the note at beat 2 still sounds 4000 samples after its start (the slack of a backward re-anchor)");
+}
+
 SL_TEST ("engine", chainOnOneVoice)
 {
     section ("a chain C3 -> G3 (Auto Slide legato) plays on one voice through the Engine: max voices 1");

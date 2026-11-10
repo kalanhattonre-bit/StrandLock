@@ -217,6 +217,12 @@ namespace sl::engine
         /** Sets every ramp to its target now (state load, plan 2.3). */
         void snapRamps() noexcept;
 
+        /** Every clip voice releases and, while the transport plays, the clip notes sounding now start again
+            through a chase at the next sample (a jump's rule, with the clock where it is). The fix pass's addition
+            (NOTES-M2): the processor calls it when decision 3's silence ends, so the notes under way come in
+            where they are instead of at their next start. */
+        void rechase() noexcept;
+
         //==========================================================================================
         // Read-only (any thread while the audio thread is idle; the audio thread itself at any time).
 

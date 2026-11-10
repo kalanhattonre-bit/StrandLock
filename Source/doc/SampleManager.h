@@ -122,8 +122,17 @@ namespace sl::doc
         /** Until every request made so far is finished, at most timeoutMs. */
         bool waitIdle (int timeoutMs);
 
+        /** Until every request the worker publishes by itself (a project, Undo, a new instance's default) is
+            finished, at most timeoutMs. A user load ends in takePending and only its owner publishes it, on the
+            message thread, so a wait there gains nothing (prepareToPlay, fix pass RT2-5). */
+        bool waitForSelfPublished (int timeoutMs);
+
         /** True while a request waits or is being made. */
         bool busy() const;
+
+        /** True when no request newer than this one has been made: a pending user load that is not the newest
+            would be refused by commit (). */
+        bool isNewest (std::uint64_t request) const;
 
         /** Every request up to this number is finished. Lock-free: the audio thread may read it (a block played
             while a state load's sound is not there yet is counted by the diagnostics, decision 3). */
@@ -160,6 +169,10 @@ namespace sl::doc
         double lastStarterMs() const;         // how long the last one it made took on the worker
         double lastFileMs() const;            // how long the last file took (hash and decode)
         std::uint64_t lastRequest() const;
+
+        /** For the tests: while held, the worker takes no new request (one it is making finishes first), as if
+            a sound took a long time to make. */
+        void setHeld (bool held);
 
     private:
         enum class Kind : std::uint8_t { starter, file, ref };
@@ -212,7 +225,9 @@ namespace sl::doc
         std::condition_variable finishedChanged;
         std::deque<Request> queue;
         std::uint64_t requested = 0;   // the newest request number
+        std::uint64_t newestSelfPublished = 0;   // the newest request that is not a user load
         std::uint64_t finished = 0;    // every request up to this one is finished
+        bool held = false;             // the tests' setHeld
         std::atomic<std::uint64_t> finishedAtomic { 0 };
         bool working = false;
         std::vector<PendingSound> pending;

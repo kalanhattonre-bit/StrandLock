@@ -245,10 +245,18 @@ namespace sl::ui
         repaint();
     }
 
-    int DiagnosticsPage::rowLines (const Row& row, int valueWidth)
+    int DiagnosticsPage::labelLines (const Row& row, int labelWidth)
+    {
+        // A label wider than its column (which is at most half the card) wraps onto a second line.
+        const float w = Theme::textWidth (labelFont(), row.label);
+        return juce::jlimit (1, 2, (int) std::ceil (w / (float) juce::jmax (40, labelWidth - labelGap)));
+    }
+
+    int DiagnosticsPage::rowLines (const Row& row, int labelWidth, int valueWidth)
     {
         const float w = Theme::textWidth (valueFont(), row.value);
-        return juce::jlimit (1, 3, (int) std::ceil (w / (float) juce::jmax (40, valueWidth - 4)));
+        const int valueLines = juce::jlimit (1, 3, (int) std::ceil (w / (float) juce::jmax (40, valueWidth - 4)));
+        return juce::jmax (valueLines, labelLines (row, labelWidth));
     }
 
     int DiagnosticsPage::labelWidthFor (const Card& card, int cardWidth)
@@ -262,10 +270,11 @@ namespace sl::ui
 
     int DiagnosticsPage::cardHeight (const Card& card, int width) const
     {
-        const int valueWidth = width - 2 * kPad - labelWidthFor (card, width);
+        const int labelWidth = labelWidthFor (card, width);
+        const int valueWidth = width - 2 * kPad - labelWidth;
         int h = kPad + 18;
         for (const auto& row : card.rows)
-            h += rowLines (row, valueWidth) * lineHeight;
+            h += rowLines (row, labelWidth, valueWidth) * lineHeight;
         return h + kPad;
     }
 
@@ -333,11 +342,16 @@ namespace sl::ui
             const int valueWidth = area.getWidth() - labelWidth;
             for (const auto& row : card.rows)
             {
-                const int lines = rowLines (row, valueWidth);
+                const int lines = rowLines (row, labelWidth, valueWidth);
+                const int ownLines = labelLines (row, labelWidth);
                 auto line = area.removeFromTop (lines * lineHeight);
                 g.setColour (theme (Tok::dim));
                 g.setFont (labelFont());
-                g.drawText (row.label, line.removeFromLeft (labelWidth).withHeight (lineHeight), juce::Justification::centredLeft, true);
+                const auto labelBox = line.removeFromLeft (labelWidth).withTrimmedRight (labelGap).withHeight (ownLines * lineHeight);
+                if (ownLines == 1)
+                    g.drawText (row.label, labelBox, juce::Justification::centredLeft, true);
+                else
+                    g.drawFittedText (row.label, labelBox, juce::Justification::centredLeft, ownLines, 1.0f);
                 g.setColour (theme (Tok::txt));
                 g.setFont (valueFont());
                 g.drawFittedText (row.value, line, juce::Justification::topLeft, lines, 1.0f);

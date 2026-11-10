@@ -29,6 +29,7 @@
 #include <cmath>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace
@@ -301,6 +302,122 @@ SL_TEST ("doc", sampleManagerCacheAndNewest)
            fmt ("a missing file: the Saw that opens up plays, the record is kept as it was, the toast: \"%s\"",
                 reports.empty() ? "" : reports.back().message.c_str()));
     check (! m.busy() && m.finishedRequest() == m.lastRequest(), "the worker is idle and every request is finished");
+}
+
+SL_TEST ("doc", snapshotPublisherOrderAndFailure)
+{
+    section ("SnapshotPublisher: a version older than one handed over is dropped; a compile that throws ends its wait and the thread lives on (fix pass RT2-4, RT2-3)");
+
+    rt::VersionExchange<core::Snapshot> out;
+    doc::SnapshotPublisher pub (out);
+
+    // A state load and an edit on two threads can hand over version 9 and then 8.
+    pub.setHeld (true);
+    pub.submit (std::make_shared<const model::Clip> (clipOf (9, 1)), 9);
+    pub.submit (std::make_shared<const model::Clip> (clipOf (8, 1)), 8);
+    pub.setHeld (false);
+    const bool nine = pub.waitForVersion (9, 3000);
+    const auto st = pub.stats();
+    const auto* snap = out.current();
+    check (nine && st.stale == 1 && st.compiled == 1 && snap != nullptr && snap->clipVersion == 9 && snap->notes.size() == 9,
+           fmt ("versions 9 then 8 handed over: 8 is dropped (%d stale), 9 is compiled and plays (version %d, %d notes)", (int) st.stale,
+                snap != nullptr ? (int) snap->clipVersion : -1, snap != nullptr ? (int) snap->notes.size() : -1));
+
+    // A compile that runs out of memory.
+    pub.failNextCompile();
+    pub.submit (std::make_shared<const model::Clip> (clipOf (5, 1)), 10);
+    const auto t0 = std::chrono::steady_clock::now();
+    const bool ten = pub.waitForVersion (10, 3000);
+    const double waited = msSince (t0);
+    const auto st2 = pub.stats();
+    const auto* empty = out.current();
+    check (ten && st2.failed == 1 && st2.tooDetailed && empty != nullptr && empty->clipVersion == 10 && empty->notes.empty(),
+           fmt ("a compile that throws: the wait for its version ends (%.1f ms), its notes are silent (an empty snapshot) and tooDetailed says so", waited));
+    pub.submit (std::make_shared<const model::Clip> (clipOf (7, 1)), 11);
+    const bool eleven = pub.waitForVersion (11, 3000);
+    const auto st3 = pub.stats();
+    check (eleven && out.current() != nullptr && out.current()->notes.size() == 7 && ! st3.tooDetailed && st3.failed == 1,
+           "the compiler thread lives on: the next version compiles and plays (7 notes)");
+}
+
+SL_TEST ("state", userLoadOvertakenByStateLoad)
+{
+    section ("A sound the user picked that a state load overtook changes nothing when it arrives: the parameters, SMPL and the undo history stay the state's (fix pass RT2-1)");
+
+    const int root = params::index (params::P::rootNote), start = params::index (params::P::regionStart);
+
+    // The state: the Square sweep, with root D3 and the Region from 0.25.
+    juce::MemoryBlock saved;
+    {
+        StrandLockProcessor maker;
+        maker.loadStarterSound (sounds::StarterId::square);
+        maker.waitForSounds();
+        params::setPlainValue (maker.getParam (root), root, 62.0f);
+        params::setPlainValue (maker.getParam (start), start, 0.25f);
+        maker.getStateInformation (saved);
+    }
+
+    StrandLockProcessor p;
+    p.waitForSounds();
+    // The user picks the Evolving pad; the worker makes it and leaves it for the message thread, which has not
+    // run yet (no message loop here) when the host loads the project.
+    const auto picked = p.loadStarterSound (sounds::StarterId::pad);
+    p.getSampleManager().waitIdle (10000);
+    p.setStateInformation (saved.getData(), (int) saved.getSize());
+    const int published = p.deliverSoundLoads();
+
+    juce::MemoryBlock after;
+    p.getStateInformation (after);
+    const auto sound = p.getCurrentSound();
+    check (picked > 0 && published == 0 && sound != nullptr && sound->starter == sounds::StarterId::square && p.getSampleRef().starterId == "square",
+           fmt ("the pad arrives after the project: it is not published, the Square sweep plays and SMPL names it (\"%s\")", p.getSampleRef().starterId.c_str()));
+    check (juce::exactlyEqual (params::plainValueOf (p.getParam (root)), 62.0f) && juce::exactlyEqual (params::plainValueOf (p.getParam (start)), 0.25f),
+           fmt ("the state's root (%.0f) and Region start (%.2f) stay: the pad's patch (root 60, the whole sound) is not applied",
+                (double) params::plainValueOf (p.getParam (root)), (double) params::plainValueOf (p.getParam (start))));
+    check (! p.canUndo() && after == saved, "no undo step, and a save gives back the loaded state byte for byte");
+}
+
+SL_TEST ("doc", prepareWaitsOnlyForSelfPublished)
+{
+    section ("prepareToPlay waits for a project's sound, not for one the user picked, which only the message thread publishes (fix pass RT2-5)");
+
+    StrandLockProcessor p;
+    p.waitForSounds();
+    p.setPlayConfigDetails (0, 2, 48000.0, 256);
+    auto& m = p.getSampleManager();
+
+    // The user's pick, not made yet (the worker is held, as if it were decoding a long file).
+    m.setHeld (true);
+    p.loadStarterSound (sounds::StarterId::pluck);
+    auto t0 = std::chrono::steady_clock::now();
+    p.prepareToPlay (48000.0, 256);
+    const double userMs = msSince (t0);
+    p.releaseResources();
+    m.setHeld (false);
+    p.waitForSounds();
+    const auto pick = p.getCurrentSound();
+    check (userMs < 2000.0 && pick != nullptr && pick->starter == sounds::StarterId::pluck,
+           fmt ("with the user's pick still to make, prepareToPlay returned in %.1f ms (it waited up to 10 s before); the pick plays once delivered", userMs));
+
+    // A no-op is not a pass: a project's sound, held 300 ms on the worker, is still waited for.
+    m.setHeld (true);
+    state::SampleRef ref;
+    ref.kind = state::kSampleStarter;
+    ref.starterId = "vowel";
+    ref.seed = 1;
+    m.loadRef (ref, doc::LoadOrigin::project);
+    std::thread release ([&m] {
+        std::this_thread::sleep_for (std::chrono::milliseconds (300));
+        m.setHeld (false);
+    });
+    t0 = std::chrono::steady_clock::now();
+    p.prepareToPlay (48000.0, 256);
+    const double projectMs = msSince (t0);
+    release.join();
+    p.releaseResources();
+    const auto loaded = p.getCurrentSound();
+    check (projectMs >= 250.0 && projectMs < 5000.0 && loaded != nullptr && loaded->starter == sounds::StarterId::vowel,
+           fmt ("a project's sound held 300 ms: prepareToPlay waited %.0f ms for it, and it plays", projectMs));
 }
 
 SL_TEST ("params", applyPatchGestures)

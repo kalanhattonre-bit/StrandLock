@@ -957,3 +957,15 @@ second on the message thread.
 - Snapshots looked at (run 42765565991): `strip_playing_dark` and `_light` show the heads of Strand Demo and the
   chord on the Region, numbered with arrows; the Diagnostics page shows the Voices and Engine health rows; the
   roll's note and the top bar's "Test build 0.1.0" fit at 900 x 560. Nothing clipped or overlapping.
+
+## Fix
+
+The fix pass after the second review (plan 7.4): 20 findings from four reviewers, each checked against the code
+first. Branch `m2-fixes`. The earlier sections are append only, so where they say something that is no longer
+true, the correction is here.
+
+### Progress
+
+- Done: the code and test changes for every finding listed as fixed below; the checklist corrections.
+- In progress: CI on `m2-fixes`.
+- Next: CI green, these notes with the CI figures, rebase on main if it moved, fast-forward main.

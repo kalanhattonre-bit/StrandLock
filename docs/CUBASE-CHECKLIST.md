@@ -116,7 +116,7 @@ screenshot helps a lot, with the UI Scale and theme you were using.
 
 From this build on StrandLock plays with its real sound engine (the Tape engine). The steps above (M0) still
 apply; this part is about the sound. Please go through it and send back your answers, the two exported files from
-step 9 and the text from **Copy report**.
+step 10 and the text from **Copy report**.
 
 A few things to know first:
 - **StrandLock now plays its own clip.** A new StrandLock opens on the demo clip (Strand Demo) and plays it in
@@ -145,17 +145,18 @@ A few things to know first:
    - Click **Browse...** and pick one of your own songs (a WAV, AIFF, FLAC, OGG or MP3).
    - Drag the same song onto the StrandLock window from Windows Explorer.
    - Drag it again from MediaBay.
-   Each time: did it load? A short message appears at the bottom; what does it say? The file line shows the name
-   and length. For a song longer than 20 seconds StrandLock starts with a 4-second part from about a third of the
-   way in. For a song longer than 10 minutes it loads the first 10 minutes and says so. (The Diagnostics tab still
-   lists each drop in its DROPS box.)
+   Each time: did it load? A short message appears in the middle of the window, near the top of the empty
+   piano roll; what does it say? The file line shows the name and length. For a song longer than 20 seconds
+   StrandLock starts with a 4-second part from about a third of the way in. For a song longer than 10 minutes it
+   loads the first 10 minutes and says so. (The Diagnostics tab still lists each drop in its DROPS box.)
 
 5. **Pick a part and play it.** On the strip, drag across the wave to make a new Region around a part you like
    (a chord, a vocal line, a drum hit). Drag the Region's edges to adjust it, or drag the band along its top to move
    the whole box. **-** and **+** zoom the wave, **Show all** shows the whole song again. Hold the mouse button
    down inside the Region to hear it from that point. Then play the part from your keyboard: C3 plays it as
    recorded, other keys play it higher or lower. Does it sound right? Does the Region box follow your mouse
-   smoothly? Does Ctrl+Z undo the Region change (click the StrandLock window first)?
+   smoothly? (Undo for StrandLock's own changes comes in a later build. For now Ctrl+Z goes to Cubase and undoes
+   your last Cubase edit, so do not use it to undo a Region change.)
 
 6. **At the end.** Hold a key and try **At the end** on the file line: **Loop** (the part repeats with a soft
    joint), **Hold** (it stops moving at the end and keeps sounding), **Stop** (it goes quiet at the end). Do you
@@ -181,6 +182,9 @@ A few things to know first:
     "Real-Time Export" ticked. Send both files. They should be identical.
 
 11. **CPU.** On the Sample tab set **Heads** to 8, then hold a 4-note chord while Cubase plays the demo clip. How
-    high does Cubase's Audio Performance meter go (Studio > Audio Performance)? Does it crackle?
+    high does Cubase's Audio Performance meter go (Studio > Audio Performance)? Does it crackle? Then stop, and
+    press Play in the middle of the demo clip (not at bar 1) a few times: is there a crackle right as it starts?
+    (Notes already under way have to catch up at that moment, which is the heaviest work StrandLock does. Your
+    buffer size from the M0 part, step 1, tells how much room it has.)
 
 12. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.

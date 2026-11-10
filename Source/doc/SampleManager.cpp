@@ -52,6 +52,8 @@ namespace sl::doc
             const std::lock_guard<std::mutex> hold (lock);
             id = ++requested;
             r.id = id;
+            if (r.origin != LoadOrigin::user)
+                newestSelfPublished = id;
             queue.push_back (std::move (r));
         }
         notify();
@@ -100,10 +102,32 @@ namespace sl::doc
                                          [this] { return finished >= requested; });
     }
 
+    bool SampleManager::waitForSelfPublished (int timeoutMs)
+    {
+        std::unique_lock<std::mutex> hold (lock);
+        return finishedChanged.wait_for (hold, std::chrono::milliseconds (std::max (0, timeoutMs)),
+                                         [this] { return finished >= newestSelfPublished; });
+    }
+
     bool SampleManager::busy() const
     {
         const std::lock_guard<std::mutex> hold (lock);
         return working || ! queue.empty();
+    }
+
+    bool SampleManager::isNewest (std::uint64_t request) const
+    {
+        const std::lock_guard<std::mutex> hold (lock);
+        return request >= requested;
+    }
+
+    void SampleManager::setHeld (bool nowHeld)
+    {
+        {
+            const std::lock_guard<std::mutex> hold (lock);
+            held = nowHeld;
+        }
+        notify();
     }
 
     std::vector<PendingSound> SampleManager::takePending()
@@ -191,7 +215,7 @@ namespace sl::doc
             bool got = false;
             {
                 const std::lock_guard<std::mutex> hold (lock);
-                if (! queue.empty())
+                if (! queue.empty() && ! held)
                 {
                     // Only the newest one waiting is made; the others are finished as replaced.
                     r = std::move (queue.back());
