@@ -968,8 +968,9 @@ true, the correction is here.
 
 - Done: the code and test changes for every finding listed as fixed below; the checklist corrections; CI run
   42778904303 on 74dbf69 green on every job; the snapshots looked at; these notes.
-- In progress: CI on the head (the corruptionFuzz gate and the toast's gap came after run 42778904303).
-- Next: CI green, rebase on main if it moved, fast-forward main, CI on main.
+- Done too: run 42781736226 on fbe4bbc (the corruptionFuzz gate and the toast's gap) green on every job.
+- In progress: CI on this commit (notes only), then the fast-forward of main and CI on main.
+- Next: the M2 review of the fix pass, or M3.
 
 ### The findings, and what was done
 
@@ -1118,3 +1119,20 @@ true, the correction is here.
   value; at 900 x 560 with the banner the Sample pane shows its first row and a scroll thumb. At 900 x 560 the toast
   touched the roll's centred note, hence the 4 px gap of commit a870a74, which also moved corruptionFuzz to its
   percentile gate. Both are checked by the CI run on the head that merges.
+
+### Results (CI run 42781736226 on fbe4bbc, all green)
+
+- Every job and step green: Windows Release 1225 checks in 191 tests; Linux Release 1224 in 191; sanitizers 577 in
+  103 (contract, model, engine) and 142 in 20 (state); Debug-CRT allocation run 36 in 6, 0 JUCE assertions; Debug
+  snapshots 0 assertions; pluginval strictness 10; the fixture check. renders.json: 22 bit for bit on Windows, 13 on
+  Linux, 36 of 36 within tolerance.
+- corruptionFuzz now says where the slow load's time goes: the slowest CRC-fixed load that made no starter took
+  81.4 ms on Windows (85.7 Linux, 189.2 sanitizers), and its clip compile took 81.3 ms of that (85.7, 189.0). So one
+  mutation makes a clip whose lane tables take that long to compile (a note made very long, most likely), and the
+  load waits for the compile, as a load must. 99.9 % of those loads finish within 0.29 ms (0.18, 7.66). The 11
+  loads that made a starter took at most 111.6 ms (64.3, 87.0), gate 550. A compile that slow is the publisher's
+  budget at work (plan 1.3, up to 256 MiB of tables), not the state code; for review.
+- The chase moment's 32-sample block: 1.62 ms on Windows this time (1.84 Linux, 4.44 sanitizers): the figure
+  moves between 1.6 and 2.3 ms from run to run on the shared runners.
+- At 900 x 560 with the banner the pane is 64 px on Windows (70 on Linux; the fonts differ), its scroll bar as
+  long, so the thumb shows on both.
