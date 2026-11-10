@@ -515,8 +515,131 @@ The plugin chain, part 1 (plan 7.4): the document, the sounds, the state and the
 
 ### Progress
 
-- Done (first CI round pending): state (SMPL file record, CLIP through ClipCodec, shared payloads), doc/
-  (ClipDocument, EditHistory, SnapshotPublisher, SampleManager, Sha256), ParamBridge::applyPatch, host/HostSync,
-  host/MidiRouter, the processor wiring, tests (test_state_clip, test_doc, test_host_midi, updated M0 tests).
-- In progress: CI on m2-plugin.
-- Next: CI green, the NOTES bullets (decisions, figures) and the hand-off for P2.
+- Done: state (SMPL file record, CLIP through ClipCodec, shared payloads), doc/ (ClipDocument, EditHistory,
+  SnapshotPublisher, SampleManager, Sha256), ParamBridge::applyPatch, host/HostSync, host/MidiRouter, the processor
+  wiring, the tests (test_state_clip, test_doc, test_host_midi, the M0 tests updated), the decisions and the
+  hand-off below. CI run 42732142894: everything built; Linux passed every new test (2 failures: an M0 test with a
+  stale chunk index, fixed); Windows stopped in probe/levels (the stack, fixed below).
+- In progress: CI on the fixes.
+- Next: CI green, the CI figures here.
+
+### Decisions and deviations
+
+- **A new instance opens on Strand Demo and the Saw that opens up.** BLUEPRINT 6: "Strand Demo clip and the
+  saw-that-opens-up sound load on first open" (the prototype's `init()`; its `init` sound preset is
+  `defaultInst()`). A state that holds no readable CLIP chunk (an M0 project, a damaged chunk) gets an empty 4-bar
+  clip instead, the clip's default, as a parameter the state does not mention gets its default. So an M0 project
+  does not start playing chords when it is opened again.
+- **CLIP is one of the chunks this version writes**, in plan 3's table order: PARM, INST, CLIP, SMPL, UIST. A state
+  without one re-saves with it appended after the kept chunks (M0's rule for missing chunks).
+- **Payloads are shared** (`state::PayloadPtr`). The processor encodes the clip once per clip version, and a save or
+  the banner check (twice a second) compares the shared payload, so a 32 MiB clip is never copied or encoded again.
+- **SMPL's default starter is now `sawopen`** (D9), and SMPL kind 1 (the file record) is read and written with
+  every field of plan 3, the analysis cache written empty (M7 fills it). A cache that a record holds is kept and
+  written back as it was.
+- **Who publishes a loaded sound.** A sound the user loads changes parameters (root and cents, the Region), which
+  plan 2.4 sets on the message thread as host-visible edits. So the worker hands such a sound back
+  (`SampleManager::takePending`), and the processor applies the patch first and publishes the sound after it: the
+  audio thread never plays the new sound with the old Region. A project load, Undo and a new instance's default
+  change no parameter, so the worker publishes those itself, and `setStateInformation` waits for that on its own
+  thread (decision 3).
+- **Newest wins.** The worker makes only the newest request waiting, and a sound whose request is older than the
+  newest one made is never published (a project load that arrives while a user load is being made wins).
+- **`prepareToPlay` waits too** (up to 10 s) for the sound and the clip already asked for (a new instance's
+  default). The reason is decision 3's: the first block plays the sound, and the worker never needs the thread
+  that waits. Without it a new instance would play silence for about 80 ms after it is made.
+- **`setStateInformation` also waits for the loaded clip's snapshot** (up to 10 s), so the first block after a load,
+  or an offline export started right after it, plays the loaded clip. The SnapshotPublisher's thread compiles it;
+  nothing else compiles, so its SnapshotCache is never shared between threads.
+- **A snapshot's memory is bounded** (NOTES-M1 asked for it). `SnapshotSizer` gives an upper bound of the lane
+  tables at a resolution (a lane counts as flat, 2 floats, only when it has no generator and every node holds the
+  same value). The publisher compiles at the finest of 256, 128, 64, 32, 16 and 8 that fits 256 MiB, measures the
+  result, and goes one step coarser if it is still over. A clip that does not fit even at 8 is not compiled: an
+  empty snapshot plays, and `stats().tooDetailed` says so. ClipDocument refuses an edit that would make such a clip
+  ("That would make the clip too detailed to play ..."). This is a third refusal beside plan 3's two caps, because
+  a clip inside both caps (4096 long notes with every lane moving: a few MB encoded) could need gigabytes of tables.
+  Only a hand-made state can now hold one.
+- **ParamBridge::applyPatch opens a gesture only for a parameter whose value changes**, and returns what changed
+  (EditHistory needs it). GrainLock's `applyPreset` opens one for every parameter; an unchanged one would only add
+  noise to Cubase's edit history.
+- **A project's file is found only while its size and SHA-256 match** (plan 3: "the original path (if the SHA-256
+  matches)"). A file at the path with other bytes counts as missing, and the toast says it changed. A saved path
+  that is not absolute on this system (a project from a Mac) counts as missing without being made into a
+  `juce::File` (which asserts on a relative path).
+- **A long file's part** follows the prototype's rule for a song: longer than 20 s (sl-ui.js `LONG_FILE`), measured
+  on the part loaded. Its Region starts as 0.35 .. 0.35 + 4 / seconds, with the exact edges in INST. A file longer
+  than 10 minutes loads its first 10 minutes (`floor (600 x rate)` frames) and the toast says so.
+- **SHA-256 is written out in `doc/Sha256`.** The plan's JUCE modules do not include `juce_cryptography`, and
+  `CMakeLists.txt` is not this part's file. It is checked against the FIPS 180-4 vectors.
+- **The probe plays from the sample exchange.** ProbeSynth's `setSound` takes `engine::SampleData` (it took a
+  `StarterSound`), so the probe plays whatever the SampleManager published, files included, until the integration
+  step replaces it. `Source/probe/SoundSlot.h` is no longer used; the integration step deletes it with `probe/`.
+- **The probe tests load the starter Saw first** (`useSaw`): a new instance now opens on sawopen, and the probe
+  tests' criteria (M0) were written for the Saw.
+- **The strip reads `doc::SoundView`.** MainView's small StripView draws the current sound from the SoundView
+  (name, file or built-in, missing) so the editor keeps working; P2 replaces it with `ui/strip/WaveStrip`.
+- **HostSync takes `diag::HostBlock`**, what `diag::readHostBlock` already reads from the play head without
+  allocating, so the play head is read once per block.
+- **MidiRouter sends a CC to both wheels when both listen to it**, and checks CC64 and CC120/CC123 on their own, so a
+  wheel assigned to CC64 still sustains.
+- **The live row's "CC 32" is the mod wheel (CC1) at value 32**: 32 / 127 on a Travel target plays -0.98236x (the
+  prototype's `travelSpeed`). No 14-bit pair is needed; JUCE's VST3 wrapper sends 7-bit controllers.
+- **Undo and sounds.** An undo step that changes the sound asks the SampleManager for the old one (no patch); the
+  root, cents and Region the step changed come back through pv. `SoundMeta` (each sound's own root, plan 2.4) is
+  not kept yet: every starter, and every file until M7's Detect, is rooted at C3, so pv holds the same values.
+- **Load reports are kept until the editor takes them, at most 32**, so a project opened with no editor does not
+  collect them for ever.
+- **The diagnostics count the blocks played before a state load's sound is there** (decision 3):
+  `DiagModel::audioWaitingForSound`, shown on the report's State line. The probe plays no clip notes; the
+  integration step silences clip notes in those blocks (the processor's `awaitedSound` against
+  `SampleManager::finishedRequest`, both lock-free).
+- **Group names.** The doc layer's unit tests are group `doc`, HostSync and MidiRouter's `hostsync` (plan 7.2 names
+  it for later milestones), applyPatch's `params`. The state tests stay in `state`, which the sanitizer job runs, so
+  the two threads run under AddressSanitizer there.
+- **The processor keeps its two rings on the heap**: the diagnostics' 4096-event ring (about 200 KB) and the
+  command queue. With the ring inline a processor was about 200 KB, and probe/levels keeps five on the test
+  thread's stack: with M2's additions that passed Windows' 1 MB main-thread stack and the runner stopped there with
+  no output (CI run 42732142894, twice; Linux has 8 MB). `doc/processorFootprint` now holds `sizeof
+  (StrandLockProcessor)` to 128 KB. For the integration step: keep the DisplaySlot (three frames of about 8.5 KB)
+  and anything else large behind a pointer too.
+
+### Hand-off for the UI builder (P2)
+
+Everything below is on the processor (`StrandLockProcessor`), message thread unless it says otherwise.
+
+- **Sounds.**
+  - Load a starter: `loadStarterSound (sounds::StarterId id, std::int32_t seed = 1)`. Load a file (Browse, a drop):
+    `loadSoundFile (juce::File)`. Both return a request number at once; the worker makes or decodes the sound.
+  - When it is ready the processor's AsyncUpdater (`handleAsyncUpdate`) sets root 60, cents 0 and the Region (the
+    whole sound, or 4 s from 35 % in for a song) as host-visible edits, records the sound in SMPL, makes one undo
+    step ("Sound: Evolving pad", "Load song.wav") and publishes the sound. The editor needs nothing for that. A test
+    with no message loop calls `waitForSounds()` (waits, then delivers).
+  - The current sound: `getCurrentSound()` returns `std::shared_ptr<const doc::SoundView>`: `left`, `right` (the
+    same pointer when mono), `frames`, `sampleRate`, `seconds()`, `stereo`, `name`, `builtIn`, `starter` and `seed`
+    (when built in), `ref` (the SMPL record: a file's path, size, SHA-256, the loaded part), `missing` (the
+    project's file was not found; the default starter plays), `cut` (a file over 10 minutes, its first 10 minutes),
+    `request`. It is the peaks source: the samples are shared with what the engine plays and never change, so the
+    strip can keep the pointer and compare it in its timer (a new sound is a new pointer). It is null only for the
+    first few tens of milliseconds after construction.
+  - Toasts: `takeSoundReports()` returns `doc::LoadReport { request, origin, ok, message }` since the last call.
+    Show the ones with a non-empty `message`: a missing or changed project file ("Could not find the sound file
+    ..."), a file cut to 10 minutes, a song's default part, a file that could not be read. The prototype's
+    "Loading ..." toast before the load is the UI's own.
+  - `getSampleRef()` is what the project names (`state::SampleRef`, kind 0 starter or 1 file).
+- **The clip.** `getDocument()` is the `doc::ClipDocument`: `current()` (the immutable `model::ClipPtr`), `version()`,
+  `encodedBytes()`, `instState()`, `soundRef()`. Edit through the processor so the edit is one undo step:
+  `editClip (label, model::EditResult)` or `editClip (label, model::Clip)`. The outcome (`doc::EditOutcome`) has
+  `accepted`, `refused` and `message`: show `message` as the toast when refused (the note cap, 32 MiB, or "too
+  detailed to play"); the clip is then unchanged. `undo()`, `redo()`, `canUndo()`, `canRedo()`, `undoLabel()` and
+  `redoLabel()` cover the clip, the INST state, the sound and the parameters the steps changed.
+- **INST state** (seed, wheel targets and CCs, key, scale, scale lock, exact Region edges): `getInstState()` and
+  `setInstState (s)`; the document writes the audio thread's atomics.
+- **Snapshots.** `getSnapshotPublisher().stats()` has `tooDetailed` (show a banner when true) and the resolution
+  used; `waitForSnapshot()` for tests.
+- **Commands to the audio thread**: `getCommandQueue()` (doc/CommandQueue.h): push `UiCommand::auditionOn` etc.
+  Nothing drains it until the integration step.
+- **Freeing versions**: call `collectVersions()` from the editor's 10 Hz timer (plan 1.3). The publisher and the
+  sound worker also collect after each publish, so nothing piles up without an editor.
+- **Left for later parts**: the audio path (Engine, HostSync, MidiRouter, the display slot, setInUse; the
+  integration step), the starter menu, Browse and drop wiring, the waveform strip with the Region box and zoom
+  (P2), MIDI Learn (M8), Preview (M6), SoundMeta and Detect (M7), the analysis cache (M7).

@@ -85,7 +85,7 @@ namespace sl::diag
     }
 
     //==============================================================================================
-    DiagModel::DiagModel() = default;
+    DiagModel::DiagModel() : log (std::make_unique<DiagLog>()) {}
     DiagModel::~DiagModel() = default;
 
     int DiagModel::bucketOf (int numSamples) noexcept
@@ -107,7 +107,7 @@ namespace sl::diag
 
     void DiagModel::push (const Event& e) noexcept
     {
-        if (! log.push (e))
+        if (! log->push (e))
             bump (lostEvents);
     }
 
@@ -328,7 +328,7 @@ namespace sl::diag
     void DiagModel::drain()
     {
         Event e;
-        while (log.pop (e))
+        while (log->pop (e))
         {
             switch (e.kind)
             {

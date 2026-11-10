@@ -207,7 +207,7 @@ namespace sl::diag
         bool prevPlaying = false, prevHasPpq = false, haveBpm = false;
         double prevEndPpq = 0.0, prevBpm = 0.0;
 
-        DiagLog log;
+        std::unique_ptr<DiagLog> log;   // about 200 KB: on the heap, so a processor on a stack stays small
 
         // Message thread only.
         std::deque<BlockStart> blockStartHistory;

@@ -359,3 +359,13 @@ SL_TEST ("params", applyPatchGestures)
            "applyStateFields: seed 77, Mod 1 -> \"pitch\", Mod 2 off on CC127 (300 clamped), the scale by name, scale lock on");
     p.removeListener (&counter);
 }
+
+SL_TEST ("doc", processorFootprint)
+{
+    section ("The processor object stays small: tests keep several on the test thread's stack (1 MB on Windows)");
+
+    // The diagnostics ring (4096 events, about 200 KB) and the command queue live on the heap. With them inline,
+    // probe/levels' five processors overflowed Windows' 1 MB main-thread stack (CI run 42732142894).
+    const std::size_t size = sizeof (StrandLockProcessor);
+    check (size <= 128u * 1024u, fmt ("sizeof (StrandLockProcessor) = %d bytes (at most 128 KB, so five fit in 1 MB with room)", (int) size));
+}

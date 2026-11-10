@@ -665,7 +665,7 @@ SL_TEST ("state", unreadableBlobsKept)
         auto chunks = ownChunks (values, state::InstState {}, starterRef (sounds::StarterId::saw, 1), state::UiState {});
         state::UiState light;
         light.theme = 1;
-        chunks[3].payload = state::encodeUist (light);
+        chunks[4].payload = state::encodeUist (light);   // UIST is the fifth chunk (PARM INST CLIP SMPL UIST)
         auto b = containerOf (chunks);
         b[16 + 12] ^= 0x40u;   // PARM's payload CRC
         StrandLockProcessor p;

@@ -152,7 +152,7 @@ public:
     bool waitForSnapshot (int timeoutMs = kLoadWaitMs);
 
     /** UI -> audio commands (doc/CommandQueue.h; the integration step drains it in processBlock). */
-    sl::doc::CommandQueue& getCommandQueue() noexcept { return commands; }
+    sl::doc::CommandQueue& getCommandQueue() noexcept { return *commands; }
 
     /** Frees every snapshot and sample version the audio thread no longer reads (plan 1.3's 10 Hz collect). */
     void collectVersions();
@@ -209,7 +209,7 @@ private:
     sl::doc::ClipDocument clipDoc { nonParam };
     sl::rt::VersionExchange<sl::core::Snapshot> snapshots;
     sl::rt::VersionExchange<sl::engine::SampleData> samples;
-    sl::doc::CommandQueue commands;
+    std::unique_ptr<sl::doc::CommandQueue> commands = std::make_unique<sl::doc::CommandQueue>();   // on the heap (6 KB)
     mutable std::mutex historyLock;
     sl::doc::EditHistory history;
     std::unique_ptr<sl::doc::SnapshotPublisher> publisher;
