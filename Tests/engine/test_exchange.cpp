@@ -271,7 +271,7 @@ SL_TEST ("engine", exchangeUnderLoad)
            fmt ("a no-op is not a pass: in %lld blocks a releasing voice held an older snapshot than the current one (the probe's rule would have freed it)",
                 heldOlder));
     note (fmt ("largest snapshot pool seen at a collect: %zu versions", largestPool));
-    check (voicesAtEnd == 0 && quietTail == 0.0,
+    check (voicesAtEnd == 0 && juce::exactlyEqual (quietTail, 0.0),
            fmt ("every note deleted while 1,000 snapshots a second still come in: %d voices after 0.5 s, and silence after 100 ms (peak %.3g)", voicesAtEnd,
                 quietTail));
 
@@ -466,5 +466,5 @@ SL_TEST ("engine", editsWhilePlaying)
     check (deleted.voicesAfter == 1 && deleted.releasedAfter && right > 0.01,
            fmt ("the deleted note's voice releases (%d voice, released %d) and still sounds as it fades (%.3f)", deleted.voicesAfter,
                 deleted.releasedAfter ? 1 : 0, right));
-    check (silenceAfter == 0.0, fmt ("100 ms after the delete: silence (peak %.3g)", silenceAfter));
+    check (juce::exactlyEqual (silenceAfter, 0.0), fmt ("100 ms after the delete: silence (peak %.3g)", silenceAfter));
 }

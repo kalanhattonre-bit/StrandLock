@@ -94,7 +94,7 @@ SL_TEST ("plugin", clipPlaysWithTheHost)
     const double playing = measure::rms (out.left.data(), (std::size_t) (4 * kSr));
     const double tail = measure::peak (out.left.data() + (std::size_t) (4.2 * kSr), (std::size_t) (0.8 * kSr));
     const auto st = p.getEngineStats();
-    check (playing > 0.01 && tail == 0.0, fmt ("playing: rms %.4f; 0.2 s after Stop: peak %.3g (the clip voices released)", playing, tail));
+    check (playing > 0.01 && juce::exactlyEqual (tail, 0.0), fmt ("playing: rms %.4f; 0.2 s after Stop: peak %.3g (the clip voices released)", playing, tail));
     check (st.nonFinite == 0 && st.filterResets == 0, "no sample was replaced by the output guard and no filter reset");
     const auto snap = p.getAudioSnapshot();
     check (snap != nullptr && snap->notes.size() == p.getDocument().current()->notes.size() && p.getDisplayFramesWritten() >= 130,
@@ -161,7 +161,7 @@ SL_TEST ("plugin", parametersReachTheEngine)
     const double gain = std::pow (10.0, -6.0 / 20.0);
     check (std::abs (quiet / loud - gain) <= 0.002, fmt ("Output Gain -18 against -12 dB: %.4f of the level (%.4f)", quiet / loud, gain));
     const double bypassed = level (127, 0.7f, -12.0f, true);
-    check (bypassed == 0.0, fmt ("the host bypass silences the output (rms %.3g)", bypassed));
+    check (juce::exactlyEqual (bypassed, 0.0), fmt ("the host bypass silences the output (rms %.3g)", bypassed));
 }
 
 SL_TEST ("plugin", liveThroughMidiRouter)
@@ -231,10 +231,10 @@ SL_TEST ("plugin", liveThroughMidiRouter)
         const double heldOn = measure::rms (r.left.data() + 19200, 4800);   // 0.4 s after the note-off
         const double after = measure::peak (r.left.data() + 24000 + 4800, 4800);
         if (pedal)
-            check (heldOn > 0.01 && after == 0.0, fmt ("with the pedal down the key still sounds 0.3 s after its note-off (rms %.4f) and ends once it lifts (peak %.3g)",
+            check (heldOn > 0.01 && juce::exactlyEqual (after, 0.0), fmt ("with the pedal down the key still sounds 0.3 s after its note-off (rms %.4f) and ends once it lifts (peak %.3g)",
                                                        heldOn, after));
         else
-            check (heldOn == 0.0, fmt ("negative control: without the pedal it has ended (rms %.3g)", heldOn));
+            check (juce::exactlyEqual (heldOn, 0.0), fmt ("negative control: without the pedal it has ended (rms %.3g)", heldOn));
     }
 }
 
@@ -347,7 +347,7 @@ SL_TEST ("plugin", determinismThroughProcessBlock)
     {
         const auto out = renderWith (run.sizes, run.offline, run.stopped);
         const double diff = harness::maxDifference (reference, out);
-        check (diff == 0.0, fmt ("%s: largest difference %.3g", run.what, diff));
+        check (juce::exactlyEqual (diff, 0.0), fmt ("%s: largest difference %.3g", run.what, diff));
     }
 
     // a no-op is not a pass: Play at beat 1.75 instead of 1.7 changes the output
@@ -407,8 +407,8 @@ SL_TEST ("plugin", voiceAndCloudPlayAsTape)
         harness::render (p, kSr, 24000, harness::fixedBlocks (256), events);
         const auto s = p.getDiag().snapshot();
         const auto report = p.getDiag().reportText();
-        const bool tape = engineIndex == 0.0f;
-        const char* name = tape ? "Tape" : engineIndex == 1.0f ? "Voice" : "Cloud";
+        const bool tape = juce::exactlyEqual (engineIndex, 0.0f);
+        const char* name = tape ? "Tape" : juce::exactlyEqual (engineIndex, 1.0f) ? "Voice" : "Cloud";
         check (s.engineReports > 0 && s.voices == 2 && s.tapeStandIns == (tape ? 0 : 2) && s.maxTapeStandIns == (tape ? 0 : 2)
                    && report.contains ("playing as Tape instead of Voice or Cloud: " + juce::String (tape ? 0 : 2) + " now"),
                fmt ("%s: 2 voices, %d of them standing in as Tape (most %d), and the report says so", name, s.tapeStandIns, s.maxTapeStandIns));
@@ -502,7 +502,7 @@ SL_TEST ("state", stateSavedAndLoadedWhilePlaying)
     const auto* snap = p.getAudioSnapshot();
     check (outcome.accepted && after == withOne && withOne != stopped,
            "after 10 loads while playing, the state is the last one loaded, byte for byte");
-    check (snap != nullptr && snap->notes.size() == 1 && snap->notes[0].p == 72.0
+    check (snap != nullptr && snap->notes.size() == 1 && juce::exactlyEqual (snap->notes[0].p, 72.0)
                && juce::exactlyEqual (params::plainValueOf (p.getParam (params::P::heads)), 3.0f),
            "the audio thread plays the loaded clip (its one note) with the loaded parameters");
     check (audioCounts.news == 0 && audioCounts.deletes == 0 && finite && blocks.load() > 100,

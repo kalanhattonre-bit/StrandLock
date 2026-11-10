@@ -202,7 +202,7 @@ namespace
         bool sounding = false;
         for (std::size_t i = static_cast<std::size_t> (from); i < L.size(); ++i)
         {
-            const bool now = L[i] != 0.0f || R[i] != 0.0f;
+            const bool now = ! juce::exactlyEqual (L[i], 0.0f) || ! juce::exactlyEqual (R[i], 0.0f);
             if (now && ! sounding)
                 out.push_back (static_cast<std::int64_t> (i));
             sounding = now;
@@ -537,7 +537,7 @@ SL_TEST ("hostsync", preRollThroughHostSync)
         const auto out = hostRender (rig, -2.0, 48000 + 24000, 128, constant (120));
         const double before = std::max (rmsOf (out.L, 0, 48000), rmsOf (out.R, 0, 48000));
         const std::int64_t first = render::firstSounding (out.L, out.R, 0, 72000);
-        check (before == 0.0 && first == 48000,
+        check (juce::exactlyEqual (before, 0.0) && first == 48000,
                fmt ("loop %s: rms before ppq 0 = %g, the first sound at sample %lld (ppq 0 = 48000)", loop ? "on" : "off", before, static_cast<long long> (first)));
     }
     // a no-op is not a pass: from ppq 6.5 the last note sounds at once

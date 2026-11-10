@@ -805,7 +805,7 @@ processor-level M2 rows, the M2 section of the Cubase checklist. Branch `m2-inte
   `test_probe.cpp` deleted; tests `Tests/engine/test_hostsync.cpp`, `test_exchange.cpp`,
   `Tests/plugin/test_audio_path.cpp`, the allocation tests and the strip's heads test updated; two new strip
   snapshots with real frames; `docs/CUBASE-CHECKLIST.md` "M2: the first real sound"; this section.
-- In progress: CI on the last commit, then the fast-forward of main.
+- In progress: the fast-forward of main once CI is green on the last commit (d7591ea was green: run 42765565991).
 - Next: the review and the fix pass (plan 7.4).
 
 ### The block, as built
@@ -935,3 +935,25 @@ second on the message thread.
 - Decision 3's silent clip notes while a loaded sound is late (see above): implemented, not tested.
 - The CPU row stays E2's engine-level test; the processor adds a little per block (the play head read, the
   diagnostics) that no test times.
+
+### Results (CI run 42765565991 on d7591ea, all green)
+
+- Windows Release: 1196 checks in 185 tests, 0 failed (engine 279 in 51, hostsync 66 in 10, plugin 53 in 9, state
+  131 in 18, alloc 35 in 6, ui 137 in 19). Linux: 1195 in 185. Linux sanitizers: contract, model and engine 567
+  checks in 101 tests (engine 278 in 51: the exchange and edits-while-playing tests under AddressSanitizer and
+  UBSan); state 131 in 18 (the save and load while playing too). Debug-CRT allocation run 36 checks in 6 tests, 0
+  JUCE assertions; Debug snapshots 0 assertions; pluginval strictness 10 SUCCESS; the fixture check passes.
+- The first run (42763451757 on 2132cf9) failed 2 checks, both in the new tests and both fixed: the tempo-and-cycle
+  song ran one block past 12 beats for the host that does not split (13 starts), and the exchange's negative
+  control asked for more than 100 blocks with an older snapshot held (CI measured about 70; it now asks for 20).
+- Figures (Windows; Linux in brackets). Allocations: 10 minutes of Strand Demo, live keys and sweeps in 31.7 s
+  (17.7 s), 3 minutes in the Debug CRT run in 29.1 s, 0 allocations and frees. The editor-open run: 45,000 blocks,
+  11,250 host changes, the editor opened 5 times, 0 and 0. The exchange: 10,000 snapshots and 2 swaps in 3,750
+  blocks, 10,000 freed (6,422 never taken by a block), at most 24 versions pooled at a collect, 76 blocks (72) with
+  an older snapshot held by a releasing voice, 0 bad reads. The sample swap step 0.987 of the steady step (0.809 in
+  E2's engine-level test, which plays a softer key). Stability: pre-limiter peak 2.763, output rms 0.340, peak 0.900.
+  CC 1 at 32: -0.982360x. Every hostsync start within 1 sample (worst 0). Determinism: largest difference 0 in all 9
+  runs.
+- Snapshots looked at (run 42765565991): `strip_playing_dark` and `_light` show the heads of Strand Demo and the
+  chord on the Region, numbered with arrows; the Diagnostics page shows the Voices and Engine health rows; the
+  roll's note and the top bar's "Test build 0.1.0" fit at 900 x 560. Nothing clipped or overlapping.
