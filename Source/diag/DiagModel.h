@@ -78,6 +78,19 @@ namespace sl::diag
             decision 3: the load waited 10 s for it, and clip notes stay silent until it arrives). */
         void audioWaitingForSound() noexcept;
 
+        /** What the engine reports with each display frame (about 30 times a second): its voices now, the notes
+            set to Voice or Cloud that play as Tape until M3 (PLUGIN-PLAN 4 M2: "the diagnostics page says so"),
+            and its counters since prepare. */
+        struct EngineFigures
+        {
+            int voices = 0;
+            int tapeStandIns = 0;
+            std::int64_t steals = 0, cuts = 0, nonFinite = 0, filterResets = 0;
+        };
+
+        /** Audio thread: the engine's figures now. */
+        void audioEngine (const EngineFigures& figures) noexcept;
+
         //==========================================================================================
         // Message thread.
 
@@ -147,6 +160,11 @@ namespace sl::diag
             bool lastLoadReadable = true;
             std::uint64_t blocksWaitingForSound = 0;
 
+            // The engine (audioEngine): now, and the most since the plugin was made.
+            std::uint64_t engineReports = 0;
+            int voices = 0, maxVoices = 0, tapeStandIns = 0, maxTapeStandIns = 0;
+            long long steals = 0, cuts = 0, nonFinite = 0, filterResets = 0;
+
             std::vector<BlockStart> blockStarts;   // recent, oldest first
             std::vector<Wrap> wraps;
             std::vector<BlockOverEnd> blocksOverEnd;
@@ -201,6 +219,9 @@ namespace sl::diag
         std::atomic<long long> lastSavedBytes { -1 }, lastLoadedBytes { -1 };
         std::atomic<bool> lastLoadReadable { true };
         std::atomic<std::uint64_t> blocksWaitingForSound { 0 };
+        std::atomic<std::uint64_t> engineReports { 0 };
+        std::atomic<int> engineVoices { 0 }, maxEngineVoices { 0 }, tapeStandIns { 0 }, maxTapeStandIns { 0 };
+        std::atomic<long long> engineSteals { 0 }, engineCuts { 0 }, engineNonFinite { 0 }, engineFilterResets { 0 };
 
         // The audio thread's own state (only it touches these, or prepare while no audio runs).
         std::uint64_t blockIndex = 0;

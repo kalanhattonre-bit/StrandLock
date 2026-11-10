@@ -225,6 +225,29 @@ namespace sl::engine
         /** Samples rendered since prepare (JS this.k). */
         std::int64_t sampleTime() const noexcept { return k; }
 
+        /** Every version the engine reads now: its own snapshot and sample, and those of every voice that is not
+            done (a releasing voice's old note, a stolen voice's old sample). f (VersionKind, const void* version,
+            std::uint64_t epoch) once per pointer held, repeats included. The integration step's addition
+            (NOTES-M2): the exchange test checks that none of them was freed. Audio thread, or while it is idle. */
+        template <class F>
+        void forEachVersionRead (F&& f) const
+        {
+            if (snap != nullptr)
+                f (VersionKind::snapshot, static_cast<const void*> (snap), snapEpoch);
+            if (src != nullptr)
+                f (VersionKind::sample, static_cast<const void*> (src), srcEpoch);
+            for (int i = 0; i < numVoices; ++i)
+            {
+                const Voice& v = voiceAt (order[static_cast<std::size_t> (i)]);
+                if (v.done)
+                    continue;
+                if (v.kind == VoiceKind::clip && v.snap != nullptr)
+                    f (VersionKind::snapshot, static_cast<const void*> (v.snap), v.snapEpoch);
+                if (v.src.data != nullptr)
+                    f (VersionKind::sample, static_cast<const void*> (v.src.data), v.src.epoch);
+            }
+        }
+
     private:
         struct VoicePoolDeleter
         {

@@ -792,3 +792,17 @@ ProbeSynth until the integration step.
   127, params 71, probe 44, engine 97 (the contract's), model 221). Linux: 949 in 130. Linux sanitizers: contract,
   model and engine 385 in 61; state 127 in 17. Debug-CRT allocation run 30 checks in 4 tests, 0 JUCE assertions;
   Debug snapshots 0 assertions; pluginval strictness 10 SUCCESS; the fixture check passes.
+
+## Integration
+
+The integration step (plan 7.4): the processor's audio path on the real engine, ProbeSynth deleted, the
+processor-level M2 rows, the M2 section of the Cubase checklist. Branch `m2-integrate`.
+
+### Progress
+
+- Done: the audio path in `PluginProcessor` (exchanges, parameters, commands, HostSync, MidiRouter, setInUse, the
+  display slot, the engine's figures for the Diagnostics page, the 10 Hz collect timer); `Source/probe/` and
+  `test_probe.cpp` deleted; tests `Tests/engine/test_hostsync.cpp`, `test_exchange.cpp`,
+  `Tests/plugin/test_audio_path.cpp`, the allocation tests and the strip's heads test updated.
+- In progress: the first CI run on `m2-integrate`.
+- Next: CI green, look at the snapshots, the checklist section, the notes below, merge to main.

@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include "host/MidiRouter.h"
 #include "model/ClipCodec.h"
 #include "model/Presets.h"
 
@@ -76,10 +77,14 @@ StrandLockProcessor::StrandLockProcessor()
     clipDoc.replace (firstOpenClip());
     resetHistory();
     sampleManager->loadStarter (sounds::kDefaultStarter, 1, doc::LoadOrigin::startup);
+
+    // Frees the versions the audio thread no longer reads, 10 times a second (plan 1.3).
+    startTimerHz (kCollectHz);
 }
 
 StrandLockProcessor::~StrandLockProcessor()
 {
+    stopTimer();
     clipDoc.onClipChanged = nullptr;
     sampleManager.reset();   // stops the worker (it may be making a sound)
     publisher.reset();       // stops the compiler
@@ -90,7 +95,18 @@ StrandLockProcessor::~StrandLockProcessor()
 
 void StrandLockProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    probe.prepare (sampleRate);
+    // The audio thread is idle here (a host calls prepareToPlay between blocks, never during one).
+    engine->prepare (sampleRate);
+    engine->setInst (params::readInst (paramRefs, nonParam));
+    engine->setBypass (params::readBypass (paramRefs));
+    engine->snapRamps();   // plan 2.3: the first block plays the parameters as they are, with no ramp from the defaults
+    hostSync.prepare (engine->sampleRate());
+    displayInterval = engine::displayEvery (engine->sampleRate());
+    samplesSinceDisplay = 0;
+    clipSilenced = false;
+    firstBlock = true;
+    displayFramesWritten = 0;
+    snapRampsPending.store (false);
     diag.prepare (sampleRate, samplesPerBlock);
 
     // The sound and the clip asked for before (a new instance's default, a state load still on its way) are
@@ -98,20 +114,25 @@ void StrandLockProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
     sampleManager->waitIdle (kLoadWaitMs);
     publisher->waitForVersion (clipDoc.version(), kLoadWaitMs);
 
+    // From here the audio thread may run: the first acquire () hands the engine the current versions again
+    // (Engine::prepare dropped its pointers).
     snapshots.setPrepared (true);
     samples.setPrepared (true);
 }
 
 void StrandLockProcessor::releaseResources()
 {
-    probe.setSound (nullptr);
+    // The engine first lets go of every version (its voices stop), so the exchanges may free what they like.
+    engine->forgetVersions();
     snapshots.setPrepared (false);
     samples.setPrepared (false);
 }
 
 void StrandLockProcessor::reset()
 {
-    probe.reset();
+    // The host clears the plugin's tails (VST3 setProcessing (false)); never during a block.
+    engine->reset();
+    hostSync.reset();
 }
 
 bool StrandLockProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -127,8 +148,7 @@ juce::AudioProcessorParameter* StrandLockProcessor::getBypassParameter() const
 }
 
 //==================================================================================================
-// The audio path stays the M0 probe until M2's integration step (plan 7.4): only the sound now comes from the
-// sample exchange, and the snapshot is taken (so old versions can be freed) though nothing plays it yet.
+// The audio path (PLUGIN-PLAN 1.3, 1.10): nothing here allocates, locks, waits, logs or touches a file.
 
 void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
 {
@@ -138,58 +158,112 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     for (int ch = 2; ch < buffer.getNumChannels(); ++ch)
         buffer.clear (ch, 0, n);
 
-    diag.audioBlock (sl::diag::readHostBlock (getPlayHead(), n, isNonRealtime()));
-    if (awaitedSound.load (std::memory_order_relaxed) > sampleManager->finishedRequest())
+    // What the host says about this block, and its MIDI, for the Diagnostics page.
+    const auto hostBlock = diag::readHostBlock (getPlayHead(), n, isNonRealtime());
+    diag.audioBlock (hostBlock);
+    for (const auto meta : midi)
+        diag.audioMidi (meta.data, meta.numBytes, juce::jlimit (0, n, meta.samplePosition));
+
+    // Decision 3: while the sound a state load asked for is not there yet, clip notes are silent.
+    const bool waitingForSound = awaitedSound.load (std::memory_order_relaxed) > sampleManager->finishedRequest();
+    if (waitingForSound)
         diag.audioWaitingForSound();
 
-    if (samples.acquire())
-        probe.setSound (samples.current());
-    snapshots.acquire();
-    probe.setInst (params::readInst (paramRefs, nonParam));
-    probe.setBypass (params::readBypass (paramRefs));
-
-    float* left = buffer.getNumChannels() > 0 ? buffer.getWritePointer (0) : nullptr;
-    float* right = buffer.getNumChannels() > 1 ? buffer.getWritePointer (1) : nullptr;
-
-    // Every event lands on its own sample: render up to it, then apply it (PLUGIN-PLAN 1.10).
-    int pos = 0;
-    for (const auto meta : midi)
+    // The newest versions (one atomic exchange each), the parameters and the editor's commands.
+    auto& eng = *engine;
+    const bool newSnapshot = snapshots.acquire();
+    if (newSnapshot || waitingForSound != clipSilenced)
     {
-        const int at = juce::jlimit (0, n, meta.samplePosition);
-        if (at > pos)
-        {
-            if (left != nullptr)
-                probe.render (left + pos, right != nullptr ? right + pos : nullptr, at - pos);
-            pos = at;
-        }
-        diag.audioMidi (meta.data, meta.numBytes, at);
-        if (meta.data != nullptr && meta.numBytes >= 3)
-        {
-            const int type = meta.data[0] & 0xf0;
-            const int d1 = meta.data[1] & 0x7f, d2 = meta.data[2] & 0x7f;
-            switch (type)
-            {
-                case 0x90: probe.noteOn (d1, d2); break;   // velocity 0 is a note off
-                case 0x80: probe.noteOff (d1); break;
-                case 0xb0:
-                    if (d1 == 64)
-                        probe.sustain (d2 >= 64);
-                    else if (d1 == 123)
-                        probe.allNotesOff();
-                    else if (d1 == 120)
-                        probe.allSoundOff();
-                    break;
-                case 0xe0: probe.pitchBend (d1 | (d2 << 7)); break;
-                default: break;
-            }
-        }
+        clipSilenced = waitingForSound;
+        if (clipSilenced)
+            eng.setSnapshot (nullptr, 0);
+        else
+            eng.setSnapshot (snapshots.current(), snapshots.currentEpoch());
     }
-    if (pos < n && left != nullptr)
-        probe.render (left + pos, right != nullptr ? right + pos : nullptr, n - pos);
+    if (samples.acquire())
+        eng.setSample (samples.current(), samples.currentEpoch());
 
-    // The probe reads only the current sample, and nothing reads a snapshot yet.
-    samples.setInUse (samples.currentEpoch());
-    snapshots.setInUse (snapshots.currentEpoch());
+    eng.setInst (params::readInst (paramRefs, nonParam));
+    eng.setBypass (params::readBypass (paramRefs));
+    if (snapRampsPending.exchange (false, std::memory_order_acq_rel) || firstBlock)
+        eng.snapRamps();   // plan 2.3: the first block and a state load play their values at once
+    firstBlock = false;
+
+    doc::UiCommand command;
+    while (commands->pop (command))
+        applyCommand (command);
+
+    // The transport (split where a host cycle wraps inside the block) and the MIDI, each at its own sample.
+    if (buffer.getNumChannels() >= 2 && n > 0)
+    {
+        const core::Snapshot* clip = snapshots.current();
+        const auto transport = hostSync.plan (hostBlock, n, clip != nullptr ? clip->offsetBeats : 0.0, clip == nullptr || clip->loop);
+        const host::MidiSettings settings { nonParam.mod1Cc.load (std::memory_order_relaxed), nonParam.mod2Cc.load (std::memory_order_relaxed) };
+        host::MidiRouter::renderBlock (eng, transport, midi, settings, buffer.getWritePointer (0), buffer.getWritePointer (1), n);
+    }
+    else
+    {
+        buffer.clear();
+    }
+
+    // The versions the engine still reads (a releasing voice's old note, a stolen voice's old sample) stay;
+    // the 10 Hz collect frees the rest.
+    snapshots.setInUse (eng.minEpochInUse (engine::VersionKind::snapshot));
+    samples.setInUse (eng.minEpochInUse (engine::VersionKind::sample));
+
+    // About 30 display frames a second for the waveform strip (the worklet's rule), and the engine's figures for
+    // the Diagnostics page.
+    samplesSinceDisplay += n;
+    if (samplesSinceDisplay >= displayInterval)
+    {
+        samplesSinceDisplay = 0;
+        eng.fillDisplay (displaySlot->beginWrite());
+        displaySlot->endWrite();
+        ++displayFramesWritten;
+
+        const auto st = eng.stats();
+        diag::DiagModel::EngineFigures f;
+        f.voices = st.voices;
+        f.tapeStandIns = st.tapeStandIns;
+        f.steals = st.steals;
+        f.cuts = st.cuts;
+        f.nonFinite = st.nonFinite;
+        f.filterResets = st.filterResets;
+        diag.audioEngine (f);
+    }
+}
+
+void StrandLockProcessor::applyCommand (const doc::UiCommand& command) noexcept
+{
+    auto& eng = *engine;
+    switch (command.kind)
+    {
+        case doc::UiCommandKind::auditionOn:
+        {
+            engine::NoteOnOpts opts;
+            opts.startPos = command.startPos;
+            eng.noteOn (static_cast<double> (command.note), command.velocity, opts);
+            break;
+        }
+        case doc::UiCommandKind::auditionOff:
+            eng.noteOff (static_cast<double> (command.note));
+            break;
+        case doc::UiCommandKind::letGoWheel:
+            eng.releaseController (command.wheel == 1 ? engine::Ctrl::mod2 : engine::Ctrl::mod1);
+            break;
+        case doc::UiCommandKind::allNotesOff:
+            eng.allNotesOff();
+            break;
+        case doc::UiCommandKind::previewStart:   // Preview is M6
+        case doc::UiCommandKind::previewStop:
+        case doc::UiCommandKind::midiLearnArm:   // MIDI Learn is M8
+            break;
+    }
+}
+
+void StrandLockProcessor::timerCallback()
+{
+    collectVersions();
 }
 
 juce::AudioProcessorEditor* StrandLockProcessor::createEditor()
@@ -648,6 +722,9 @@ void StrandLockProcessor::loadState (const void* data, std::size_t size)
         sampleManager->waitFor (request, kLoadWaitMs);
     }
     publisher->waitForVersion (clipDoc.version(), kLoadWaitMs);
+
+    // Plan 2.3: the loaded parameters play at once, with no ramp from the values before the load.
+    snapRampsPending.store (true, std::memory_order_release);
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

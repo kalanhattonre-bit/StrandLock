@@ -16,6 +16,7 @@
 #include "params/ParamIds.h"
 #include "params/ParameterLayout.h"
 #include "support/Check.h"
+#include "support/Harness.h"
 #include "support/TestRegistry.h"
 #include "support/TestSignals.h"
 #include "ui/Theme.h"
@@ -23,6 +24,7 @@
 #include "ui/strip/WaveStrip.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -649,7 +651,7 @@ SL_TEST ("ui", stripZoom)
 
 SL_TEST ("ui", stripHeadsFromDisplayFrames)
 {
-    section ("Strip: the heads and grains of the engine's display frame; none before the integration step sends one");
+    section ("Strip: the heads and grains of the engine's display frame; none before the audio thread writes one");
 
     StrandLockProcessor proc;
     resetUserSettings (proc);
@@ -662,12 +664,13 @@ SL_TEST ("ui", stripHeadsFromDisplayFrames)
 
     const auto none = render();
     const int headPixelsNone = countNear (none, strip.getWaveArea(), dark[Tok::head], 6);
-    check (proc.getDisplaySlot() == nullptr && strip.headsDrawn() == 0 && strip.grainsDrawn() == 0 && headPixelsNone < 5,
-           fmt ("no display slot yet (the integration step makes it): no heads drawn (%d head-coloured pixels)", headPixelsNone));
+    check (proc.getDisplaySlot() != nullptr && proc.getDisplayFramesWritten() == 0 && strip.headsDrawn() == 0 && strip.grainsDrawn() == 0
+               && headPixelsNone < 5,
+           fmt ("the processor's display slot is there, no block has run: no heads drawn (%d head-coloured pixels)", headPixelsNone));
 
     const auto frame = fakeFrame();
     strip.setDisplayFrame (frame.get());
-    editor.refreshNow();   // with no slot the editor leaves the frame it was given
+    editor.refreshNow();   // no new frame in the slot: the editor leaves the frame it was given
     const auto with = render();
     const int x50 = (int) std::lround (strip.xOf (0.5));
     const auto column = juce::Rectangle<int> (x50 - 1, strip.getWaveArea().getY() + ui::WaveStrip::band, 3, strip.getWaveArea().getHeight() - ui::WaveStrip::band);
@@ -682,6 +685,32 @@ SL_TEST ("ui", stripHeadsFromDisplayFrames)
     strip.setDisplayFrame (nullptr);
     render();
     check (strip.headsDrawn() == 0, "no frame: nothing drawn");
+
+    // The real thing: the processor plays a held key with 3 heads, writes about 30 frames a second into its slot,
+    // and the editor's next tick draws the newest one's heads.
+    strip.setView (0.0, 1.0);
+    params::setPlainValue (proc.getParam (params::P::heads), params::index (params::P::heads), 3.0f);
+    proc.setPlayConfigDetails (0, 2, 48000.0, 256);
+    proc.prepareToPlay (48000.0, 256);
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    constexpr int blocks = 48000 / 256;   // 1 s
+    for (int b = 0; b < blocks; ++b)
+    {
+        proc.processBlock (buffer, midi);
+        midi.clear();
+    }
+    // The worklet's rule: a frame after the block in which displayEvery (sr) = 1600 samples have passed, so one
+    // every 7 blocks of 256.
+    const auto want = (std::uint64_t) (blocks / ((engine::displayEvery (48000.0) + 255) / 256));
+    const auto written = proc.getDisplayFramesWritten();
+    editor.refreshNow();
+    render();
+    check (written == want && strip.headsDrawn() == 3,
+           fmt ("1 s of audio in 256-sample blocks wrote %llu frames (%llu expected); the editor takes the newest and draws its 3 heads (%d)",
+                (unsigned long long) written, (unsigned long long) want, strip.headsDrawn()));
+    proc.releaseResources();
     resetUserSettings (proc);
 }
 
@@ -741,7 +770,34 @@ namespace
         bool menuOpen = false;
         bool zoomed = false;
         bool heads = false;
+        bool played = false;   // the heads of the processor's own frames: Strand Demo and a held chord, 4 heads each
     };
+
+    /** The processor plays 1.2 s of Strand Demo at 120 bpm (the play head moving) with a chord held, 4 heads with
+        Spread 0.6, so its display slot holds the frames of a real playing engine. */
+    void playStrandDemo (StrandLockProcessor& proc)
+    {
+        params::setPlainValue (proc.getParam (params::P::heads), params::index (params::P::heads), 4.0f);
+        params::setPlainValue (proc.getParam (params::P::spread), params::index (params::P::spread), 0.6f);
+        harness::FakePlayHead head;
+        proc.setPlayHead (&head);
+        proc.setPlayConfigDetails (0, 2, 48000.0, 512);
+        proc.prepareToPlay (48000.0, 512);
+        juce::AudioBuffer<float> buffer (2, 512);
+        juce::MidiBuffer midi;
+        for (const int note : { 48, 55, 64 })
+            midi.addEvent (juce::MidiMessage::noteOn (1, note, (juce::uint8) 100), 0);
+        for (int b = 0; b < (int) (1.2 * 48000.0) / 512; ++b)
+        {
+            head.info.setIsPlaying (true);
+            head.info.setBpm (120.0);
+            head.info.setPpqPosition (b * 512 / 24000.0);
+            proc.processBlock (buffer, midi);
+            midi.clear();
+        }
+        proc.releaseResources();
+        proc.setPlayHead (nullptr);
+    }
 
     juce::Image stripShot (const StripShot& s, juce::Rectangle<int>* menuArea = nullptr)
     {
@@ -767,6 +823,8 @@ namespace
             const auto frame = fakeFrame();
             if (s.heads)
                 strip.setDisplayFrame (frame.get());
+            if (s.played)
+                playStrandDemo (proc);   // the next refreshNow takes the newest frame from the slot
             editor.refreshNow();
             image = editor.createComponentSnapshot (editor.getLocalBounds(), true, 1.0f);
             if (s.menuOpen)
@@ -834,3 +892,5 @@ SL_SNAPSHOT (strip_menu_open_dark)        { return stripShot ({ ThemeId::dark, 0
 SL_SNAPSHOT (strip_menu_open_light)       { return stripShot ({ ThemeId::light, 0, 0, true }); }
 SL_SNAPSHOT (strip_zoomed_heads_dark)     { return stripShot ({ ThemeId::dark, 0, 0, false, true, true }); }
 SL_SNAPSHOT (strip_zoomed_heads_light)    { return stripShot ({ ThemeId::light, 0, 0, false, true, true }); }
+SL_SNAPSHOT (strip_playing_dark)          { return stripShot ({ ThemeId::dark, 0, 0, false, false, false, true }); }
+SL_SNAPSHOT (strip_playing_light)         { return stripShot ({ ThemeId::light, 0, 0, false, false, false, true }); }

@@ -1,4 +1,5 @@
-// With no MIDI the scaffold's processor plays exact silence, whatever the host left in its buffer.
+// With no MIDI and no host position the processor plays exact silence, whatever the host left in its buffer:
+// the clip (Strand Demo in a new instance) plays only while the host plays.
 // (Moved from the skeleton's inline TestMain; M0 owns this file.)
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -15,7 +16,7 @@ namespace
     using namespace sl::test;
 }
 
-SL_TEST ("probe", silenceWithoutMidi)
+SL_TEST ("plugin", silenceWithoutMidi)
 {
     section ("Ten seconds with no MIDI: every sample is exactly zero and finite");
 

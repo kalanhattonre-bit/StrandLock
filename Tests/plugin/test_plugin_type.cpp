@@ -23,7 +23,7 @@ namespace
     }
 }
 
-SL_TEST ("probe", pluginType)
+SL_TEST ("plugin", pluginType)
 {
     section ("An instrument: no audio input, one stereo output, MIDI in");
 

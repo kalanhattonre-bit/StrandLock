@@ -1,10 +1,12 @@
-// The audio thread never allocates or frees (PLUGIN-PLAN 4 M0): the probe playing chords, with bends,
-// controllers, a moving and cycling host position, host parameter changes and the diagnostics fed, for
-// --alloc-minutes of audio (10 by default, the Release run; the Debug-CRT run passes 3, and there malloc is
-// counted too). Cubase sends automation and Quick Control moves inside process(), on the audio thread, just
-// before processBlock (JUCE's VST3 wrapper calls setValueNotifyingHost there), so those are counted too. A
-// second run does the same with the editor open, from a thread of its own: from M2 no control listens through
-// JUCE's attachments (PLUGIN-PLAN 7.4 decision 1), so that allocates nothing either.
+// The audio thread never allocates or frees (PLUGIN-PLAN 4 M0 and M2): the engine playing Strand Demo (a new
+// instance's clip) while the host cycles round 4 bars and stops now and then, live keys with bends and
+// controllers, parameter sweeps and jumps, the diagnostics fed and the display frames written, for
+// --alloc-minutes of audio (10 by default, the Release run; the Debug-CRT run passes 3, and there malloc is counted
+// too). Cubase sends automation and Quick Control moves inside process(), on the audio thread, just before
+// processBlock (JUCE's VST3 wrapper calls setValueNotifyingHost there), so those are counted too. A second run
+// does the same from an audio thread of its own while the message thread opens and closes the editor and runs its
+// timer's work: from M2 no control listens through JUCE's attachments (PLUGIN-PLAN 7.4 decision 1), so that
+// allocates nothing either.
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -18,23 +20,31 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <iterator>
+#include <memory>
 #include <thread>
 
 namespace
 {
     using namespace sl::test;
 
-    /** The parameters the host moves in the first run: one of each kind (float, whole number, choice, switch). */
-    constexpr sl::params::P kMoved[] = { sl::params::P::outGain, sl::params::P::rootNote, sl::params::P::polyphony,
-                                         sl::params::P::engine, sl::params::P::lock };
+    /** The parameters the host moves now and then in the first run: one of each kind (float, whole number,
+        choice, switch), the engine and its Motion included. */
+    constexpr sl::params::P kMoved[] = { sl::params::P::outGain, sl::params::P::rootNote, sl::params::P::polyphony, sl::params::P::engine,
+                                         sl::params::P::lock, sl::params::P::motion, sl::params::P::refreshMode, sl::params::P::atEnd };
+
+    /** The parameters it sweeps on every block (automation curves): the ramped ones and the head layout. */
+    constexpr sl::params::P kSwept[] = { sl::params::P::speed, sl::params::P::macro1, sl::params::P::macro3, sl::params::P::pitch,
+                                         sl::params::P::drift, sl::params::P::heads, sl::params::P::spread, sl::params::P::ampOffset,
+                                         sl::params::P::regionStart };
 }
 
 SL_TEST ("alloc", processBlockAllocatesNothing)
 {
     const double minutes = options().allocMinutes;
-    section (fmt ("%.1f minutes at 48 kHz / 64-sample blocks, the probe playing, the host moving parameters: no allocation or free on the audio thread", minutes));
+    section (fmt ("%.1f minutes at 48 kHz / 64-sample blocks: Strand Demo, live keys, parameter sweeps: no allocation or free on the audio thread", minutes));
 
     const double rate = 48000.0;
     const int block = 64;
@@ -55,7 +65,8 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
     bool finite = true;
     double peak = 0.0;
     double ppq = 0.0;
-    long long hostMoves = 0;
+    long long hostMoves = 0, sweeps = 0;
+    int mostVoices = 0;
 
     alloc::reset();
     const auto startMs = juce::Time::getMillisecondCounterHiRes();
@@ -117,8 +128,9 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
             midi.addEvent (pressure, 2, block - 1);
         }
 
-        // Now and then the host moves a parameter (Output Gain ramps, the root, the voice count, the engine and
-        // Lock change). It does so inside the counted scope, just before processBlock, as the VST3 wrapper does.
+        // Now and then the host moves a parameter (Output Gain, the root, the voice count, the engine, Lock, the
+        // Motion, Refresh, At the end), and every 8th block it sweeps the ramped ones along slow curves, as
+        // automation would. It does so inside the counted scope, just before processBlock, as the VST3 wrapper does.
         juce::RangedAudioParameter* moved = nullptr;
         float movedTo = 0.0f;
         if (rng.nextInt (100) == 0)
@@ -127,14 +139,25 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
             movedTo = rng.nextFloat();
             ++hostMoves;
         }
+        const bool sweep = b % 8 == 0;
         proc.setNonRealtime (rng.nextInt (2000) == 0);
 
         {
             const alloc::Scope counting;
             if (moved != nullptr)
                 moved->setValueNotifyingHost (movedTo);
+            if (sweep)
+            {
+                int i = 0;
+                for (const auto p : kSwept)
+                {
+                    const double phase = (double) b * 0.0005 + 1.3 * i++;
+                    proc.getParam (p).setValueNotifyingHost ((float) (0.5 + 0.35 * std::sin (phase)));
+                }
+            }
             proc.processBlock (buffer, midi);
         }
+        sweeps += sweep ? 1 : 0;
 
         const float* l = buffer.getReadPointer (0);
         const float* r = buffer.getReadPointer (1);
@@ -144,25 +167,35 @@ SL_TEST ("alloc", processBlockAllocatesNothing)
             peak = std::max (peak, (double) std::max (std::abs (l[i]), std::abs (r[i])));
         }
 
-        // The editor's timer drains the diagnostics on the message thread (outside the counted scope).
+        // The editor's timer drains the diagnostics and frees old versions on the message thread (outside the
+        // counted scope).
         if (b % 1500 == 0)
+        {
             proc.getDiag().snapshot();
+            proc.collectVersions();
+            mostVoices = std::max (mostVoices, proc.getEngineStats().voices);
+        }
     }
 
     const double seconds = (juce::Time::getMillisecondCounterHiRes() - startMs) / 1000.0;
     const auto c = alloc::counts();
     note (fmt ("%.1f minutes of audio (%lld blocks) in %.1f s; counting %s", minutes, (long long) totalBlocks, seconds, alloc::coverage()));
 
-    check (totalBlocks > 0 && hostMoves > 0, fmt ("the run covered %lld blocks and %lld host parameter changes", (long long) totalBlocks, hostMoves));
-    check (finite && peak > 0.01 && peak <= 0.98, fmt ("the probe played (peak %.3f, at most 0.98) and every sample was finite", peak));
+    check (totalBlocks > 0 && hostMoves > 0 && sweeps > 0,
+           fmt ("the run covered %lld blocks, %lld host parameter changes and %lld sweeps of %d parameters", (long long) totalBlocks, hostMoves, sweeps,
+                (int) std::size (kSwept)));
+    check (finite && peak > 0.01 && peak <= 0.98 && proc.getDisplayFramesWritten() > 0,
+           fmt ("the engine played (peak %.3f, at most 0.98; up to %d voices seen), every sample was finite, %llu display frames were written", peak,
+                mostVoices, (unsigned long long) proc.getDisplayFramesWritten()));
     check (c.news == 0 && c.deletes == 0,
            fmt ("allocations on the audio thread (host parameter changes and processBlock): %lld, frees: %lld (largest request %zu bytes)",
                 c.news, c.deletes, c.largest));
+    proc.setPlayHead (nullptr);
 }
 
 SL_TEST ("alloc", hostChangesWithEditorOpen)
 {
-    section ("One minute with the editor open: host parameter changes and processBlock on an audio thread of their own");
+    section ("One minute on an audio thread of its own: host parameter changes and processBlock while the message thread opens and closes the editor");
 
     const double rate = 48000.0;
     const int block = 64;
@@ -176,12 +209,13 @@ SL_TEST ("alloc", hostChangesWithEditorOpen)
 
     // The editor lives on this thread (the message thread). Its controls do not listen to their parameters
     // (decision 1): the editor's 30 Hz timer reads them, so a change from another thread posts nothing.
-    StrandLockEditor editor (proc);
+    auto editor = std::make_unique<StrandLockEditor> (proc);
 
     const int totalBlocks = (int) (60.0 * rate / block);
     alloc::Counts change, process;
     long long moves = 0;
     bool finite = true;
+    std::atomic<int> done { 0 };
 
     std::thread audio ([&]
     {
@@ -238,23 +272,69 @@ SL_TEST ("alloc", hostChangesWithEditorOpen)
             for (int ch = 0; ch < 2; ++ch)
                 for (int i = 0; i < block; ++i)
                     finite = finite && std::isfinite (buffer.getSample (ch, i));
+            done.store (b + 1, std::memory_order_release);
         }
     });
+
+    // The message thread: the editor's timer work (the controls, the display frames, the diagnostics, collect)
+    // every 25 blocks (about 30 times a second of audio), and the editor closed and opened again every 6000 blocks.
+    int opened = 1, ticks = 0, lastTick = 0;
+    while (done.load (std::memory_order_acquire) < totalBlocks)
+    {
+        const int at = done.load (std::memory_order_acquire);
+        if (at - lastTick >= 25)
+        {
+            lastTick = at;
+            ++ticks;
+            if (editor != nullptr)
+                editor->refreshNow();
+            proc.collectVersions();
+            if (ticks % 240 == 0)
+            {
+                if (editor != nullptr)
+                {
+                    editor.reset();
+                }
+                else
+                {
+                    editor = std::make_unique<StrandLockEditor> (proc);
+                    ++opened;
+                }
+            }
+        }
+        else
+        {
+            std::this_thread::yield();
+        }
+    }
     audio.join();
     proc.setPlayHead (nullptr);
+    if (editor == nullptr)
+    {
+        editor = std::make_unique<StrandLockEditor> (proc);
+        ++opened;
+    }
 
-    note (fmt ("%d blocks, %lld host parameter changes; counting %s", totalBlocks, moves, alloc::coverage()));
-    check (moves > 0 && finite, fmt ("the host moved parameters %lld times and every sample was finite", moves));
+    note (fmt ("%d blocks, %lld host parameter changes, %d timer ticks, the editor opened %d times; counting %s", totalBlocks, moves, ticks, opened,
+               alloc::coverage()));
+    check (moves > 0 && finite && opened >= 2, fmt ("the host moved parameters %lld times, every sample was finite, the editor opened %d times", moves, opened));
     check (process.news == 0 && process.deletes == 0,
-           fmt ("allocations inside processBlock with the editor open: %lld, frees: %lld", process.news, process.deletes));
+           fmt ("allocations inside processBlock with the editor open and closed: %lld, frees: %lld", process.news, process.deletes));
 
     // Decision 1: 0 on every platform (M0 measured 1 allocation of 1088 bytes on Linux and in the Debug CRT run,
     // from JUCE's ParameterAttachment posting to the message queue).
     check (change.news == 0 && change.deletes == 0,
-           fmt ("the host's parameter changes with the editor open: %lld allocations and %lld frees for %lld changes (largest %zu bytes)",
+           fmt ("the host's parameter changes with the editor open and closed: %lld allocations and %lld frees for %lld changes (largest %zu bytes)",
                 change.news, change.deletes, moves, change.largest));
 
-    // And the editor's timer shows what the host did, once it runs (this thread is its message thread).
-    const int moved = editor.getView().syncControls();
-    check (moved > 0, fmt ("the next timer tick moves the controls the host changed (%d moved)", moved));
+    // And the editor's timer shows what the host does, once it runs (this thread is its message thread): three
+    // knobs moved by the host move at the next tick.
+    editor->getView().syncControls();
+    for (const auto p : { sl::params::P::speed, sl::params::P::heads, sl::params::P::spread })
+    {
+        auto& param = proc.getParam (p);
+        param.setValueNotifyingHost (param.getValue() < 0.5f ? 0.9f : 0.1f);
+    }
+    const int movedControls = editor->getView().syncControls();
+    check (movedControls >= 3, fmt ("the next timer tick moves the controls the host changed (%d moved)", movedControls));
 }

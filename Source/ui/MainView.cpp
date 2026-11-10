@@ -295,7 +295,7 @@ namespace sl::ui
           keysButton (t, "Keys", FlatButton::Icon::keys),
           tempoLabel (t, "Tempo (host)", Caption::Style::label),
           scaleLabel (t, "UI Scale", Caption::Style::label),
-          status (t, juce::String ("Probe build ") + core::kPluginVersion, Caption::Style::sub),
+          status (t, juce::String ("Test build ") + core::kPluginVersion, Caption::Style::sub),
           buildButton (t, "Build"),
           nodesButton (t, "Nodes", FlatButton::Icon::nodes),
           selInfo (t, "No notes selected", Caption::Style::sub),

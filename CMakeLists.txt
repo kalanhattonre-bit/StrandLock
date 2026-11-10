@@ -56,8 +56,7 @@ file(GLOB_RECURSE STRANDLOCK_PLUGIN_FOLDER_SOURCES CONFIGURE_DEPENDS
     Source/host/*.cpp
     Source/doc/*.cpp
     Source/diag/*.cpp
-    Source/ui/*.cpp
-    Source/probe/*.cpp)
+    Source/ui/*.cpp)
 list(APPEND STRANDLOCK_PLUGIN_SOURCES ${STRANDLOCK_PLUGIN_FOLDER_SOURCES})
 
 set(STRANDLOCK_DEFINITIONS

@@ -73,9 +73,14 @@ namespace sl::ui
         {
             Card c { "This computer", {} };
             const auto& host = processor.getHostInfo();
-            c.rows.push_back ({ "StrandLock", juce::String (core::kPluginVersion) + " (probe build)" });
+            c.rows.push_back ({ "StrandLock", juce::String (core::kPluginVersion) + " (test build: Tape engine)" });
             c.rows.push_back ({ "Host", host.summary() });
             c.rows.push_back ({ "Engines", juce::String (kEnginesNote) });
+            c.rows.push_back ({ "Voices", juce::String (s.voices) + " now, most " + juce::String (s.maxVoices) + "; playing as Tape instead of Voice or Cloud: "
+                                          + juce::String (s.tapeStandIns) + " now, most " + juce::String (s.maxTapeStandIns) });
+            c.rows.push_back ({ "Engine health", juce::String ((juce::int64) s.steals) + " steals, " + juce::String ((juce::int64) s.cuts) + " cuts, "
+                                                 + juce::String ((juce::int64) s.nonFinite) + " non-finite samples, "
+                                                 + juce::String ((juce::int64) s.filterResets) + " filter resets" });
             c.rows.push_back ({ "Sample rate", s.sampleRate > 0.0 ? fixed (s.sampleRate, 0) + " Hz" : juce::String ("not playing yet") });
             c.rows.push_back ({ "Block size at start", juce::String (s.preparedBlockSize) + " samples" });
             c.rows.push_back ({ "Display scale", "Windows " + fixed (s.desktopScale * 100.0, 0) + " %, StrandLock UI "
