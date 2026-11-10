@@ -170,3 +170,132 @@ Audio thread (never allocate, lock, wait, log or touch files):
 - **Negative controls.** Each rt check has a deliberate wrong use beside it that the same check must catch: a reader
   that forgets a releasing voice sees the poison; a frame mixing two writes fails the whole-frame check; an insertion
   sort that also passes equal elements differs from `std::stable_sort`; a tone with another seed fails the 2-ulp window.
+
+## E1
+
+The engine chain, part 1 of 2: everything one voice does (plan 7.4). Branch `m2-engine`; part 2 (E2) continues on
+the same branch and worktree and merges it.
+
+### Progress
+
+- Done: `engine/EngineMath.h`, `Tables`, `SourceRead.h`, `Region`, `Biquad.h`, `Head.h`, `Clock.h`, `InstSmoother.h`,
+  `Voice.h` / `Voice.cpp`, `VoiceTick.cpp`, `VoiceRender.cpp`, `VoiceChase.cpp`; `Stats::tapeStandIns` in `Engine.h`.
+  Tests `Tests/engine/test_parity.cpp` (engine/defs.json), `test_seams.cpp`, `test_voice.cpp`, with the rig
+  `Tests/engine/VoiceRig.*` and `EngineFixture.*`.
+- In progress: CI on `m2-engine`.
+- Next (E2): the Engine itself (see "For E2" below).
+
+### Files
+
+| File | What it is |
+|---|---|
+| `engine/EngineMath.h` | the JS helpers: `clampJs` (NaN passes), `fin`, `jsMin` / `jsMax` (NaN and signed zero as JS), `toInt64`, `kTau` |
+| `engine/Tables.h/.cpp` | HANN and FADE (Float32, built at static init), `hannTab`, `fadeIn` |
+| `engine/SourceRead.h` | `readAbs` (a template over the source) and `hermite`, the fast paths' shared expression |
+| `engine/Region.h/.cpp` | `RegionState` (the JS `reg`), `readReg`, `seamRho`, `mapPos`, `grabPos`, and `PlainStretch`: the inline fast path of runTape (and of runGrains and runLock in M3) |
+| `engine/Biquad.h` | the RBJ peak and low-pass; `run` returns true when the NaN guard reset it |
+| `engine/Head.h` | one playhead: the JS fields, with `std::array<double, 8>` grain slots |
+| `engine/Clock.h` | the beat clock (`uAt`, `loopBeat` with 8.2 #4, `songBeat`, `kOf`, `effLen`, `Lb`, `bpm`) |
+| `engine/InstSmoother.h` | plan 2.3's ramp20ms smoother |
+| `engine/Voice.h` | `VoiceContext`, `VoiceSource`, `playedEngine` (the M3 switch), `snapshotNote`, `liveIdHash`, `class Voice` |
+| `engine/Voice.cpp` | `initClip`, `initLive` (the JS constructor, in place), `setNote`, `switchTo`, `follow`, `setLivePitch`, `release`, `steal` |
+| `engine/VoiceTick.cpp` | `Voice::tick` |
+| `engine/VoiceRender.cpp` | `render`, `renderRun`, `runTape` |
+| `engine/VoiceChase.cpp` | `chase` (with the coarse rule), `chaseBegin` / `chaseRun` / `chaseEnd`, `ffAdvance`, `ffChain` |
+
+### For E2: what each Voice function expects from the Engine
+
+- **VoiceContext.** The Engine owns one and gives every voice a pointer at init. It sets `sr` in `prepare`. `inst`
+  points at what the voices read at their next tick (the smoother's `current ()`, so the address never changes).
+  `clock` points at the Engine's `Clock`. `wheel`, `wheelTouched` and `bend` are `setController`'s. `filterResets` is
+  counted by the voices: copy it into `Stats::filterResets` and zero it in `resetStats`.
+- **Clock.** It replaces the JS fields `playing, loop, bpm, db, anchorBeat, anchorK, freeBeat0, freeK0, Lb`.
+  `setTransport` and `setSnapshot` write them (db = bpm / 60 / sr). `loopBeat` already has 8.2 #4 (no wrap below 0);
+  `setTransport`'s `wrap ()`, the jump anchor and `doChase` still need it.
+- **VoiceSource.** `VoiceSource::of (sample, epoch, sr)` at `setSample` (the JS rate rule). A new voice gets the
+  current one; a stolen voice keeps its own to the end of its fade (8.2 #23). `Voice::src.epoch` and
+  `Voice::snapEpoch` are what `minEpochInUse` reads for every voice that is not done.
+- **Starting a clip voice** (startClip / addVoice): `v.initClip (ctx, source, snap, snapEpoch, index, U, m, kS,
+  ++serial)`, put it last in the voice list, `v.startAt (kS)` (the JS `v.tick (k0, false); v.pre = true`), then
+  `plan ()`. A chain hand-over is `v.switchTo (&snap->notes[i], U)`. Find the previous note with
+  `core::resolve (X, inst).chain.prevIndex` (none when `X.restart`).
+- **Starting a live voice** (noteOn): `v.initLive (ctx, source, p, vel, k, ++serial)` (p already rounded and clamped,
+  vel 0..1; it sets `key = p`), then `v.startPos = clamp (opts.startPos, 0, 1)` when given, **before**
+  `v.startAt (k)` and `plan ()`. Live legato and noteOff's fallback key: `v.setLivePitch (p, vel)` and
+  `v.setLivePitch (q)`.
+- **setSnapshot.** A clip voice that is not done follows its note by id (`Snapshot::byHash`, then compare the id
+  string): `v.follow (newSnap, epoch, &newSnap->notes[i], X.s + v.m * Lb)`. A deleted note's voice gets
+  `v.release ()` and keeps its old `snap` and `snapEpoch`.
+- **Chase.** One-shot (a chase moment inside the 4096-tick budget): `ticks = v.chase (k); v.ffChain (k);`, then add
+  it as above with `startAt (k)`. Spread over blocks: `v.chaseBegin (k)` (returns 1 tick), add it to the voice list
+  (it renders nothing while `v.chasing`), then per 32 samples `v.chaseRun (kNow, budget)` (returns the ticks it ran);
+  when `v.chaseCaughtUp (kNow)`: `v.chaseEnd (kNow); v.ffChain (kNow); v.startAt (kNow);` and `plan ()`. `plan ()`
+  must leave a chasing voice's heads without grants (it is "waiting", plan 1.8): with a grant its ff ticks would turn
+  its heads on. Count the returned ticks in `Stats::chaseTicks`.
+- **Render.** `v.render (outL, outR, o, n, k0)` per segment, voices in list order, exactly as the JS. `measure ()`
+  reads and clears `h.segPeak`.
+- **Planner fields.** `heads[i].want / allowed / est / grant / on / active / g0L .. dR / needPrime / clearGrains ()`,
+  `v.vt`, `v.level`, `v.env`, `v.released`, `v.serial`, `v.done`, `v.st` are the JS fields, public.
+- **Display.** `engineName` (the engine the note asks for, a `Kc`), `motion` (as played), `kind`, `note->idHash`,
+  `note->p`, `env`, `released`. Per head that is on: `(reg.rs + mapPos (reg, raw + off)) / src.data->n`, `dir`,
+  `0.5 (g1L + g1R) stopG`, `want && !allowed`. `Stats::tapeStandIns` = the voices not done with `asTape`.
+- **InstSmoother.** `setInst`: `smoother.setTarget (core::clampForEngine (inst))`. `step ()` at every 32-sample
+  boundary of the control grid (8.2 #21). `setRampMs` and `snapRamps` call into it. `Engine::prepare`:
+  `smoother.prepare (sr, rampMs)` then `snap ()`. `setBypass` -> `smoother.setBypass`. outGain's per-sample ramp: the
+  tick values are `current ().outGain` before and after `step ()`; the bypass fade is `value (InstSmoother::bypass)`.
+
+### What is left for E2
+
+`Engine.cpp` (replace the stub: prepare with the pool, the inputs, the clocks, `process`, the limiter, the health
+counters), `EngineSchedule.cpp` (`scanStarts` with the binary search and the 256-start cap, `startClip`, `doChase` with
+the bounded budget, `addVoice` with steals and the 64-object pool), `EnginePlan.cpp` (`plan`, `measure`),
+`EngineDisplay.cpp` (`fillDisplay`, `stats`), setTransport with 8.2 #3, #4 and #21, `engine/renders.json` (the 36 tape
+cases), and the engine-level M2 rows (tuning, note starts, jitter, cycle wrap, tempo, pre-roll, chase stop and start,
+chase cost, tempo drift, stopped processing, determinism, voice steal, stability, live, allocations, CPU).
+
+### Decisions and deviations
+
+- **What a voice reads from its engine is a `VoiceContext`**, not the Engine itself. So a Voice can be built and
+  tested before the Engine exists (the tests drive one directly), and Engine.h's private part stays E2's.
+- **A voice keeps its own source and snapshot pointers with their epochs** (plan 1.3, 8.2 #23). Chain lookups
+  (`ffChain`, the bridging test in `tick`, `chainNext`) use the voice's own snapshot. The JS uses the engine's current
+  `byId`. The two are the same for every voice that is not released (setSnapshot releases a voice whose note was
+  deleted), and only voices that are not released look a chain up.
+- **`snapshotNote`** applies the JS setSnapshot filter (finite p, s, l and l > 0) to a chain or glide link, as `byId`
+  would. Compiled snapshots never hold such notes; a raw one could.
+- **A live voice's note lives inside the Voice** (`liveNote`). Its lane tables are empty, so every lane reads its
+  default, as the JS `lanes: null`. `liveIdHash (p)` hashes "live:" + p without building a string.
+- **The M3 switch is one function**, `playedEngine (Kc wanted)` in Voice.h. `tick` works out the engine the note asks
+  for, plays what `playedEngine` returns (Tape until M3) and sets `Voice::asTape`. The switch sits where the JS
+  computes `kc`, so everything that depends on it follows Tape: the speed carries the pitch, Freeze plays Forward,
+  Path plays as Tape's 1x, the formant EQ is Tape's, and the budget estimate is 2. `engineName` keeps the asked-for
+  engine (the display). renderRun dispatches only Tape; M3 adds runGrains and runLock there.
+- **`Stats::tapeStandIns`** is an addition to the contract's Stats (at its end): the voices that stood in as Tape, for
+  the diagnostics page (plan 4, M2: "the diagnostics page says so").
+- **Vibrato Sync (8.2 #12) is in `tick`.** With `vibSync` not Free the vibrato rate is (bpm / 60) / rateBeats (the
+  parameter's note in docs/parameters.json). Free is the prototype's `vibRate`, bit for bit. Its test is M8's.
+- **The coarse chase rule, exactly.** From the replay point kk, a step is coarse (ffAdvance (512), then one tick)
+  while `kNow - (kk + 512) > 4096 x 32`, that is while more than 4096 ticks would still remain after it. The last
+  4096 to 4111 ticks are replayed one by one. So a chase of at most 4096 ticks (every fixture case) is the JS chase
+  (checked bit for bit against the JS loop on 3000 ticks). Coarse ticks move the vibrato and Refresh phases once per
+  16 ticks: the far past is approximate, as with the JS's own 2^17-tick cap.
+- **A chase can run in steps** (`chaseBegin`, `chaseRun` with a tick budget, `chaseEnd`). With the same chase point it
+  gives the one-shot result bit for bit (tested with steps of 256). With a moving chase point (the engine's current
+  sample) the coarse/fine boundary moves with it.
+- **InstSmoother: the none and engine classes apply at `setTarget`,** not at the next grid boundary. The prototype's
+  setInst changes `E.inst` at once, and each voice reads it at its own next tick (a voice's ticks run on its own
+  32-sample grid, not the engine's). So applying at once is what "applies at the next tick" means for every voice.
+  The ramp20ms fields step on the grid. The first value a field ever gets applies at once.
+- **readAbs is a template; the Region functions and PlainStretch take `SampleData`.** M7's 16-bit storage adds its
+  own read path there.
+- **The JS reference numbers in the tests** (seam ratios, the ramp's largest step, the chain's probes, the chase's
+  position and first sample, and the per-voice render hashes printed as notes) come from a scratch node script. It
+  loads the prototype through `tools/fixtures/common.js` and drives the JS Voice directly, exactly as the C++ rig
+  drives `engine::Voice`: a live voice from `noteOn`; a clip voice made with the live voice's constructor
+  (`e.voices[0].constructor`) and started as `addVoice` does; `v.render (L, R, k, n, k)` in the same blocks; the
+  chain's hand-over at B's start sample, as `startClip` does. Its values: seam ratio 1.0337246672832128 (no fade
+  16.193937828473878), ramp largest step 0.0012744665145874023 (no fade 0.20682281255722046), chain probes
+  0.2616012913184508 and 0.2959359382681376, chase position 0.2562493661446489 and first sample
+  0.0002693095593713224.
+- **`Tests/engine/EngineFixture.*`** repeats test_contract's JSON-to-Inst coercion (what JS does to the values before
+  normInst), because test_contract keeps it private and the engine group runs every defs.json case itself.
