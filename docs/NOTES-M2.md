@@ -950,8 +950,8 @@ second on the message thread.
   (17.7 s), 3 minutes in the Debug CRT run in 29.1 s, 0 allocations and frees. The editor-open run: 45,000 blocks,
   11,250 host changes, the editor opened 5 times, 0 and 0. The exchange: 10,000 snapshots and 2 swaps in 3,750
   blocks, 10,000 freed (6,422 never taken by a block), at most 24 versions pooled at a collect, 76 blocks (72) with
-  an older snapshot held by a releasing voice, 0 bad reads. The sample swap step 0.987 of the steady step (0.809 in
-  E2's engine-level test, which plays a softer key). Stability: pre-limiter peak 2.763, output rms 0.340, peak 0.900.
+  an older snapshot held by a releasing voice, 0 bad reads. The sample swap step 0.987 of the steady step (E2's
+  engine-level test: 0.809). Stability: pre-limiter peak 2.763, output rms 0.340, peak 0.900.
   CC 1 at 32: -0.982360x. Every hostsync start within 1 sample (worst 0). Determinism: largest difference 0 in all 9
   runs.
 - Snapshots looked at (run 42765565991): `strip_playing_dark` and `_light` show the heads of Strand Demo and the
