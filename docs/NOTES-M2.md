@@ -966,9 +966,10 @@ true, the correction is here.
 
 ### Progress
 
-- Done: the code and test changes for every finding listed as fixed below; the checklist corrections.
-- In progress: CI on `m2-fixes`.
-- Next: CI green, these notes with the CI figures, rebase on main if it moved, fast-forward main.
+- Done: the code and test changes for every finding listed as fixed below; the checklist corrections; CI run
+  42778904303 on 74dbf69 green on every job; the snapshots looked at; these notes.
+- In progress: CI on the head (the corruptionFuzz gate and the toast's gap came after run 42778904303).
+- Next: CI green, rebase on main if it moved, fast-forward main, CI on main.
 
 ### The findings, and what was done
 
@@ -1089,3 +1090,31 @@ true, the correction is here.
   2.53:1 on the strip's #e8ebf6. Not changed here, because the decision and its test say exactly what was built.
   If 3:1 should hold on what is on screen, the three tokens need darkening to at least 3:1 against #eef0f5 (and the
   test's reference and its "under 3.1" bound changing with them).
+
+### Results (CI run 42778904303 on 74dbf69, all green)
+
+- Windows Release: 1225 checks in 191 tests, 0 failed. Linux Release: 1224 in 191. Linux sanitizers: contract,
+  model and engine 577 checks in 103 tests; state 142 in 20 (the new state tests under AddressSanitizer and UBSan).
+  Debug-CRT allocation run 36 checks in 6 tests, 0 JUCE assertions; Debug snapshots 0 assertions; pluginval
+  strictness 10 passed; the fixture check passed. renders.json, needs tape: 36 of 36 within tolerance, 22 bit for
+  bit on Windows and 13 on Linux, as before the fix pass (so arming the catch-up at every re-anchor changed no
+  fixture).
+- The new checks: the note eps samples before a tempo drop starts once in all 6 cases; 12 re-anchors in 12 samples
+  put the clock at beat 1.97033, behind the note at beat 2, which starts once (most voices 1); the host that does
+  not split puts pass 3's downbeat 0.00111 beat before the block reported early, and it still sounds 0.2 beat on;
+  the Volume edit plays 0.2500 of before over samples 32-64 after it (expected 0.2500); version 8 after 9 is
+  dropped; a compile that throws ends its wait in 0.1 ms and the next version plays; prepareToPlay returns in 0.1
+  ms with a user pick unmade, and waits 403 to 417 ms for a project sound held 300 ms; the pad that arrives after
+  the project changes nothing and the save is the loaded state byte for byte; while a loaded sound is late the clip
+  is silent (peak 0), a live key plays (peak 0.339), 138 to 143 blocks are counted, and once the Saw is there (beat
+  2.5) the note under way sounds within 50 ms (peak 0.597); at 900 x 560 with the banner the pane is 70 px, with a
+  70 px scroll bar (a thumb needs 48).
+- Figures for review (Windows; Linux Release, then the sanitizers, in brackets). The chase moment's 32-sample
+  block: 2.26 ms (1.59, 3.58), against 0.667 ms of audio; review 2 saw 2.19. corruptionFuzz, CRC-fixed mutations:
+  the slowest load that made no starter 93.2 ms (83.1, 194.9); the 11 that made one took 71.7 ms at most (74.1,
+  95.0).
+- Snapshots looked at (run 42778904303): the toast "Loaded strip chord.wav" sits under the ruler and the bar 3
+  number shows; on the Diagnostics page "Last parameter Cubase changed" wraps to two lines with a gap before its
+  value; at 900 x 560 with the banner the Sample pane shows its first row and a scroll thumb. At 900 x 560 the toast
+  touched the roll's centred note, hence the 4 px gap of commit a870a74, which also moved corruptionFuzz to its
+  percentile gate. Both are checked by the CI run on the head that merges.
