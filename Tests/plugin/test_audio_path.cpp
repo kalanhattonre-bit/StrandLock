@@ -22,6 +22,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -563,23 +564,26 @@ SL_TEST ("state", lateSoundSilencesClipNotes)
     const float demo = peakFor (0.5);
 
     // The project's sound cannot be made yet (the worker is held): the host loads the state on its own thread,
-    // which waits for the sound, while the audio thread plays on.
-    p.getSampleManager().setHeld (true);
+    // which waits for the sound, while the audio thread plays on. This thread first waits, in real time and not in
+    // song time, until the load has asked for its sound, so the song is near its start when the sound arrives and
+    // the note's next start (beat 16) is seconds away.
+    auto& sounds = p.getSampleManager();
+    sounds.setHeld (true);
+    const auto requestsBefore = sounds.lastRequest();
     std::atomic<bool> loaded { false };
     std::thread host ([&p, &saved, &loaded] {
         p.setStateInformation (saved.getData(), (int) saved.getSize());
         loaded.store (true);
     });
-    for (int spins = 0; waitedBlocks() == 0 && ! loaded.load() && spins < 100000; ++spins)
-    {
-        block (-1, -1);
-        std::this_thread::yield();
-    }
+    for (int spins = 0; sounds.lastRequest() == requestsBefore && ! loaded.load() && spins < 5000; ++spins)
+        std::this_thread::sleep_for (std::chrono::milliseconds (1));
+    std::this_thread::sleep_for (std::chrono::milliseconds (50));   // the load names its sound, then hands over its clip
+    block (-1, -1);
     const auto waitingAtStart = waitedBlocks();
-    for (int spins = 0; (p.getAudioSnapshot() == nullptr || p.getAudioSnapshot()->notes.size() != 1) && spins < 100000; ++spins)
+    for (int spins = 0; (p.getAudioSnapshot() == nullptr || p.getAudioSnapshot()->notes.size() != 1) && spins < 2000; ++spins)
     {
         block (-1, -1);
-        std::this_thread::yield();
+        std::this_thread::sleep_for (std::chrono::milliseconds (1));
     }
     const bool newClip = p.getAudioSnapshot() != nullptr && p.getAudioSnapshot()->notes.size() == 1;
     peakFor (0.1);   // Strand Demo's voices fade out (60 ms)
@@ -592,7 +596,7 @@ SL_TEST ("state", lateSoundSilencesClipNotes)
     const auto waitingNow = waitedBlocks();
     const bool stillLoading = ! loaded.load();
 
-    p.getSampleManager().setHeld (false);
+    sounds.setHeld (false);
     host.join();
     const auto waitingAtArrival = waitedBlocks();
     const double beatAtArrival = (double) played * 256.0 / 24000.0;
@@ -601,7 +605,7 @@ SL_TEST ("state", lateSoundSilencesClipNotes)
     const auto waitingAfter = waitedBlocks();
 
     check (demo > 0.01 && stillLoading && newClip && waitingAtStart > 0 && juce::exactlyEqual (silent, 0.0f) && juce::exactlyEqual (silentAgain, 0.0f),
-           fmt ("while the sound is made: Strand Demo played before (peak %.3f); the loaded clip's note is silent (peak %g, and %g after a live key)", demo,
+           fmt ("while the sound is made: Strand Demo played before (peak %.3f); the loaded clip's note is silent (peak %g, and %g after a live key)", (double) demo,
                 (double) silent, (double) silentAgain));
     check (live > 0.01, fmt ("a live key plays meanwhile, on the sound there is (peak %.3f)", (double) live));
     check (waitingNow > waitingAtStart + 100,
