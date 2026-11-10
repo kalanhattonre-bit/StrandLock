@@ -180,10 +180,25 @@ the same branch and worktree and merges it.
 
 - Done: `engine/EngineMath.h`, `Tables`, `SourceRead.h`, `Region`, `Biquad.h`, `Head.h`, `Clock.h`, `InstSmoother.h`,
   `Voice.h` / `Voice.cpp`, `VoiceTick.cpp`, `VoiceRender.cpp`, `VoiceChase.cpp`; `Stats::tapeStandIns` in `Engine.h`.
-  Tests `Tests/engine/test_parity.cpp` (engine/defs.json), `test_seams.cpp`, `test_voice.cpp`, with the rig
-  `Tests/engine/VoiceRig.*` and `EngineFixture.*`.
-- In progress: CI on `m2-engine`.
+  Tests `Tests/engine/test_parity.cpp` (engine/defs.json), `test_seams.cpp`, `test_voice.cpp`,
+  `test_voice_parity.cpp`, `test_voice_alloc.cpp`, with the rig `Tests/engine/VoiceRig.*` and `EngineFixture.*`.
+  CI green on `m2-engine` (see "Results").
+- In progress: nothing.
 - Next (E2): the Engine itself (see "For E2" below).
+
+### Tests
+
+| Test (group engine) | What it checks |
+|---|---|
+| `fixtureEngineDefs` | engine/defs.json, every case counted against the file (6): constants, budgets, HEAD_TUNE, salts, lane defaults, HANN and FADE within 1 ulp, the 5 normInst cases through `clampForEngine` exactly; a table 2 ulps off fails |
+| `readAbsFastPaths` | `hermite` equals readAbs on frames 1 .. n-3; `PlainStretch::read` equals `readReg` bit for bit at 20,000 random positions plus every edge, in 7 kinds of Region (post, pre and no seam, from frame 0, Hold, Hold to the file end, Bounce), mono and stereo; a fast path without the seam rule fails |
+| `loopSeamTape`, `loopSeamRamp` | M2's loop seam row on one live Tape voice, as test-engine.js: 10 ms seam ratio < 1.5 and the ramp's largest step < 0.01, both the prototype's numbers; without the crossfade both measures fail |
+| `voiceChainOneVoice` | M2's chain row: C3 -> G3 on one voice, min envelope across the joint > 0.999, B continues A's playhead within 0.002 of the prototype (and within 1e-6); B on its own voice restarts |
+| `voiceChase` | test-engine.js's chase on one voice: playhead within 0.002, first sample non-zero, the 10 ms fade ratio, 3001 ticks; under 4096 ticks it is the JS chase loop bit for bit |
+| `voiceCoarseChase` | plan 1.8: a 64-beat note with a moving Travel lane chased 60 beats in lands within 0.002 of the straight render (1.7e-4), with 6661 ticks instead of 45001; the stepped chase equals the one-shot bit for bit and is silent until it ends |
+| `voiceParityWithPrototype` | 17 per-voice renders against the JS Voice: every Motion, Scatter, Refresh, heads, Hold, Stop, the pre seam, wheels, bend, offsets, macros, lanes, Starts, Path-as-1x |
+| `voiceInitInPlace`, `voiceEnvelope`, `voiceFilterGuard`, `instSmoother` | a reused voice renders like a new one; 8 / 60 / 5 ms; the NaN guard counts and stays finite; plan 2.3's ramps |
+| `voiceNoAllocations` (also group alloc) | the voice's audio-thread work allocates nothing |
 
 ### Files
 
@@ -299,3 +314,25 @@ chase cost, tempo drift, stopped processing, determinism, voice steal, stability
   0.0002693095593713224.
 - **`Tests/engine/EngineFixture.*`** repeats test_contract's JSON-to-Inst coercion (what JS does to the values before
   normInst), because test_contract keeps it private and the engine group runs every defs.json case itself.
+- **For M3: read through `PlainStretch`.** runGrains and runLock have the same inline fast path as runTape in the
+  JS. Calling `PlainStretch::read` (falling back to `readReg`) keeps the three identical and covered by
+  `readAbsFastPaths`. Use `hannTable ()` for the inline Hann lookups (the JS reads HANN directly, not hannTab).
+- **The per-voice parity table** (`test_voice_parity.cpp`) holds the JS Voice's results for 17 renders, made by a
+  second scratch script in the same way (the Saw starter, 1 s at 48 kHz, 128-sample blocks): RMS of both channels,
+  12 samples and head 1's position. On the first CI run all 17 matched with 0 difference at every probed sample.
+
+### Results (CI)
+
+- Run 42733606918 on 40b0130 (the last code commit), green on both jobs. Windows Release: 851 checks in 117 tests, 0
+  failed (engine 24 tests, 188 checks; alloc 5, 31). Debug CRT `--only alloc`: 32 checks in 5 tests, 0 failed, 0
+  JUCE assertions. pluginval strictness 10: SUCCESS. Fixture check: passed. Linux Release: 852 checks in 117 tests
+  (engine 24, 188; alloc 5, 32). Linux sanitizers: contract, model and engine 476 checks in 74 tests (engine 24,
+  187); state 79 checks in 10 tests.
+- Bit for bit with the prototype, on both platforms: engine/defs.json 6 of 6, and the per-voice renders on the test
+  signals (the loop seam on the tone with and without the fade, the ramp seam, the chain on the tone, the chase on
+  the ramp: their hashes equal the JS Voice's).
+- The 17-case parity table on the Saw starter is within tolerance on both platforms, with 0 difference at every
+  probed sample, but only 5 hashes match on Windows (2 on Linux). The likely reason is the source, not the voice:
+  the Saw starter itself is not bit for bit with SLSounds (test_sounds prints hash 2c2dfee3 against the prototype's
+  44f47b11, every window within 0), while the same voice paths are bit for bit on the test signals. Not proven case
+  by case. E2 should expect the same in renders.json on the starters: hashes printed, windows within 1e-5.
