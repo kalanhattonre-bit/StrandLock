@@ -17,6 +17,7 @@
 #include "engine/InstSmoother.h"
 #include "engine/Region.h"
 #include "engine/Voice.h"
+#include "model/Clip.h"
 
 #include <algorithm>
 #include <cmath>
@@ -25,6 +26,11 @@
 #include <memory>
 #include <string>
 #include <vector>
+
+// VoiceTick.cpp reads StartSnap::mode as model::StartMode's values without including the model.
+static_assert (static_cast<int> (sl::model::StartMode::region) == 0 && static_cast<int> (sl::model::StartMode::song) == 2
+                   && static_cast<int> (sl::model::StartMode::random) == 3,
+               "VoiceTick.cpp's kStartSong and kStartRandom, and a live note's Start (mode 0 = region)");
 
 namespace
 {

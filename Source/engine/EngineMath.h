@@ -43,7 +43,7 @@ namespace sl::engine
         sample counter reaches, and 0 for NaN. Where JS keeps such a number as a double, the C++ keeps an int64. */
     inline std::int64_t toInt64 (double x) noexcept
     {
-        if (! (x == x))
+        if (std::isnan (x))
             return 0;
         if (x >= 4.0e18)
             return static_cast<std::int64_t> (4.0e18);

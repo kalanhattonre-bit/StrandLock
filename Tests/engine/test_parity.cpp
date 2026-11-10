@@ -184,6 +184,6 @@ SL_TEST ("engine", fixtureEngineDefs)
     bool exact = true;
     std::string why;
     const auto* defs = fixture::casesOfKind (doc, "defs").empty() ? nullptr : fixture::casesOfKind (doc, "defs")[0];
-    check (defs != nullptr && ! tableWithin (wrong.data(), engine::kHannN + 2, (*defs)["HANN"], 1, exact, why),
-           "negative control: a HANN table with one value 2 ulps off fails the 1-ulp comparison (" + why + ")");
+    const bool caught = defs != nullptr && ! tableWithin (wrong.data(), engine::kHannN + 2, (*defs)["HANN"], 1, exact, why);
+    check (caught, "negative control: a HANN table with one value 2 ulps off fails the 1-ulp comparison (" + why + ")");
 }

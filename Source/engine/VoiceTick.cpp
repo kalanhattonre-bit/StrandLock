@@ -16,7 +16,6 @@
 #include "core/Seeds.h"
 #include "core/Travel.h"
 #include "engine/EngineMath.h"
-#include "model/Clip.h"
 
 #include <cmath>
 
@@ -27,10 +26,9 @@ namespace sl::engine
         constexpr int L_PITCH = 0, L_AMP = 1, L_VIB = 2, L_TONE = 3, L_FORMANT = 4, L_HOLLOW = 5, L_TRAVEL = 6, L_HEADS = 7, L_GRAIN = 8,
                       L_REFRESH = 9;
 
-        // StartSnap::mode holds a model::StartMode.
-        constexpr std::uint8_t kStartSong = static_cast<std::uint8_t> (model::StartMode::song);
-        constexpr std::uint8_t kStartRandom = static_cast<std::uint8_t> (model::StartMode::random);
-        static_assert (static_cast<int> (model::StartMode::region) == 0, "a live note's Start (mode 0) is the Region start");
+        // StartSnap::mode holds a model::StartMode: region 0, carry 1, song 2, random 3 (test_voice checks the values).
+        constexpr std::uint8_t kStartSong = 2;
+        constexpr std::uint8_t kStartRandom = 3;
 
         constexpr double laneDef (int li) noexcept { return core::kLanes[li].def; }
 
