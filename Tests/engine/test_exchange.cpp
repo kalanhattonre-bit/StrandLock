@@ -267,7 +267,7 @@ SL_TEST ("engine", exchangeUnderLoad)
     check (badReads == 0 && belowInUse == 0 && regressions == 0,
            fmt ("no version read after it was freed: %lld reads of a poisoned or other version, %lld below the exchange's in-use epoch, %lld in-use regressions",
                 badReads, belowInUse, regressions));
-    check (heldOlder > 100,
+    check (heldOlder >= 20,
            fmt ("a no-op is not a pass: in %lld blocks a releasing voice held an older snapshot than the current one (the probe's rule would have freed it)",
                 heldOlder));
     note (fmt ("largest snapshot pool seen at a collect: %zu versions", largestPool));

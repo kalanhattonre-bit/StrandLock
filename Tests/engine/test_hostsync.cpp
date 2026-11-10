@@ -471,7 +471,11 @@ SL_TEST ("hostsync", tempoAndCycleTogether)
         {
             const double bpm = 120.0 - 30.0 * songBeat / 12.0;
             const double bps = bpm / 60.0 / kSr;
-            int len = 512;
+            // the song ends after 12 beats: the last block stops short of the third wrap
+            const double remaining = std::floor ((12.0 - songBeat) / bps);
+            if (remaining < 1)
+                break;
+            int len = remaining < 512 ? static_cast<int> (remaining) : 512;
             if (hostSplits)
             {
                 const double toEnd = std::ceil ((4.0 - ppq) / bps);

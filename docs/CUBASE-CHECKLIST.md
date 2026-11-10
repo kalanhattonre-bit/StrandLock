@@ -1,9 +1,10 @@
-# StrandLock M0: the Cubase checklist
+# StrandLock: the Cubase checklist
 
-This test build is the "probe": the StrandLock window with its final look, all of its knobs, and a plain saw
-sound you can play. The piano roll and the real sound engine come later. This build is here to find out how
-Cubase treats StrandLock on your computer. Please go through the steps below and send back your answers and
-the text from the **Copy report** button.
+The first test build (M0) was the "probe": the StrandLock window with its final look, all of its knobs, and a
+plain saw sound you can play. It was there to find out how Cubase treats StrandLock on your computer, and its
+steps below (The checklist) still apply. The M2 build plays the real sound engine: its own steps are in
+**M2: the first real sound** at the end. Please go through them and send back your answers and the text from the
+**Copy report** button.
 
 ## Getting the test build
 
@@ -61,11 +62,11 @@ the text from the **Copy report** button.
    **Last keys**. Which keys reached StrandLock? Which ones did Cubase still take first? Space should still start
    and stop Cubase. (Turn Keys off again afterwards. StrandLock remembers the setting for the next window.)
 
-6. **Dropping sounds.** StrandLock does not load dropped sounds yet (that comes with the next build), but it
-   shows what Cubase hands it. Drag a WAV file onto the StrandLock window from each of these: Windows Explorer;
+6. **Dropping sounds.** From M2 a dropped sound also loads and plays (M2 step 4); this step is about what Cubase
+   hands StrandLock. Drag a WAV file onto the StrandLock window from each of these: Windows Explorer;
    MediaBay; the Pool (Project > Pool); an audio event in the project window (a trimmed piece of a longer
    recording); a Cubase factory loop. The window turns purple with a dashed border while you drag. After each
-   drop the Diagnostics tab opens with a short message at the top. In the DROPS box: which file name and folder
+   drop click the Diagnostics tab (from M2 it no longer opens by itself). In the DROPS box: which file name and folder
    did it receive? How long does it say the file is (frames, seconds, sample rate, channels)? For the trimmed
    event: is that the whole recording's length or only the trimmed piece? If a drop shows **Text** instead of a
    file name, please copy what it says.
@@ -110,3 +111,76 @@ the text from the **Copy report** button.
 
 If something on the StrandLock window looks wrong (text cut off, things overlapping, unreadable colours), a
 screenshot helps a lot, with the UI Scale and theme you were using.
+
+## M2: the first real sound
+
+From this build on StrandLock plays with its real sound engine (the Tape engine). The steps above (M0) still
+apply; this part is about the sound. Please go through it and send back your answers, the two exported files from
+step 9 and the text from **Copy report**.
+
+A few things to know first:
+- **StrandLock now plays its own clip.** A new StrandLock opens on the demo clip (Strand Demo) and plays it in
+  time with Cubase whenever Cubase plays. You cannot see or change the notes yet: the piano roll comes in a later
+  build. Your keyboard plays the sound too, at any time.
+- **Only the Tape engine plays in this build.** On the Sample tab the Engine buttons are Tape, Voice and Cloud.
+  Notes set to Voice or Cloud play as Tape for now, and the Diagnostics tab says how many do (the **Voices** line
+  in the THIS COMPUTER box). Tape plays the sound like a tape machine: higher notes play it faster.
+- **The waveform strip** at the bottom has, on the left, the sound menu and **Browse...**; above the wave, the
+  file line with **At the end**, **-**, **+** and **Show all**. The orange box on the wave is the **Region**, the
+  part of the sound that plays. Moving lines on the wave show where each playhead is.
+
+1. **Install the new build** the same way as before (Getting the test build, above): close Cubase, replace the
+   old `StrandLock.vst3` in `C:\Program Files\Common Files\VST3`, start Cubase.
+
+2. **The Saw that opens up.** Add StrandLock to an Instrument track. The strip shows "Saw that opens up". Play C3
+   and then a few chords on your keyboard. Do you hear a saw that gets brighter? Is C3 in tune with a Cubase piano?
+   Press Play in Cubase: do you hear the demo clip, in time with Cubase's metronome? Press Stop: does it stop
+   cleanly (no click, no note left hanging)?
+
+3. **The other starters.** Open the sound menu on the strip and pick each sound in turn (Saw, Square sweep,
+   Evolving pad, Vowel aah to ooh, Pluck arpeggio, Beat loop, Noise). Does each one load quickly and play from
+   the keyboard? Does the wave in the strip change to the new sound?
+
+4. **One of your songs, three ways.**
+   - Click **Browse...** and pick one of your own songs (a WAV, AIFF, FLAC, OGG or MP3).
+   - Drag the same song onto the StrandLock window from Windows Explorer.
+   - Drag it again from MediaBay.
+   Each time: did it load? A short message appears at the bottom; what does it say? The file line shows the name
+   and length. For a song longer than 20 seconds StrandLock starts with a 4-second part from about a third of the
+   way in. For a song longer than 10 minutes it loads the first 10 minutes and says so. (The Diagnostics tab still
+   lists each drop in its DROPS box.)
+
+5. **Pick a part and play it.** On the strip, drag across the wave to make a new Region around a part you like
+   (a chord, a vocal line, a drum hit). Drag the Region's edges to adjust it, or drag the band along its top to move
+   the whole box. **-** and **+** zoom the wave, **Show all** shows the whole song again. Hold the mouse button
+   down inside the Region to hear it from that point. Then play the part from your keyboard: C3 plays it as
+   recorded, other keys play it higher or lower. Does it sound right? Does the Region box follow your mouse
+   smoothly? Does Ctrl+Z undo the Region change (click the StrandLock window first)?
+
+6. **At the end.** Hold a key and try **At the end** on the file line: **Loop** (the part repeats with a soft
+   joint), **Hold** (it stops moving at the end and keeps sounding), **Stop** (it goes quiet at the end). Do you
+   hear a click at the loop joint with Loop? Does each one do what its name says?
+
+7. **Motion.** On the Sample tab, try the **Motion** buttons while you hold a key: Forward, Backward, Bounce
+   (forward and back inside the Region), Mirror (try it with the Heads knob at 2), Freeze (plays like Forward on
+   Tape), Scatter (jumps around the part in time with Cubase; **Jump every** sets how often). Does each one sound
+   different and do what you expected? Try **Heads**, **Spread** and **Drift** too.
+
+8. **A 4-bar cycle while playing.** Set Cubase's cycle to 4 bars and press Play, so the demo clip goes round at
+   least 4 times. Do you hear any click, gap, doubled note or stumble where the cycle jumps back? Try it again with
+   a cycle that is not 4 bars long (for example 3 bars): the clip should jump back with Cubase each time. On the
+   Diagnostics tab, does **Wraps inside a block** go up?
+
+9. **Save and reopen with your song.** Load your song (step 4) and set a Region you like. Save the project, close
+   it and open it again. Is your song back, with the same Region and the same knobs? Now move or rename the song's
+   file in Windows Explorer and open the project once more: does a message say which file is missing, and does
+   the Saw that opens up play instead? (Put the file back afterwards.)
+
+10. **Export twice.** Record a few bars of chords on the track, set the locators around them (with the demo clip
+    playing too), and export them twice with File > Export > Audio Mixdown: once as usual and once with
+    "Real-Time Export" ticked. Send both files. They should be identical.
+
+11. **CPU.** On the Sample tab set **Heads** to 8, then hold a 4-note chord while Cubase plays the demo clip. How
+    high does Cubase's Audio Performance meter go (Studio > Audio Performance)? Does it crackle?
+
+12. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.
