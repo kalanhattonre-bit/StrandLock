@@ -238,6 +238,11 @@ namespace sl::engine
         bool asTape = false;                    // the note asks for Voice, Cloud or Lock and plays Tape (until M3)
         double lpHz = 0, fmtDb = 0, fmtHz = 0, hollowDb = 0;
 
+        // 8.2 #3: after a tempo change re-anchored the clock back by up to 0.1 beat, a voice that had already started
+        // is up to that much ahead of the clock; it keeps sounding (the JS rule u < U releases only a note edited to
+        // start later). Set by the engine, cleared once the clock reaches U.
+        double reanchorSlack = 0;
+
         // A chase spread over blocks (chaseBegin .. chaseEnd).
         bool chasing = false;
         std::int64_t chaseK = 0;                // the sample the replayed ticks have reached

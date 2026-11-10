@@ -107,11 +107,11 @@ SL_TEST ("engine", stabilityStrandDemoChords)
 
 SL_TEST ("engine", healthCountersCount)
 {
-    section ("the health counters count: a source far too loud trips the output guard, a NaN in the source resets the filters");
+    section ("the health counters count: a source far too loud (1e7: the filters pass it, they reset only beyond 1e9) trips the output guard, a NaN in the source resets the filters");
 
     for (const bool withNan : { false, true })
     {
-        std::vector<float> x (48000, withNan ? 0.25f : 1.0e30f);
+        std::vector<float> x (48000, withNan ? 0.25f : 1.0e7f);
         if (withNan)
             for (std::size_t i = 1000; i < 2000; ++i)
                 x[i] = std::numeric_limits<float>::quiet_NaN();
@@ -133,7 +133,7 @@ SL_TEST ("engine", healthCountersCount)
             check (st.filterResets > 0 && finite, fmt ("NaN in the source: %lld filter resets, the output stays finite",
                                                        static_cast<long long> (st.filterResets)));
         else
-            check (st.nonFinite > 0 && finite, fmt ("a 1e30 source: the guard replaced %lld samples, the output stays finite and within 0.98",
+            check (st.nonFinite > 0 && finite, fmt ("a 1e7 source: the guard replaced %lld samples, the output stays finite and within 0.98",
                                                     static_cast<long long> (st.nonFinite)));
         e->resetStats();
         check (e->stats().nonFinite == 0 && e->stats().filterResets == 0, "resetStats clears them");
@@ -164,11 +164,13 @@ SL_TEST ("engine", deferredStartsAndPoolCuts)
     e->process (L.data(), R.data(), 32);
     const engine::Stats b = e->stats();
     check (a.deferredStarts == 44 && b.deferredStarts == 44, fmt ("44 starts deferred (%lld)", static_cast<long long> (a.deferredStarts)));
-    // polyphony 32: every start after the 32nd steals one voice; the pool holds 64: every start after the 64th cuts one
-    check (a.steals == 256 - 32 && a.cuts == 256 - 64 && a.voices == 64,
+    // Segment 1: polyphony 32, so every start after the 32nd steals one voice; the pool holds 64, so every start after the
+    // 64th cuts the oldest stealing voice. A voice stolen before it sounded (env 0) ends at its first sample, so 32
+    // voices are left. Segment 2: 32 pool objects are free again, so of the 44 deferred starts the last 12 cut.
+    check (a.steals == 256 - 32 && a.cuts == 256 - 64 && a.voices == 32,
            fmt ("after the first segment: 256 started (steals %lld, cuts %lld, %d voices)", static_cast<long long> (a.steals),
                 static_cast<long long> (a.cuts), a.voices));
-    check (b.steals == 300 - 32 && b.cuts == 300 - 64 && b.voices == 64,
+    check (b.steals == 300 - 32 && b.cuts == (256 - 64) + (44 - 32) && b.voices == 32,
            fmt ("after the second: all 300 started (steals %lld, cuts %lld, %d voices)", static_cast<long long> (b.steals),
                 static_cast<long long> (b.cuts), b.voices));
     std::vector<float> rest (4800), restR (4800);
@@ -219,4 +221,40 @@ SL_TEST ("engine", editsFollowAndEpochs)
     e->process (L.data(), R.data(), 4800);
     check (e->minEpochInUse (engine::VersionKind::snapshot) == rt::kNoEpoch && e->stats().voices == 0,
            "no snapshot: the last voice releases, and once it is done no snapshot epoch is read");
+}
+
+SL_TEST ("engine", tapeStandInsCounted)
+{
+    section ("until M3, notes that ask for Voice or Cloud play as Tape, and stats ().tapeStandIns and the display say so");
+
+    auto sample = render::monoSample (signals::dc (2.0, 48000, 0.25), 48000);
+    const core::Engine engines[] = { core::Engine::tape, core::Engine::voice, core::Engine::cloud };
+    int standIns[3] = { -1, -1, -1 };
+    int shown[3] = { -1, -1, -1 };
+    for (int i = 0; i < 3; ++i)
+    {
+        core::Inst inst = core::defaultInst();
+        inst.engine = engines[i];
+        auto e = std::make_unique<engine::Engine>();
+        e->prepare (48000);
+        e->setInst (inst);
+        e->setSample (sample.get(), 1);
+        e->noteOn (60, 1.0);
+        e->noteOn (64, 1.0);
+        std::vector<float> L (480), R (480);
+        e->process (L.data(), R.data(), 480);
+        standIns[i] = e->stats().tapeStandIns;
+        auto f = std::make_unique<engine::DisplayFrame>();
+        e->fillDisplay (*f);
+        shown[i] = f->numVoices == 2 ? static_cast<int> (f->voices[0].engine) : -1;
+    }
+    // the M3 switch (engine::playedEngine): until M3 Voice and Cloud play as Tape; from M3 they play themselves
+    const int voiceWants = engine::playedEngine (engine::Kc::voice) == engine::Kc::voice ? 0 : 2;
+    const int cloudWants = engine::playedEngine (engine::Kc::cloud) == engine::Kc::cloud ? 0 : 2;
+    check (standIns[0] == 0 && standIns[1] == voiceWants && standIns[2] == cloudWants,
+           fmt ("tapeStandIns: Tape %d, Voice %d, Cloud %d (2 keys each; expected 0, %d, %d)", standIns[0], standIns[1], standIns[2], voiceWants,
+                cloudWants));
+    check (shown[0] == static_cast<int> (engine::Kc::tape) && shown[1] == static_cast<int> (engine::Kc::voice)
+               && shown[2] == static_cast<int> (engine::Kc::cloud),
+           "the display shows the engine each note asks for");
 }

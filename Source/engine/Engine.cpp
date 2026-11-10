@@ -401,6 +401,15 @@ namespace sl::engine
             C.anchorBeat = cur + d;
             C.anchorK = k;
             setTempo();
+            // a clock moved back leaves the notes that started in the last |d| beats ahead of it: they keep sounding
+            // (their voices would otherwise release at once, by the rule meant for a note edited to start later)
+            const double uNew = cur + d;
+            for (int i = 0; i < numVoices; ++i)
+            {
+                Voice& v = voiceAt (order[static_cast<std::size_t> (i)]);
+                if (v.kind == VoiceKind::clip && ! v.done && v.U > uNew)
+                    v.reanchorSlack = jsMax (v.reanchorSlack, v.U - uNew);
+            }
         }
         else
         {

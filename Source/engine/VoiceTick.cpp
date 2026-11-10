@@ -147,10 +147,12 @@ namespace sl::engine
                     else
                         release();
                 }
-                else if (u < U - 1e-6)
+                else if (u < U - 1e-6 - reanchorSlack)
                 {
-                    release();
+                    release();   // a note edited to start later than now (8.2 #3: not one a backward re-anchor put ahead)
                 }
+                if (u >= U)
+                    reanchorSlack = 0;
             }
             t = X.l > 0 ? clampJs ((u - U) / X.l, 0, 1) : 1;
             beat = C.loopBeat (u);

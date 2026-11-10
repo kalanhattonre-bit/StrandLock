@@ -375,3 +375,79 @@ SL_TEST ("engine", chaseStartsMidNote)
         check (diff <= 1e-4 && before > 0.01, fmt ("%s: after 20 ms the chased output equals the straight render within 1e-4 (largest difference %.2e)", label, diff));
     }
 }
+
+SL_TEST ("engine", reAnchorForwardAndBack)
+{
+    section ("a tempo change re-anchors to the host's beat (8.2 #3): forward, the note it jumps over starts at once; back, no note starts twice");
+
+    const model::Clip clip = clipOf (1, kFourShort);
+    const double spb100 = 60.0 / 100 * 48000;
+    struct Way
+    {
+        const char* label;
+        std::int64_t at;    // the re-anchor sample (beat 2 -/+ 0.02 at 120 bpm)
+        double hostBeat;    // what the host says there: 0.05 beat ahead of, or behind, the engine's clock
+    };
+    const Way ways[] = { { "forward (+0.05 beat, just before the note at beat 2)", 48000 - 480, 2.03 },
+                         { "back (-0.05 beat, just after the note at beat 2)", 48000 + 480, 1.97 } };
+    for (const Way& w : ways)
+    {
+        Rig rig (48000, tapeInst(), dcSample(), &clip);
+        render::Script script;
+        script.at (0, [] (engine::Engine& e) { e.setTransport (playAt (120, 0)); });
+        script.at (w.at, [w] (engine::Engine& e) { e.setTransport (playAt (100, w.hostBeat)); });
+        int maxVoices = 0;
+        std::vector<float> L, R;
+        const auto n = static_cast<std::int64_t> (w.at + (4.5 - w.hostBeat) * spb100);
+        script.run (*rig.e, n, render::fixedBlocks (32), L, R,
+                    [&maxVoices] (engine::Engine& e, std::int64_t) { maxVoices = std::max (maxVoices, e.stats().voices); });
+        // after the re-anchor beat b sounds at w.at + (b - hostBeat) x 0.6 s; a note the clock jumped over, at once
+        std::vector<double> exact { 0, 24000 };
+        for (const double b : { 2.0, 3.0, 4.0 })
+        {
+            if (b == 2.0 && w.hostBeat > 2)
+                exact.push_back (static_cast<double> (w.at));
+            else if (b == 2.0)
+                exact.push_back (48000);
+            else
+                exact.push_back (static_cast<double> (w.at) + (b - w.hostBeat) * spb100);
+        }
+        std::string why;
+        check (startsOnTime (soundStarts (L, R), exact, why) && maxVoices == 1,
+               fmt ("%s: 5 starts, each once and on time (most voices at once %d) %s", w.label, maxVoices, why.c_str()));
+        // the note at beat 2 plays its length after the re-anchor (moved back, the clock is behind its start for a
+        // moment: it must not release, as the JS rule for a note edited to start later would)
+        check (L[52000] != 0.0f, fmt ("%s: the note at beat 2 still sounds 4000 samples after its start", w.label));
+    }
+}
+
+SL_TEST ("engine", chainOnOneVoice)
+{
+    section ("a chain C3 -> G3 (Auto Slide legato) plays on one voice through the Engine: max voices 1");
+
+    const model::Clip clip = clipOf (4, { { 60, 0, 2 }, { 67, 2, 2 } });
+    const sounds::StarterSound saw = sounds::makeStarterSound (sounds::StarterId::saw, 1);
+    Rig rig (48000, tapeInst(), engine::makeSampleData (saw.left, saw.right, saw.sampleRate, "saw"), &clip);
+    render::Script script;
+    script.at (0, [] (engine::Engine& e) { e.setTransport (playAt (120, 0)); });
+    int maxVoices = 0;
+    std::vector<float> L, R;
+    script.run (*rig.e, 96000 + 4800, render::fixedBlocks (64),
+                L, R, [&maxVoices] (engine::Engine& e, std::int64_t) { maxVoices = std::max (maxVoices, e.stats().voices); });
+    const auto starts = soundStarts (L, R);
+    check (maxVoices == 1 && starts.size() == 1 && starts[0] == 0,
+           fmt ("one voice at most (%d), sounding from sample 0 without a gap at the joint (%zu stretches of sound)", maxVoices, starts.size()));
+
+    // a no-op is not a pass: with a restart on the second note the chain breaks, and two voices overlap at the joint
+    model::Clip broken = clip;
+    model::Note second = *broken.notes[1];
+    second.sample.restart = true;
+    broken.notes[1] = std::make_shared<const model::Note> (second);
+    Rig rig2 (48000, tapeInst(), engine::makeSampleData (saw.left, saw.right, saw.sampleRate, "saw"), &broken);
+    render::Script script2;
+    script2.at (0, [] (engine::Engine& e) { e.setTransport (playAt (120, 0)); });
+    int maxVoices2 = 0;
+    script2.run (*rig2.e, 96000, render::fixedBlocks (64), L, R,
+                 [&maxVoices2] (engine::Engine& e, std::int64_t) { maxVoices2 = std::max (maxVoices2, e.stats().voices); });
+    check (maxVoices2 == 2, fmt ("negative control: with Restart on the second note, %d voices overlap at the joint", maxVoices2));
+}

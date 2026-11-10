@@ -126,6 +126,7 @@ namespace sl::engine
 
         chasing = false;
         chaseK = 0;
+        reanchorSlack = 0;
     }
 
     void Voice::seedHeads() noexcept
