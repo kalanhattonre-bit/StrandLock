@@ -81,6 +81,10 @@ namespace sl::engine
         std::int64_t nonFinite = 0;       // output samples the guard replaced, counted before the limiter (1.8)
         std::int64_t filterResets = 0;    // biquad NaN resets (1.8)
         double preLimiterPeak = 0.0;      // the largest |sample| after outGain, before the limiter
+
+        // M2 until M3 (E1's addition, NOTES-M2): voices that are not done whose note asks for Voice, Cloud or Lock
+        // and plays as Tape (Voice::asTape), so the diagnostics page can say so. Always 0 once M3 plays the grains.
+        std::int32_t tapeStandIns = 0;
     };
 
     class Engine
