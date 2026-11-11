@@ -20,7 +20,8 @@ M3 part G of 3 (plan 7.5 "G"): the grain engines Voice and Cloud. Branch `m3-eng
   87 bpm row at 120 bpm (its helper's fixed tempo), so the jumps missed the 87 bpm grid. Fixed in the test.
 - Run 43099804752 on 3776cdf: every step green but one check of M2's `engine/exchangeUnderLoad` under the sanitizers
   (Tape only, so not the grains): a timing race in the test, fixed (see "Decisions").
-- In progress: CI on the last commit, then the fast-forward of main.
+- Run 43102817014 on b616092 (the exchange fix): green on every job and step.
+- In progress: CI on this commit (notes only), then the fast-forward of main.
 - Next: part L (see "For L" below).
 
 ### What was built
@@ -130,3 +131,39 @@ M3 part G of 3 (plan 7.5 "G"): the grain engines Voice and Cloud. Branch `m3-eng
   centroid, corr and stats are, ported from test-engine.js.
 - **The Lock chase** row (beat 1.37) can reuse `test_chase_grains.cpp`'s playFrom with core::Engine::cloud and
   inst.lock = true.
+
+### Results (CI)
+
+- Run 43102817014 on b616092, green on every job and step: Windows Release 1299 checks in 205 tests (engine 362 in
+  67, alloc 35 in 6, cpu 4 in 2); Linux Release 1298 in 205 (engine 362 in 67); the sanitizers' contract, model and
+  engine groups 650 in 117 (engine 361 in 67), state 142 in 20; Debug-CRT allocation run 36 in 6, 0 JUCE
+  assertions; Debug snapshots 0 assertions; pluginval strictness 10 SUCCESS; the fixture check passed (24 files,
+  4.68 MB). The exchange stress: the deletion reached the audio 60 ms early in Release (the publisher ahead) and
+  12 ms late under the sanitizers, and the tail was silent in all three.
+- The figures below are from run 43099804752 on 3776cdf, the same code; run 43102817014 printed the same.
+- Run 43099804752 on 3776cdf (the code of the merge head; only the exchange test's fix came after it): Windows
+  Release 1298 checks in 205 tests, 0 failed; Linux Release 1297 in 205, 0 failed; Debug-CRT allocation run 36 in
+  6, 0 failed; pluginval strictness 10 SUCCESS; the fixture check passed; the sanitizers' state group 142 in 20;
+  their contract, model and engine groups 649 in 117 with the one exchange check above failing (fixed after).
+- renders.json, needs grains: 28 of 28 within tolerance on both platforms, 20 bit for bit on Windows and 9 on Linux
+  (needs tape: 36 of 36, 22 and 13, as before). The 9 Lock cases wait for L, as listed.
+- Voice tuning: C1, C3, C5 at 48 and 96 kHz, the worst 0.0058 cents (gate 3). Cloud, printed: C1 -9.9 and -10.1
+  cents, C3 +0.005 and -0.006, C5 +2.45 and +2.50 (48 and 96 kHz), the prototype's figures. Pitch +0.1 st reads
+  +10.004 and +9.993 cents.
+- Formant: +6 st raises the centroid 40.0 % (997 -> 1395 Hz), -6 st lowers it 31.2 % (685 Hz); f0 within 0.0015
+  cents in all three; a 0.05 st nudge moves it 0.04 %.
+- Glide: C3 -0.006 cents, G3 -0.003 (Voice) and -0.004 (Tape), one voice, envelope 1.0000 at the hand-over. Auto
+  Slide Off with the glideTo link: one voice, G3 -0.003 cents; without the link 2 voices.
+- Motions: Tape Backward r = 0.9910 at lag 0, Forward 0.0036; Backward reads -0.12499 (Voice) and -0.12514 (Cloud)
+  in 0.5 s against -0.12500. Freeze spread 1.3e-5 (Voice) and 0 (Cloud), Forward 0.3000; Tape's Freeze moves
+  0.30000 (1x). Bounce 4 turns on every engine, inside 0.2003 .. 0.3000 (Voice), 0.2056 .. 0.2956 (Cloud),
+  0.2002 .. 0.2998 (Tape). Mirror +1.0000x -1.0000x +1.0000x -1.0000x on Voice and Cloud.
+- Scatter at 1/8, 87 bpm: 15 jumps on 15 grid lines, 1.1 to 27.6 samples after them, on Tape, Voice and Cloud;
+  renders identical; seed + 1 moves 15 of 15; the largest step 0.0048 (Tape), 0.0041 (Voice), under 0.0001 (Cloud).
+- Refresh 100 ms at 4x: the read position moves 0.00000 inside a period (Smooth 0.0300); each refresh grabs
+  0.0497 .. 0.0503 further. Skip 0.5: 6 of 13 grab (5 with seed 2), renders identical. Spray 0.25: median
+  deviation 0.01077 against 0.00000, the most 0.0275; identical; seed + 1 differs.
+- Chase at beat 1.37: the Voice and Cloud playheads equal the straight render's (difference 0), the fade ratio
+  0.144 and 0.145; the audio reads 0.09177 (Voice) and 0.09453 (Cloud) against the playhead's 0.09187 (printed).
+- Allocations: the engine sweep through Tape, Voice and Cloud makes 0 allocations and 0 frees (19 voices during
+  the bounded chase), in Release and in the Debug-CRT run.
