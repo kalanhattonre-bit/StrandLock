@@ -398,8 +398,8 @@ SL_TEST ("engine", fixtureEngineRendersGrains)
         std::string why;
         bool hm = false;
         const bool rendered = render::renderFixtureCase (asTape, clips, r, why);
-        check (rendered && ! renderMatches (r, (*control)["out"], hm, why),
-               "negative control: voice-c3 played as Tape fails the comparison with the prototype's Voice render (" + why + ")");
+        const bool caught = rendered && ! renderMatches (r, (*control)["out"], hm, why);   // sets why before the message is made
+        check (caught, "negative control: voice-c3 played as Tape fails the comparison with the prototype's Voice render (" + why + ")");
     }
     else
     {
