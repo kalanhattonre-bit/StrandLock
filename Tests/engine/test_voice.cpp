@@ -362,20 +362,28 @@ SL_TEST ("engine", voiceInitInPlace)
            fmt ("a Voice voice started again in place renders bit for bit what a new one renders, not the Tape render (rms %.4f)",
                 rig::rms (L4, 0, static_cast<std::int64_t> (n))));
 
-    // Until M3 part L a Lock note (Cloud with the Lock switch) plays as Tape and says so; its display engine is Lock.
+    // M3 part L: a Lock note (Cloud with the Lock switch) plays Lock (runLock) and is no stand-in; a voice reused in
+    // place plays its captures bit for bit as a new one (the captures, the tap phase and the re-grab start again).
     core::Inst lockInst = inst;
     lockInst.engine = core::Engine::cloud;
     lockInst.lock = true;
-    rig::VoiceRig lockRig (48000);
-    lockRig.setInst (lockInst);
-    lockRig.setSample (rig::sampleOf (src, 44100));
-    std::vector<float> L6 (n), R6 (n);
-    renderOnce (lockRig, L6, R6);
-    const bool lockStandsIn = engine::playedEngine (engine::Kc::lock) == engine::Kc::tape;
-    check (lockRig.voice->asTape == lockStandsIn && lockRig.voice->engineName == engine::Kc::lock
-               && lockRig.voice->kc == engine::playedEngine (engine::Kc::lock),
-           fmt ("a Lock note: asTape %d (expected %d until part L), the display engine Lock, the played engine %d", lockRig.voice->asTape ? 1 : 0,
-                lockStandsIn ? 1 : 0, static_cast<int> (lockRig.voice->kc)));
+    rig::VoiceRig lockFresh (48000), lockReused (48000);
+    for (rig::VoiceRig* r : { &lockFresh, &lockReused })
+    {
+        r->setInst (lockInst);
+        r->setSample (rig::sampleOf (src, 44100));
+    }
+    std::vector<float> L6 (n), R6 (n), L8 (n), R8 (n), L9 (n), R9 (n);
+    renderOnce (lockFresh, L6, R6);
+    renderOnce (lockReused, L8, R8);   // first life
+    lockReused.voice->steal();
+    renderOnce (lockReused, L9, R9);   // the same object, started again
+    check (! lockFresh.voice->asTape && lockFresh.voice->engineName == engine::Kc::lock && lockFresh.voice->kc == engine::Kc::lock,
+           fmt ("a Lock note plays Lock: asTape %d, the display engine Lock, the played engine %d (Lock is %d)", lockFresh.voice->asTape ? 1 : 0,
+                static_cast<int> (lockFresh.voice->kc), static_cast<int> (engine::Kc::lock)));
+    check (L6 == L8 && L6 == L9 && R6 == R9 && L6 != L1 && rig::rms (L6, 0, static_cast<std::int64_t> (n)) > 0.01,
+           fmt ("a Lock voice started again in place renders bit for bit what a new one renders, not the Tape render (rms %.4f)",
+                rig::rms (L6, 0, static_cast<std::int64_t> (n))));
 }
 
 SL_TEST ("engine", voiceEnvelope)

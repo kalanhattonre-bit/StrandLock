@@ -4,8 +4,7 @@
 //
 // Plugin changes here: the note's "follow the instrument" markers are resolved every tick (core::resolve, plan
 // 1.4); Vibrato Sync (8.2 #12, M8's parameter) sets the vibrato rate from the tempo when it is not Free; and the
-// M2 -> M3 switch (playedEngine, Voice.h) plays Lock notes as Tape until M3 part L (Voice and Cloud play as
-// themselves from part G).
+// M2 -> M3 switch (playedEngine, Voice.h), which since M3 part L plays every engine as itself.
 
 #include "engine/Voice.h"
 

@@ -223,10 +223,10 @@ SL_TEST ("engine", editsFollowAndEpochs)
            "no snapshot: the last voice releases, and once it is done no snapshot epoch is read");
 }
 
-SL_TEST ("engine", tapeStandInsCounted)
+SL_TEST ("engine", noTapeStandIns)
 {
-    section ("M3 part G: Voice and Cloud notes play as themselves; until part L, Lock notes play as Tape, and stats ().tapeStandIns "
-             "and the display say so");
+    section ("M3 part L: Tape, Voice, Cloud and Lock notes each play their own engine; stats ().tapeStandIns is 0 and the display "
+             "shows each engine with its grains (Lock: its captures)");
 
     auto sample = render::monoSample (signals::dc (2.0, 48000, 0.25), 48000);
     // Tape, Voice, Cloud, and Lock (the Cloud engine with the Lock switch on)
@@ -235,6 +235,7 @@ SL_TEST ("engine", tapeStandInsCounted)
     const engine::Kc wanted[] = { engine::Kc::tape, engine::Kc::voice, engine::Kc::cloud, engine::Kc::lock };
     int standIns[4] = { -1, -1, -1, -1 };
     int shown[4] = { -1, -1, -1, -1 };
+    int grainsShown[4] = { -1, -1, -1, -1 };
     bool playedRight = true;
     for (int i = 0; i < 4; ++i)
     {
@@ -253,19 +254,21 @@ SL_TEST ("engine", tapeStandInsCounted)
         auto f = std::make_unique<engine::DisplayFrame>();
         e->fillDisplay (*f);
         shown[i] = f->numVoices == 2 ? static_cast<int> (f->voices[0].engine) : -1;
-        // a grain engine's heads hold grains (the display lists them; Lock lists its captures); a Tape head never does
+        // a grain engine's heads hold grains (the display lists them; Lock lists one capture per head); a Tape head
+        // never does
+        grainsShown[i] = f->numGrains;
         const bool grains = f->numGrains > 0;
-        playedRight = playedRight && grains == (engine::playedEngine (wanted[i]) != engine::Kc::tape);
+        playedRight = playedRight && grains == (wanted[i] != engine::Kc::tape);
     }
-    // Voice and Cloud never stand in from part G on; Lock does until part L flips engine::playedEngine
-    const int lockWants = engine::playedEngine (engine::Kc::lock) == engine::Kc::lock ? 0 : 2;
     check (engine::playedEngine (engine::Kc::voice) == engine::Kc::voice && engine::playedEngine (engine::Kc::cloud) == engine::Kc::cloud
-               && engine::playedEngine (engine::Kc::tape) == engine::Kc::tape,
-           "the M3 switch plays Tape, Voice and Cloud as themselves");
-    check (standIns[0] == 0 && standIns[1] == 0 && standIns[2] == 0 && standIns[3] == lockWants,
-           fmt ("tapeStandIns: Tape %d, Voice %d, Cloud %d, Lock %d (2 keys each; expected 0, 0, 0, %d)", standIns[0], standIns[1], standIns[2],
-                standIns[3], lockWants));
-    check (playedRight, "Voice and Cloud keys show grains on the display (they play runGrains); Tape, and Lock while it stands in as Tape, show none");
+               && engine::playedEngine (engine::Kc::tape) == engine::Kc::tape && engine::playedEngine (engine::Kc::lock) == engine::Kc::lock,
+           "the M3 switch plays Tape, Voice, Cloud and Lock as themselves");
+    check (standIns[0] == 0 && standIns[1] == 0 && standIns[2] == 0 && standIns[3] == 0,
+           fmt ("tapeStandIns: Tape %d, Voice %d, Cloud %d, Lock %d (2 keys each; expected 0 each)", standIns[0], standIns[1], standIns[2],
+                standIns[3]));
+    check (playedRight && grainsShown[3] == 2,
+           fmt ("Voice and Cloud keys show grains on the display (%d, %d), Lock one capture per head (%d of 2 heads), Tape none (%d)", grainsShown[1],
+                grainsShown[2], grainsShown[3], grainsShown[0]));
     check (shown[0] == static_cast<int> (engine::Kc::tape) && shown[1] == static_cast<int> (engine::Kc::voice)
                && shown[2] == static_cast<int> (engine::Kc::cloud) && shown[3] == static_cast<int> (engine::Kc::lock),
            "the display shows the engine each note asks for");

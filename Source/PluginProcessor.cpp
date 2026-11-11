@@ -231,7 +231,6 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         const auto st = eng.stats();
         diag::DiagModel::EngineFigures f;
         f.voices = st.voices;
-        f.tapeStandIns = st.tapeStandIns;
         f.steals = st.steals;
         f.cuts = st.cuts;
         f.nonFinite = st.nonFinite;

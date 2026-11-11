@@ -5,6 +5,8 @@
 #include "support/FixtureJson.h"
 #include "support/TestSignals.h"
 
+#include "core/Lanes.h"
+#include "core/Seeds.h"
 #include "model/Normalize.h"
 #include "model/Presets.h"
 #include "model/Recipes.h"
@@ -159,6 +161,126 @@ namespace sl::test::render
         return out;
     }
 
+    std::unique_ptr<core::Snapshot> rawSnapshotFromJson (const JsonValue& raw, std::string& why)
+    {
+        const JsonValue& notes = raw["notes"];
+        if (! notes.isArray())
+        {
+            why = "the raw snapshot has no notes";
+            return nullptr;
+        }
+        auto snap = std::make_unique<core::Snapshot>();
+        snap->version = static_cast<std::uint32_t> (raw["version"].asNumber (1));
+        snap->bars = static_cast<std::int32_t> (raw["bars"].asNumber (4));
+        snap->beatsPerBar = static_cast<std::int32_t> (raw["beatsPerBar"].asNumber (4));
+        snap->res = static_cast<std::int32_t> (raw["res"].asNumber (256));
+        snap->offsetBeats = 0;
+        snap->loop = true;
+        snap->tieAcrossLoop = false;
+        const auto count = static_cast<std::int32_t> (notes.size());
+
+        // glide.toId and the chain's ids name notes of the snapshot; null or a missing id is -1
+        auto indexOf = [&notes] (const JsonValue& id) -> std::int32_t {
+            if (! id.isString())
+                return -1;
+            for (std::size_t i = 0; i < notes.size(); ++i)
+                if (notes[i]["id"].asString() == id.asString())
+                    return static_cast<std::int32_t> (i);
+            return -1;
+        };
+        auto flag = [] (const JsonValue& v) -> std::int8_t { return static_cast<std::int8_t> (v.asBool() ? 1 : 0); };
+
+        for (std::int32_t i = 0; i < count; ++i)
+        {
+            const JsonValue& o = notes[static_cast<std::size_t> (i)];
+            const std::string id = o["id"].asString();
+            core::NoteSnap x;
+            x.idHash = core::idHash (std::string_view (id));
+            if (o.contains ("idHash") && static_cast<std::uint32_t> (o["idHash"].asNumber()) != x.idHash)
+            {
+                why = "note " + id + ": its idHash is not the id's";
+                return nullptr;
+            }
+            x.idIndex = i;
+            x.p = fixture::num (o["p"]);
+            x.s = fixture::num (o["s"]);
+            x.l = fixture::num (o["l"]);
+            x.vel = fixture::num (o["vel"]);
+            const auto eng = core::parseEngine (o["engine"].asString());
+            const auto mot = core::parseMotion (o["motion"].asString());
+            if (! eng.has_value() || ! mot.has_value() || ! o["jump"].isNumber())
+            {
+                why = "note " + id + ": the engine, motion or jump cannot be read";
+                return nullptr;
+            }
+            x.engine = static_cast<std::int8_t> (*eng);
+            x.lock = flag (o["lock"]);
+            x.motion = static_cast<std::int8_t> (*mot);
+            x.tape = flag (o["tape"]);
+            x.rev = flag (o["rev"]);
+            x.travel = static_cast<std::uint8_t> (o["travel"].asString() == "path" ? 1 : 0);
+            x.jumpBeats = fixture::num (o["jump"]);   // the engine's rateBeats (X.jump): a number of beats passes through
+            x.restart = o["restart"].asBool();
+            const JsonValue& st = o["start"];
+            x.start.mode = 0;
+            for (std::uint8_t m = 0; m < 4; ++m)
+                if (st["mode"].asString() == model::kStartModeCodes[m])
+                    x.start.mode = m;
+            x.start.pos = fixture::num (st["pos"]);
+            x.start.range = fixture::num (st["range"]);
+            x.start.seed = static_cast<std::int32_t> (fixture::num (st["seed"]));
+
+            // the glide (the JS reads X.glide.len as it is; resolve () takes min (max (0, glide), l x 0.95), the same
+            // for every glide of a raw snapshot shorter than 0.95 of its note)
+            core::GlideSnap g;
+            const JsonValue& gl = o["glide"];
+            if (gl.isObject())
+            {
+                g.present = true;
+                g.d = fixture::num (gl["d"]);
+                g.curve = fixture::num (gl["curve"]);
+                g.toIndex = indexOf (gl["toId"]);
+                x.glide = fixture::num (gl["len"]);
+                if (! (x.glide <= x.l * 0.95))
+                {
+                    why = "note " + id + ": a glide longer than 0.95 of its note reads differently here";
+                    return nullptr;
+                }
+            }
+            core::ChainSnap ch;
+            const JsonValue& cj = o["chain"];
+            ch.firstIndex = cj.isObject() ? indexOf (cj["id"]) : i;
+            ch.index = cj.isObject() ? static_cast<std::int32_t> (cj["index"].asNumber()) : 0;
+            ch.prevIndex = cj.isObject() ? indexOf (cj["prevId"]) : -1;
+            ch.nextIndex = cj.isObject() ? indexOf (cj["nextId"]) : -1;
+            for (int mode = 0; mode < 3; ++mode)
+            {
+                x.glides[mode] = g;
+                x.chains[mode] = ch;
+            }
+
+            auto tables = std::make_shared<core::NoteTables>();
+            for (int li = 0; li < core::kNumLanes; ++li)
+            {
+                auto& t = tables->lanes[static_cast<std::size_t> (li)];
+                const JsonValue& lane = o["lanes"][core::kLanes[li].code];
+                if (! fixture::table (lane, t) || t.size() < 2)
+                {
+                    why = "note " + id + ": lane " + core::kLanes[li].code + " cannot be read";
+                    return nullptr;
+                }
+                tables->fullLength[static_cast<std::size_t> (li)] = static_cast<std::int32_t> (t.size());
+                x.lanes[li] = core::LaneTab { t.data(), static_cast<std::int32_t> (t.size()) };
+            }
+            snap->notes.push_back (x);
+            snap->ids.push_back (id);
+            snap->byHash.emplace_back (x.idHash, i);
+            snap->tables.push_back (std::move (tables));
+        }
+        std::sort (snap->byHash.begin(), snap->byHash.end());
+        return snap;
+    }
+
     bool renderFixtureCase (const JsonValue& c, const std::map<std::string, model::Clip>& clips, Rendered& out, std::string& why)
     {
         const double sr = c["sr"].asNumber (48000);
@@ -167,11 +289,6 @@ namespace sl::test::render
         const JsonValue& o = c["out"];
         const bool statsOnly = ! o.contains ("blockRms");
         const bool trace = o.contains ("trace");
-        if (c.contains ("snapshot"))
-        {
-            why = "a raw snapshot (the engine-only case is a grains case)";
-            return false;
-        }
 
         auto e = std::make_unique<engine::Engine>();
         e->prepare (sr);
@@ -204,6 +321,14 @@ namespace sl::test::render
                 return false;
             }
             setClip (clip);
+        }
+        if (c.contains ("snapshot"))
+        {   // the engine-only case: a raw snapshot, set as it is (the JS e.setSnapshot (spec.snapshot))
+            auto raw = rawSnapshotFromJson (c["snapshot"], why);
+            if (raw == nullptr)
+                return false;
+            snaps.push_back (std::move (raw));
+            e->setSnapshot (snaps.back().get(), ++epoch);
         }
 
         const JsonValue& transport = c["transport"];

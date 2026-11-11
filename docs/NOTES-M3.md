@@ -167,3 +167,16 @@ M3 part G of 3 (plan 7.5 "G"): the grain engines Voice and Cloud. Branch `m3-eng
   0.144 and 0.145; the audio reads 0.09177 (Voice) and 0.09453 (Cloud) against the playhead's 0.09187 (printed).
 - Allocations: the engine sweep through Tape, Voice and Cloud makes 0 allocations and 0 frees (19 voices during
   the bounded chase), in Release and in the Debug-CRT run.
+
+## L
+
+M3 part L of 3 (plan 7.5 "L"): the Lock engine. Branch `m3-engine`, on top of G (main = 8ffa98d when L began).
+
+### Progress
+
+- Done: `engine/VoiceLock.cpp` (lockGrab, lockRho, runLock), the Lock arm of Voice::renderRun, `playedEngine`
+  playing every engine as itself, the raw-snapshot reader in the renders harness, all 37 grains cases expected to
+  run, the stand-in lines gone from the Diagnostics page and the Copy report (with their tests), the Lock rows
+  (tuning, harmonic lines, chase, allocations).
+- In progress: the first CI run on these commits.
+- Next: CI green, then this section's results and the hand-off for B, then the fast-forward of main.

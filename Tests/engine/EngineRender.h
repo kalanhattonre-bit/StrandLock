@@ -50,6 +50,12 @@ namespace sl::test::render
         other value replaces. */
     core::JsonValue mergeInstJson (const core::JsonValue& current, const core::JsonValue& patch);
 
+    /** A raw engine-only snapshot (tools/fixtures/engine.js rawSnapOut: BLUEPRINT 3.2, every setting resolved,
+        lanes as Tables, glide and chain by id) as a core::Snapshot: the notes in the file's order, each setting
+        explicit (no "follow the instrument" marker), the glide and chain the same in all three Auto Slide modes,
+        parity clip settings. nullptr (why says what) when a field cannot be read. */
+    std::unique_ptr<core::Snapshot> rawSnapshotFromJson (const core::JsonValue& snap, std::string& why);
+
     /** Renders one renders.json case. False (why says what) when the case cannot be set up. */
     bool renderFixtureCase (const core::JsonValue& c, const std::map<std::string, model::Clip>& clips, Rendered& out, std::string& why);
 

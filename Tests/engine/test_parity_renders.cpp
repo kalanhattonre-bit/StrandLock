@@ -1,10 +1,10 @@
 // engine/renders.json (PLUGIN-PLAN 5.3, the first test row of M2 and of M3): every case with needs "tape" (M2), and
-// every case with needs "grains" that plays Voice and Cloud only (M3 part G), rendered by the C++ engine exactly as
-// tools/fixtures/engine.js drives the prototype (Tests/engine/EngineRender), and compared with section 5's
-// tolerances: if the hash matches, bit for bit (printed); otherwise windows within 1e-5, blockRms within
+// every case with needs "grains" (M3: Voice and Cloud from part G, Lock from part L), rendered by the C++ engine
+// exactly as tools/fixtures/engine.js drives the prototype (Tests/engine/EngineRender), and compared with section
+// 5's tolerances: if the hash matches, bit for bit (printed); otherwise windows within 1e-5, blockRms within
 // 1e-6 + 1e-4 x rms, blockPeak within 1e-5, stats exact, display ids, kinds, engines, motions, released, dir and
-// thinned exact and pos, level, env and beat within 1e-6, trace within 1e-6. The grains cases that play Lock wait
-// for M3 part L (kWaitForLock below names each one and why). Group "engine".
+// thinned exact and pos, level, env and beat within 1e-6, trace within 1e-6. A case that waits for M3 part B would
+// be named in kWaitForB with its reason; none does. Group "engine".
 
 #include "engine/EngineRender.h"
 #include "engine/VoiceRig.h"
@@ -18,6 +18,7 @@
 #include "core/Seeds.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <iterator>
@@ -205,29 +206,21 @@ namespace
         return true;
     }
 
-    /** The "grains" cases that wait for M3 part L, and why: each one plays a Lock voice (counted in the prototype:
-        these 9 cases call runLock, the other 28 never do), and Lock plays as Tape until L (engine::playedEngine). */
+    /** The "grains" cases that wait for M3 part B (the complete planner), and why. Part G ran the 28 cases that play
+        Voice and Cloud only; part L added the 9 that play Lock (counted in the prototype: they call runLock), the
+        budget-16x8-lock12-* cases among them (their stats are the planner's thinning and cuts, which the planner
+        already does as the JS). None waits now; a case put here is named with its reason and not run. */
     struct Waiting
     {
         const char* name;
         const char* why;
     };
-    constexpr Waiting kWaitForLock[] = {
-        { "lock-from-noise", "a Lock note (part L)" },
-        { "lock-from-chord", "a Lock note (part L)" },
-        { "budget-16x8-lock12-48k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
-        { "budget-16x8-lock12-96k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
-        { "budget-16x8-lock12-clip-44.1k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
-        { "budget-16x8-lock12-clip-48k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
-        { "budget-16x8-lock12-clip-96k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
-        { "strand-demo-recipe-8", "recipe 8 is Cloud with Lock (part L)" },
-        { "raw-snapshot", "note raw-c is Cloud with Lock (part L), and the harness has no raw-snapshot reader yet" },
-    };
-    constexpr std::size_t kGrainCasesNow = 37 - std::size (kWaitForLock);   // 28
+    constexpr std::array<Waiting, 0> kWaitForB {};
+    constexpr std::size_t kGrainCasesNow = 37 - kWaitForB.size();   // 37
 
     const Waiting* waitingFor (const std::string& name)
     {
-        for (const Waiting& w : kWaitForLock)
+        for (const Waiting& w : kWaitForB)
             if (name == w.name)
                 return &w;
         return nullptr;
@@ -330,7 +323,7 @@ SL_TEST ("engine", fixtureEngineRendersTape)
 
 SL_TEST ("engine", fixtureEngineRendersGrains)
 {
-    section ("engine/renders.json: every case with needs \"grains\" that plays Voice and Cloud (M3 part G), section 5 tolerances");
+    section ("engine/renders.json: every case with needs \"grains\" (M3: Voice, Cloud and Lock), section 5 tolerances");
 
     JsonValue doc;
     if (! fixture::load ("engine/renders.json", doc))
@@ -348,14 +341,15 @@ SL_TEST ("engine", fixtureEngineRendersGrains)
             ++grainCases;
             waitingFound += waitingFor (cases[c]["name"].asString()) != nullptr ? 1 : 0;
         }
-    check (grainCases == 37 && waitingFound == std::size (kWaitForLock) && grainCases - waitingFound == kGrainCasesNow,
-           fmt ("37 grains cases in the file (%zu); %zu of them wait for part L (%zu named); %zu run now (expected %zu)", grainCases,
-                waitingFound, std::size (kWaitForLock), grainCases - waitingFound, kGrainCasesNow));
-    for (const Waiting& w : kWaitForLock)
-        note (std::string ("waits for M3 part L: ") + w.name + " (" + w.why + ")");
+    check (grainCases == 37 && waitingFound == kWaitForB.size() && grainCases - waitingFound == kGrainCasesNow,
+           fmt ("37 grains cases in the file (%zu); %zu of them wait for part B (%zu named); %zu run now (expected %zu)", grainCases,
+                waitingFound, kWaitForB.size(), grainCases - waitingFound, kGrainCasesNow));
+    for (const Waiting& w : kWaitForB)
+        note (std::string ("waits for M3 part B: ") + w.name + " (" + w.why + ")");
 
-    modelfx::FileTally tally ("engine/renders.json, needs grains (Voice and Cloud)", kGrainCasesNow);
+    modelfx::FileTally tally ("engine/renders.json, needs grains (Voice, Cloud and Lock)", kGrainCasesNow);
     const JsonValue* control = nullptr;
+    const JsonValue* lockControl = nullptr;
     for (std::size_t c = 0; c < cases.size(); ++c)
     {
         const JsonValue& k = cases[c];
@@ -383,6 +377,8 @@ SL_TEST ("engine", fixtureEngineRendersGrains)
         }
         if (name == "voice-c3")
             control = &k;
+        if (name == "lock-from-noise")
+            lockControl = &k;
     }
     tally.finish();
 
@@ -404,5 +400,25 @@ SL_TEST ("engine", fixtureEngineRendersGrains)
     else
     {
         check (false, "negative control: the voice-c3 case is in the file");
+    }
+
+    // The same for Lock: lock-from-noise with the Lock switch off (plain Cloud grains on the noise) is far outside
+    // the tolerance, so a Lock dispatch that played plain Cloud, or the Tape stand-in, would fail above.
+    if (lockControl != nullptr)
+    {
+        JsonValue asCloud = *lockControl;
+        JsonValue inst = asCloud["inst"];
+        inst.set ("lock", JsonValue (false));
+        asCloud.set ("inst", inst);
+        Rendered r;
+        std::string why;
+        bool hm = false;
+        const bool rendered = render::renderFixtureCase (asCloud, clips, r, why);
+        const bool caught = rendered && ! renderMatches (r, (*lockControl)["out"], hm, why);
+        check (caught, "negative control: lock-from-noise played as plain Cloud fails the comparison with the prototype's Lock render (" + why + ")");
+    }
+    else
+    {
+        check (false, "negative control: the lock-from-noise case is in the file");
     }
 }

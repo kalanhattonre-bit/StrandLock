@@ -87,8 +87,8 @@ namespace sl::engine
         double preLimiterPeak = 0.0;      // the largest |sample| after outGain, before the limiter
 
         // E1's addition (NOTES-M2): voices that are not done whose note asks for an engine this build does not play
-        // yet and plays as Tape instead (Voice::asTape), so the diagnostics page can say so. From M3 part G that is
-        // Lock only (Voice and Cloud play runGrains); always 0 once part L plays Lock.
+        // yet and plays as Tape instead (Voice::asTape). Always 0 since M3 part L (every engine plays itself); kept
+        // so the engine tests can check that no note stands in. The diagnostics page no longer shows it.
         std::int32_t tapeStandIns = 0;
     };
 

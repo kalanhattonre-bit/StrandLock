@@ -7,8 +7,9 @@
 // Steady heads are planned to floor (0.75 B), so the 20 ms fade tails fit under B. The units: Tape 2 per head
 // (est; the measured peak is 1, or 2 during a jump or stutter crossfade), Voice and Cloud the active grains of a
 // head (est min (8, ceil (len / P) + 1) for Voice and min (5, ceil (len / hop) + 1) for Cloud, set by Voice::tick;
-// runGrains measures its most grains in the stretch), Lock its taps (M3 part L). The grain engines only change what
-// the heads estimate and measure, not this planner.
+// runGrains measures its most grains in the stretch), Lock its taps (est 2 max (nT, nA, nB while crossfading), set
+// by Voice::tick; runLock measures N, or N + N' during a re-grab crossfade). The grain engines only change what the
+// heads estimate and measure, not this planner.
 //
 // The plugin's one change: a voice still in a bounded chase (Voice::chasing) is silent and waiting. The planner
 // passes it over (as if it were not in the list), so its heads get no grant; once it has caught up it starts like

@@ -2,8 +2,8 @@
 // plays with the host, the parameters reach the engine (the M0 probe's tuning shifts and levels, now on the real
 // engine), the live row through MidiRouter (CC 32 on a Travel wheel plays -0.98236x, velocity, bend, sustain), the
 // editor's commands, determinism through processBlock (block sizes, setNonRealtime, stopped samples before Play),
-// stability with 8 heads and 16 live keys, Lock notes standing in as Tape on the Diagnostics page (Voice and Cloud
-// play themselves from M3 part G), and a state saved and loaded while playing. Group "plugin" (the
+// stability with 8 heads and 16 live keys, every engine playing itself (Voice and Cloud from M3 part G, Lock from
+// part L: nothing stands in as Tape), and a state saved and loaded while playing. Group "plugin" (the
 // state-while-playing test is in "state", which the sanitizer job runs).
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -406,31 +406,47 @@ SL_TEST ("plugin", stabilityThroughProcessBlock)
            "latency 0, no input bus, stereo out, accepts MIDI");
 }
 
-SL_TEST ("plugin", onlyLockStandsInAsTape)
+SL_TEST ("plugin", everyEnginePlaysItself)
 {
-    section ("M3 part G: notes set to Voice or Cloud play as themselves; until part L, notes set to Lock play as Tape, and the "
-             "Diagnostics page says so");
+    section ("M3 part L: notes set to Tape, Voice, Cloud or Lock each play their own engine through processBlock; nothing stands "
+             "in as Tape, and the Diagnostics report no longer has a stand-in line");
 
-    // { Engine choice, Lock switch }: Voice, Cloud, Tape, then Cloud with Lock
-    const std::pair<float, float> settings[] = { { 1.0f, 0.0f }, { 2.0f, 0.0f }, { 0.0f, 0.0f }, { 2.0f, 1.0f } };
-    const bool lockStandsIn = engine::playedEngine (engine::Kc::lock) == engine::Kc::tape;
-    for (const auto& [engineIndex, lockOn] : settings)
+    // { Engine choice, Lock switch, the engine played }: Voice, Cloud, Tape, then Cloud with Lock
+    struct Setting
+    {
+        float engineIndex, lockOn;
+        engine::Kc played;
+        const char* name;
+    };
+    const Setting settings[] = { { 1.0f, 0.0f, engine::Kc::voice, "Voice" },
+                                 { 2.0f, 0.0f, engine::Kc::cloud, "Cloud" },
+                                 { 0.0f, 0.0f, engine::Kc::tape, "Tape" },
+                                 { 2.0f, 1.0f, engine::Kc::lock, "Lock" } };
+    for (const Setting& set : settings)
     {
         StrandLockProcessor p;
         useSaw (p);
-        setParam (p, params::P::engine, engineIndex);
-        setParam (p, params::P::lock, lockOn);
+        setParam (p, params::P::engine, set.engineIndex);
+        setParam (p, params::P::lock, set.lockOn);
         const auto events = std::vector<MidiEvent> { harness::noteOn (0, 60, 100), harness::noteOn (0, 64, 100) };
         harness::render (p, kSr, 24000, harness::fixedBlocks (256), events);
         const auto s = p.getDiag().snapshot();
         const auto report = p.getDiag().reportText();
-        const bool lock = juce::exactlyEqual (lockOn, 1.0f);
-        const int expected = lock && lockStandsIn ? 2 : 0;
-        const char* name = lock ? "Lock" : juce::exactlyEqual (engineIndex, 0.0f) ? "Tape" : juce::exactlyEqual (engineIndex, 1.0f) ? "Voice" : "Cloud";
-        check (s.engineReports > 0 && s.voices == 2 && s.tapeStandIns == expected && s.maxTapeStandIns == expected
-                   && report.contains ("playing as Tape instead of Lock: " + juce::String (expected) + " now"),
-               fmt ("%s: 2 voices, %d of them standing in as Tape (most %d; expected %d), and the report says so", name, s.tapeStandIns,
-                    s.maxTapeStandIns, expected));
+        const auto st = p.getEngineStats();
+        // the newest display frame: both voices show the engine they play, and a grain engine's heads list grains
+        // (Lock lists its captures); a Tape head lists none
+        engine::DisplaySlot& slot = *p.getDisplaySlot();
+        slot.takeLatest();
+        const engine::DisplayFrame& f = slot.latest();
+        const bool shown = f.numVoices == 2 && f.voices[0].engine == static_cast<std::uint8_t> (set.played)
+                           && f.voices[1].engine == static_cast<std::uint8_t> (set.played);
+        const bool grains = f.numGrains > 0;
+        check (s.engineReports > 0 && s.voices == 2 && st.tapeStandIns == 0 && shown && grains == (set.played != engine::Kc::tape),
+               fmt ("%s: 2 voices (%d), none standing in as Tape (%d), the display shows the engine (%d) and %d grains (%s)", set.name, s.voices,
+                    static_cast<int> (st.tapeStandIns), shown ? 1 : 0, static_cast<int> (f.numGrains),
+                    set.played == engine::Kc::tape ? "none for Tape" : "some for a grain engine"));
+        check (report.contains ("Engine: 2 voices now") && ! report.contains ("as Tape") && ! report.contains ("instead of"),
+               fmt ("%s: the report's Engine line counts the voices and has no stand-in text", set.name));
     }
 }
 

@@ -329,9 +329,6 @@ namespace sl::diag
         engineVoices.store (f.voices, relaxed);
         if (f.voices > maxEngineVoices.load (relaxed))
             maxEngineVoices.store (f.voices, relaxed);
-        tapeStandIns.store (f.tapeStandIns, relaxed);
-        if (f.tapeStandIns > maxTapeStandIns.load (relaxed))
-            maxTapeStandIns.store (f.tapeStandIns, relaxed);
         engineSteals.store ((long long) f.steals, relaxed);
         engineCuts.store ((long long) f.cuts, relaxed);
         engineNonFinite.store ((long long) f.nonFinite, relaxed);
@@ -494,8 +491,6 @@ namespace sl::diag
         s.engineReports = engineReports.load (relaxed);
         s.voices = engineVoices.load (relaxed);
         s.maxVoices = maxEngineVoices.load (relaxed);
-        s.tapeStandIns = tapeStandIns.load (relaxed);
-        s.maxTapeStandIns = maxTapeStandIns.load (relaxed);
         s.steals = engineSteals.load (relaxed);
         s.cuts = engineCuts.load (relaxed);
         s.nonFinite = engineNonFinite.load (relaxed);
@@ -520,9 +515,7 @@ namespace sl::diag
 
         lines.add (juce::String ("StrandLock ") + core::kPluginVersion + " diagnostics report");
         lines.add ("Host: " + hostInfo.summary() + (hostInfo.path.isNotEmpty() ? " at " + hostInfo.path : juce::String()));
-        lines.add ("Engines: Tape, Voice and Cloud play now; notes set to Lock play as Tape until the next build");
-        lines.add ("Engine: " + juce::String (s.voices) + " voices now (most " + juce::String (s.maxVoices) + "); playing as Tape instead of Lock: "
-                   + juce::String (s.tapeStandIns) + " now (most " + juce::String (s.maxTapeStandIns) + "); steals " + juce::String ((juce::int64) s.steals)
+        lines.add ("Engine: " + juce::String (s.voices) + " voices now (most " + juce::String (s.maxVoices) + "); steals " + juce::String ((juce::int64) s.steals)
                    + ", cuts " + juce::String ((juce::int64) s.cuts) + ", non-finite samples " + juce::String ((juce::int64) s.nonFinite)
                    + ", filter resets " + juce::String ((juce::int64) s.filterResets));
         lines.add ("Sample rate: " + fixed (s.sampleRate, 0) + " Hz; block size given at prepare: " + juce::String (s.preparedBlockSize));
