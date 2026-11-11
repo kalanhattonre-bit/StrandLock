@@ -3,7 +3,8 @@
 // The grain engines' test rows (M3 part G) follow prototype-v4/tests/test-engine.js line by line, so they use its
 // measurements and its way of driving the engine. This rig holds both:
 //  - the measurements: spectrum (Blackman-Harris), harmonicF0 (the harmonic-refined f0), centroid (power-weighted,
-//    below 12 kHz), corr, stats (min, median, max of the finite values, the JS quantile rule), cents;
+//    below 12 kHz), corr, stats (min, median, max of the finite values, the JS quantile rule), cents, and for Lock
+//    (M3 part L) periodF0 (the period of a signal that repeats exactly) and harmonicity (lines over gaps);
 //  - a Play: a fresh Engine with an instrument and a sample (mkEngine), rendered in host blocks (render) with a
 //    hook after every block (the JS hook (i)), live keys and a raw snapshot (rig::rawSnapshot) as the JS tests
 //    build them.
@@ -44,6 +45,16 @@ namespace sl::test::grains
     /** centroid (x, sr, order, start, fMax): the power-weighted mean frequency of the spectrum below fMax.
         start < 0 = the last 2^order samples. */
     double centroid (const std::vector<float>& x, double sr, int order = 15, std::int64_t start = -1, double fMax = 12000);
+
+    /** periodF0 (x, sr, fExp, length) (M3 part L): the period estimator for signals that repeat exactly (Lock).
+        It minimises the summed squared difference between x (t) and x (t + tau) over `length` samples near the
+        end, tau Hermite-interpolated (samples outside x read 0): a scan of +-3 % around sr / fExp in 0.25-sample
+        steps, then 40 golden-section steps in +-0.3 samples around the best. Returns sr / tau. */
+    double periodF0 (const std::vector<float>& x, double sr, double fExp, int length = 32768);
+
+    /** The JS Lock test's harmonicity (x, sr, f): over the last 2^16 samples, the mean power within +-1.5 % of
+        k f against the mean power in the gaps (0.3 .. 0.7 of the way to the next harmonic), k = 1 .. 8, in dB. */
+    double harmonicity (const std::vector<float>& x, double sr, double f);
 
     /** corr (a, b): sum ab / sqrt (sum aa sum bb). */
     double corr (const float* a, const float* b, std::size_t n);

@@ -1,6 +1,6 @@
 // The Engine's audio-thread work allocates nothing (PLUGIN-PLAN 1.3, 4 M2 "allocations"): 10 s of Strand Demo with
-// live keys and chords, parameter sweeps every block (with the 20 ms ramps; the engine moves through Tape, Voice and
-// Cloud from M3 part G), the bypass fade, wheels, bend and sustain, a transport jump, a bounded chase into long
+// live keys and chords, parameter sweeps every block (with the 20 ms ramps; the engine moves through Tape, Voice,
+// Cloud and Lock: M3 parts G and L), the bypass fade, wheels, bend and sustain, a transport jump, a bounded chase into long
 // 8-head notes, a sample swap, snapshot swaps, a stop and a start, all notes off, the display, stats and reset.
 // Counted by AllocCounter (operator new and delete; malloc and free too on glibc and the Debug CRT). Registered in
 // group "engine" and again in group "alloc", which the Debug-CRT job runs. The processor-level allocation row is the
@@ -60,10 +60,12 @@ namespace
         for (int i = 0; i < 8; ++i)
         {
             core::Inst x = base;
-            // M3 part G: the sweep moves through Tape, Voice and Cloud (Spray and Each grain backwards on some), so
-            // runGrains runs here too
-            x.engine = i % 3 == 0 ? core::Engine::tape : i % 3 == 1 ? core::Engine::voice : core::Engine::cloud;
-            x.spray = i % 3 == 2 ? 0.3 : 0.0;
+            // M3: the sweep moves through Tape, Voice, Cloud and Lock (part G: runGrains, with Spray and Each grain
+            // backwards on some; part L: runLock, with Spray and Lock N = 12 on one), so every engine runs here
+            x.engine = i % 4 == 0 ? core::Engine::tape : i % 4 == 1 ? core::Engine::voice : core::Engine::cloud;
+            x.lock = i % 4 == 3;
+            x.grainLock = i == 7 ? 12 : 4;
+            x.spray = i % 4 >= 2 ? 0.3 : 0.0;
             x.rev = i == 5;
             x.heads = 1 + i;
             x.macros[0] = 0.3 + 0.05 * i;
@@ -83,6 +85,7 @@ namespace
         std::vector<float> L (128), R (128);
         double energy = 0;
         std::int64_t maxChaseVoices = 0;
+        int lockFrames = 0;   // display frames with a Lock voice showing its captures (Lock played)
 
         alloc::reset();
         {
@@ -140,7 +143,13 @@ namespace
                 for (int j = 0; j < 128; ++j)
                     energy += static_cast<double> (L[static_cast<std::size_t> (j)]) * L[static_cast<std::size_t> (j)];
                 if (k % 1536 == 0)
+                {
                     e->fillDisplay (*frame);
+                    bool lockShown = false;
+                    for (int v = 0; v < frame->numVoices; ++v)
+                        lockShown = lockShown || frame->voices[v].engine == static_cast<std::uint8_t> (engine::Kc::lock);
+                    lockFrames += lockShown && frame->numGrains > 0 ? 1 : 0;
+                }
                 if (k >= 144000 && k < 200000)
                     maxChaseVoices = std::max<std::int64_t> (maxChaseVoices, e->stats().voices);
                 (void) e->minEpochInUse (engine::VersionKind::snapshot);
@@ -153,8 +162,9 @@ namespace
         }
         const alloc::Counts c = alloc::counts();
         check (c.news == 0 && c.deletes == 0, fmt ("0 allocations and 0 frees in 10 s of everything at once (%lld and %lld)", c.news, c.deletes));
-        check (energy > 1.0 && maxChaseVoices >= 16, fmt ("and it played (energy %.1f; %lld voices during the bounded chase)", energy,
-                                                          static_cast<long long> (maxChaseVoices)));
+        check (energy > 1.0 && maxChaseVoices >= 16 && lockFrames > 0,
+               fmt ("and it played (energy %.1f; %lld voices during the bounded chase; %d display frames with Lock voices playing)", energy,
+                    static_cast<long long> (maxChaseVoices), lockFrames));
 
         // A no-op is not a pass: the counter sees an allocation made the same way.
         alloc::reset();

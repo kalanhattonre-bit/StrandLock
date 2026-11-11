@@ -106,6 +106,99 @@ namespace sl::test::grains
         return b > 0 ? a / b : 0;
     }
 
+    namespace
+    {
+        /** x[j], or 0 outside x (the JS `x[j] || 0`). */
+        double sampleOr0 (const std::vector<float>& x, std::int64_t j)
+        {
+            return j >= 0 && j < static_cast<std::int64_t> (x.size()) ? static_cast<double> (x[static_cast<std::size_t> (j)]) : 0.0;
+        }
+
+        /** The JS test's hermiteAt (x, p): 4-point Hermite at p, samples outside x read 0. */
+        double hermiteAt (const std::vector<float>& x, double p)
+        {
+            const double fl = std::floor (p);
+            const auto i = static_cast<std::int64_t> (fl);
+            const double f = p - fl;
+            const double a = sampleOr0 (x, i - 1), b = sampleOr0 (x, i), c = sampleOr0 (x, i + 1), d = sampleOr0 (x, i + 2);
+            return (((0.5 * (d - a) + 1.5 * (b - c)) * f + (a - 2.5 * b + 2 * c - 0.5 * d)) * f + 0.5 * (c - a)) * f + b;
+        }
+    }
+
+    double periodF0 (const std::vector<float>& x, double sr, double fExp, int length)
+    {
+        const double P0 = sr / fExp;
+        const std::int64_t start = static_cast<std::int64_t> (x.size()) - length - static_cast<std::int64_t> (std::ceil (P0 * 1.1)) - 4;
+        auto d = [&] (double tau) {
+            double s = 0;
+            for (int t = 0; t < length; ++t)
+            {
+                const double e = sampleOr0 (x, start + t) - hermiteAt (x, static_cast<double> (start + t) + tau);
+                s += e * e;
+            }
+            return s;
+        };
+        double bestT = P0, bestD = HUGE_VAL;   // coarse scan +-3 % in 0.25-sample steps, then golden section
+        for (double tau = P0 * 0.97; tau <= P0 * 1.03; tau += 0.25)
+        {
+            const double v = d (tau);
+            if (v < bestD)
+            {
+                bestD = v;
+                bestT = tau;
+            }
+        }
+        double a = bestT - 0.3, b = bestT + 0.3;
+        const double g = (std::sqrt (5.0) - 1) / 2;
+        double c = b - g * (b - a), e = a + g * (b - a), dc = d (c), de = d (e);
+        for (int it = 0; it < 40; ++it)
+        {
+            if (dc < de)
+            {
+                b = e;
+                e = c;
+                de = dc;
+                c = b - g * (b - a);
+                dc = d (c);
+            }
+            else
+            {
+                a = c;
+                c = e;
+                dc = de;
+                e = a + g * (b - a);
+                de = d (e);
+            }
+        }
+        return sr / ((a + b) / 2);
+    }
+
+    double harmonicity (const std::vector<float>& x, double sr, double f)
+    {
+        const std::vector<double> m = spectrum (x, static_cast<std::int64_t> (x.size()) - 65536, 16);
+        const double bin = sr / 65536;
+        double on = 0, off = 0;
+        int cOn = 0, cOff = 0;
+        auto power = [&m] (double q) {
+            const auto i = static_cast<std::size_t> (q);
+            return i < m.size() ? m[i] * m[i] : 0.0;
+        };
+        for (int k = 1; k <= 8; ++k)
+        {
+            for (double q = std::floor (k * f * 0.985 / bin); q <= std::ceil (k * f * 1.015 / bin); ++q)
+            {
+                on += power (q);
+                ++cOn;
+            }
+            for (double q = std::floor ((k + 0.3) * f / bin); q <= std::ceil ((k + 0.7) * f / bin); ++q)
+            {
+                off += power (q);
+                ++cOff;
+            }
+        }
+        return 10 * std::log10 ((on / cOn) / (off / cOff));
+    }
+
     double corr (const float* a, const float* b, std::size_t n)
     {
         double ab = 0, aa = 0, bb = 0;
