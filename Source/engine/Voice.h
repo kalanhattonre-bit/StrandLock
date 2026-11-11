@@ -61,13 +61,13 @@ namespace sl::engine
     enum class TravelPlay : std::uint8_t { speed, path, tapePath };
 
     /** The M2 -> M3 switch (plan 4, M2: "Notes whose engine is Voice or Cloud play as Tape until M3").
-        Voice::tick works out the engine a note asks for and plays the one this returns. Until runGrains
-        (VoiceGrains.cpp) and runLock (VoiceLock.cpp) exist, that is Tape for every note, and Voice::asTape says
-        which voices stood in. M3 replaces this function's body with `return wanted;` and adds the grain engines
-        to Voice::renderRun's dispatch (VoiceRender.cpp). */
+        Voice::tick works out the engine a note asks for and plays the one this returns, and Voice::asTape says
+        which voices stood in as Tape. M3 part G plays Voice and Cloud as themselves (runGrains, VoiceGrains.cpp);
+        Lock still plays as Tape until part L adds runLock (VoiceLock.cpp), the Lock arm of Voice::renderRun's
+        dispatch (VoiceRender.cpp), and makes this `return wanted;`. */
     constexpr Kc playedEngine (Kc wanted) noexcept
     {
-        return wanted == Kc::tape ? Kc::tape : Kc::tape;
+        return wanted == Kc::lock ? Kc::tape : wanted;
     }
 
     /** A Snapshot note the JS engine would hold in its byId map (JS setSnapshot's filter: finite p, s and l, and
@@ -148,6 +148,11 @@ namespace sl::engine
 
         /** runTape (h, run): Hermite reads at the head's speed; Scatter jumps and Refresh stutters crossfade 5 ms. */
         void runTape (Head& h, int run) noexcept;
+
+        /** runGrains (h, run, voice) (VoiceGrains.cpp): Voice (voice = true: root-grid PSOLA, the formant kept)
+            and Cloud (free grains in ms, Spray) grains, Hann windows with fractional start times; at most
+            min (grant, 8 for Voice, 5 for Cloud) grains per head, and when full the oldest grain gives way. */
+        void runGrains (Head& h, int run, bool voice) noexcept;
 
         //==========================================================================================
         // Chase (VoiceChase.cpp, PLUGIN-PLAN 1.8 and 8.2 #22).
@@ -235,7 +240,7 @@ namespace sl::engine
 
         Kc engineName = Kc::voice;              // the engine the note asks for (the display's engine)
         core::Motion motion = core::Motion::forward;   // the motion as played
-        bool asTape = false;                    // the note asks for Voice, Cloud or Lock and plays Tape (until M3)
+        bool asTape = false;                    // the note asks for Lock and plays Tape (until M3 part L)
         double lpHz = 0, fmtDb = 0, fmtHz = 0, hollowDb = 0;
 
         // 8.2 #3: after a tempo change re-anchored the clock back by up to 0.1 beat, a voice that had already started

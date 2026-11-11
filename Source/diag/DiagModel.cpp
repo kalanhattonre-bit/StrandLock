@@ -520,8 +520,8 @@ namespace sl::diag
 
         lines.add (juce::String ("StrandLock ") + core::kPluginVersion + " diagnostics report");
         lines.add ("Host: " + hostInfo.summary() + (hostInfo.path.isNotEmpty() ? " at " + hostInfo.path : juce::String()));
-        lines.add ("Engines: Tape plays now; notes set to Voice or Cloud play as Tape until the next build (M3)");
-        lines.add ("Engine: " + juce::String (s.voices) + " voices now (most " + juce::String (s.maxVoices) + "); playing as Tape instead of Voice or Cloud: "
+        lines.add ("Engines: Tape, Voice and Cloud play now; notes set to Lock play as Tape until the next build");
+        lines.add ("Engine: " + juce::String (s.voices) + " voices now (most " + juce::String (s.maxVoices) + "); playing as Tape instead of Lock: "
                    + juce::String (s.tapeStandIns) + " now (most " + juce::String (s.maxTapeStandIns) + "); steals " + juce::String ((juce::int64) s.steals)
                    + ", cuts " + juce::String ((juce::int64) s.cuts) + ", non-finite samples " + juce::String ((juce::int64) s.nonFinite)
                    + ", filter resets " + juce::String ((juce::int64) s.filterResets));

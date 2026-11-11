@@ -1,9 +1,10 @@
-// engine/renders.json (PLUGIN-PLAN 5.3, M2's first test row): every case with needs "tape", rendered by the C++
-// engine exactly as tools/fixtures/engine.js drives the prototype (Tests/engine/EngineRender), and compared with
-// section 5's tolerances: if the hash matches, bit for bit (printed); otherwise windows within 1e-5, blockRms within
+// engine/renders.json (PLUGIN-PLAN 5.3, the first test row of M2 and of M3): every case with needs "tape" (M2), and
+// every case with needs "grains" that plays Voice and Cloud only (M3 part G), rendered by the C++ engine exactly as
+// tools/fixtures/engine.js drives the prototype (Tests/engine/EngineRender), and compared with section 5's
+// tolerances: if the hash matches, bit for bit (printed); otherwise windows within 1e-5, blockRms within
 // 1e-6 + 1e-4 x rms, blockPeak within 1e-5, stats exact, display ids, kinds, engines, motions, released, dir and
-// thinned exact and pos, level, env and beat within 1e-6, trace within 1e-6. The 37 "grains" cases are M3's.
-// Group "engine".
+// thinned exact and pos, level, env and beat within 1e-6, trace within 1e-6. The grains cases that play Lock wait
+// for M3 part L (kWaitForLock below names each one and why). Group "engine".
 
 #include "engine/EngineRender.h"
 #include "engine/VoiceRig.h"
@@ -19,6 +20,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <iterator>
 #include <map>
 #include <string>
 #include <string_view>
@@ -203,6 +205,34 @@ namespace
         return true;
     }
 
+    /** The "grains" cases that wait for M3 part L, and why: each one plays a Lock voice (counted in the prototype:
+        these 9 cases call runLock, the other 28 never do), and Lock plays as Tape until L (engine::playedEngine). */
+    struct Waiting
+    {
+        const char* name;
+        const char* why;
+    };
+    constexpr Waiting kWaitForLock[] = {
+        { "lock-from-noise", "a Lock note (part L)" },
+        { "lock-from-chord", "a Lock note (part L)" },
+        { "budget-16x8-lock12-48k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
+        { "budget-16x8-lock12-96k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
+        { "budget-16x8-lock12-clip-44.1k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
+        { "budget-16x8-lock12-clip-48k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
+        { "budget-16x8-lock12-clip-96k", "16 Lock N = 12 voices (part L; the budget row is part B's)" },
+        { "strand-demo-recipe-8", "recipe 8 is Cloud with Lock (part L)" },
+        { "raw-snapshot", "note raw-c is Cloud with Lock (part L), and the harness has no raw-snapshot reader yet" },
+    };
+    constexpr std::size_t kGrainCasesNow = 37 - std::size (kWaitForLock);   // 28
+
+    const Waiting* waitingFor (const std::string& name)
+    {
+        for (const Waiting& w : kWaitForLock)
+            if (name == w.name)
+                return &w;
+        return nullptr;
+    }
+
     /** One render against the fixture's out. hashMatch: the whole render is bit for bit the prototype's. */
     bool renderMatches (const Rendered& r, const JsonValue& o, bool& hashMatch, std::string& why)
     {
@@ -239,7 +269,8 @@ SL_TEST ("engine", fixtureEngineRendersTape)
         grainCases += needs == "grains" ? 1 : 0;
     }
     check (cases.size() == 73 && tapeCases == 36 && grainCases == 37,
-           fmt ("the file holds 73 cases: 36 tape and 37 grains (%zu, %zu, %zu); the grains cases are M3's", cases.size(), tapeCases, grainCases));
+           fmt ("the file holds 73 cases: 36 tape and 37 grains (%zu, %zu, %zu); fixtureEngineRendersGrains runs the grains cases",
+                cases.size(), tapeCases, grainCases));
 
     modelfx::FileTally tally ("engine/renders.json, needs tape", tapeCases);
     const JsonValue* firstTape = nullptr;
@@ -294,5 +325,84 @@ SL_TEST ("engine", fixtureEngineRendersTape)
         const bool caughtStats = ! renderMatches (counted, o, hm, why2);
         check (caughtSample && caughtStats,
                "negative control: a window sample 2e-5 off and a stats row one voice off both fail the comparison (" + why1 + "; " + why2 + ")");
+    }
+}
+
+SL_TEST ("engine", fixtureEngineRendersGrains)
+{
+    section ("engine/renders.json: every case with needs \"grains\" that plays Voice and Cloud (M3 part G), section 5 tolerances");
+
+    JsonValue doc;
+    if (! fixture::load ("engine/renders.json", doc))
+        return;
+    std::map<std::string, model::Clip> clips;
+    if (! modelfx::clipsFrom (doc, clips))
+        return;
+    const JsonValue& cases = doc["cases"];
+
+    // The waiting list names grains cases of the file, each once, so the count below is the file's count minus it.
+    std::size_t grainCases = 0, waitingFound = 0;
+    for (std::size_t c = 0; c < cases.size(); ++c)
+        if (cases[c]["needs"].asString() == "grains")
+        {
+            ++grainCases;
+            waitingFound += waitingFor (cases[c]["name"].asString()) != nullptr ? 1 : 0;
+        }
+    check (grainCases == 37 && waitingFound == std::size (kWaitForLock) && grainCases - waitingFound == kGrainCasesNow,
+           fmt ("37 grains cases in the file (%zu); %zu of them wait for part L (%zu named); %zu run now (expected %zu)", grainCases,
+                waitingFound, std::size (kWaitForLock), grainCases - waitingFound, kGrainCasesNow));
+    for (const Waiting& w : kWaitForLock)
+        note (std::string ("waits for M3 part L: ") + w.name + " (" + w.why + ")");
+
+    modelfx::FileTally tally ("engine/renders.json, needs grains (Voice and Cloud)", kGrainCasesNow);
+    const JsonValue* control = nullptr;
+    for (std::size_t c = 0; c < cases.size(); ++c)
+    {
+        const JsonValue& k = cases[c];
+        if (k["needs"].asString() != "grains" || waitingFor (k["name"].asString()) != nullptr)
+            continue;
+        const std::string name = k["name"].asString();
+        Rendered r;
+        std::string why;
+        if (! render::renderFixtureCase (k, clips, r, why))
+        {
+            tally.fail (name + ": " + why);
+            continue;
+        }
+        bool hashMatch = false;
+        if (renderMatches (r, k["out"], hashMatch, why))
+        {
+            tally.pass (hashMatch);
+            if (! hashMatch)
+                note (name + ": within tolerance, not bit for bit (hash " + signals::hex8 (rig::hashOf (r.L, r.R)) + ", the prototype's "
+                      + k["out"]["hash"].asString() + ")");
+        }
+        else
+        {
+            tally.fail (name + ": " + why);
+        }
+        if (name == "voice-c3")
+            control = &k;
+    }
+    tally.finish();
+
+    // A no-op is not a pass: the voice-c3 case played by the Tape engine (the M2 stand-in) is far outside the
+    // tolerance, so a dispatch that still played Tape, or grains that read the wrong place, would fail above.
+    if (control != nullptr)
+    {
+        JsonValue asTape = *control;
+        JsonValue inst = asTape["inst"];
+        inst.set ("engine", JsonValue ("tape"));
+        asTape.set ("inst", inst);
+        Rendered r;
+        std::string why;
+        bool hm = false;
+        const bool rendered = render::renderFixtureCase (asTape, clips, r, why);
+        check (rendered && ! renderMatches (r, (*control)["out"], hm, why),
+               "negative control: voice-c3 played as Tape fails the comparison with the prototype's Voice render (" + why + ")");
+    }
+    else
+    {
+        check (false, "negative control: the voice-c3 case is in the file");
     }
 }

@@ -43,7 +43,7 @@
     and the block's MIDI, each at its own sample (MidiRouter renders up to each one and splits at a cycle wrap
     inside the block), then the epochs the engine still reads go back to the exchanges (setInUse) and, about 30
     times a second, a display frame goes to the DisplaySlot. A 10 Hz timer on the message thread frees the versions
-    nothing reads any more (collect). Notes set to Voice or Cloud play as Tape until M3; the diagnostics count them. */
+    nothing reads any more (collect). Notes set to Lock play as Tape until M3 part L; the diagnostics count them. */
 class StrandLockProcessor final : public juce::AudioProcessor,
                                   private juce::AudioProcessorParameter::Listener,
                                   private juce::AsyncUpdater,

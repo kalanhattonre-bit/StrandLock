@@ -18,8 +18,8 @@ namespace sl::ui
 
         juce::String fixed (double v, int decimals) { return juce::String (v, decimals); }
 
-        // PLUGIN-PLAN 4 M2: the Voice and Cloud grain engines come with M3.
-        constexpr const char* kEnginesNote = "Tape plays now. Notes set to Voice or Cloud play as Tape until the next build (M3).";
+        // PLUGIN-PLAN 7.5: M3 part G plays Voice and Cloud; Lock comes with part L.
+        constexpr const char* kEnginesNote = "Tape, Voice and Cloud play now. Notes set to Lock play as Tape until the next build.";
         juce::String count (std::uint64_t n) { return juce::String (static_cast<juce::int64> (n)); }
 
         juce::String noteText (int note)
@@ -73,10 +73,10 @@ namespace sl::ui
         {
             Card c { "This computer", {} };
             const auto& host = processor.getHostInfo();
-            c.rows.push_back ({ "StrandLock", juce::String (core::kPluginVersion) + " (test build: Tape engine)" });
+            c.rows.push_back ({ "StrandLock", juce::String (core::kPluginVersion) + " (test build: Tape, Voice and Cloud engines)" });
             c.rows.push_back ({ "Host", host.summary() });
             c.rows.push_back ({ "Engines", juce::String (kEnginesNote) });
-            c.rows.push_back ({ "Voices", juce::String (s.voices) + " now, most " + juce::String (s.maxVoices) + "; playing as Tape instead of Voice or Cloud: "
+            c.rows.push_back ({ "Voices", juce::String (s.voices) + " now, most " + juce::String (s.maxVoices) + "; playing as Tape instead of Lock: "
                                           + juce::String (s.tapeStandIns) + " now, most " + juce::String (s.maxTapeStandIns) });
             c.rows.push_back ({ "Engine health", juce::String ((juce::int64) s.steals) + " steals, " + juce::String ((juce::int64) s.cuts) + " cuts, "
                                                  + juce::String ((juce::int64) s.nonFinite) + " non-finite samples, "

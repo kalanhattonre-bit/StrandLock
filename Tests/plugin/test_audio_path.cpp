@@ -2,15 +2,16 @@
 // plays with the host, the parameters reach the engine (the M0 probe's tuning shifts and levels, now on the real
 // engine), the live row through MidiRouter (CC 32 on a Travel wheel plays -0.98236x, velocity, bend, sustain), the
 // editor's commands, determinism through processBlock (block sizes, setNonRealtime, stopped samples before Play),
-// stability with 8 heads and 16 live keys, Voice and Cloud notes standing in as Tape on the Diagnostics page, and a
-// state saved and loaded while playing. Group "plugin" (the state-while-playing test is in "state", which the
-// sanitizer job runs).
+// stability with 8 heads and 16 live keys, Lock notes standing in as Tape on the Diagnostics page (Voice and Cloud
+// play themselves from M3 part G), and a state saved and loaded while playing. Group "plugin" (the
+// state-while-playing test is in "state", which the sanitizer job runs).
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "PluginProcessor.h"
 #include "core/Travel.h"
 #include "engine/EngineRender.h"
+#include "engine/Voice.h"
 #include "params/ParameterLayout.h"
 #include "sounds/StarterSounds.h"
 #include "support/AllocCounter.h"
@@ -28,6 +29,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace
@@ -51,6 +53,13 @@ namespace
     {
         p.loadStarterSound (sounds::StarterId::saw);
         p.waitForSounds();
+    }
+
+    /** useSaw, then the Tape engine (the default is Voice, which plays as itself from M3 part G). */
+    void useSawOnTape (StrandLockProcessor& p)
+    {
+        useSaw (p);
+        setParam (p, params::P::engine, 0.0f);
     }
 
     /** One note held from sample 0, long enough for a 2^17-point FFT after the attack. */
@@ -108,10 +117,12 @@ SL_TEST ("plugin", parametersReachTheEngine)
 {
     section ("The parameters reach the engine (the M0 probe's checks on the real engine): tuning, root, cents, Pitch, bend, velocity, Output Gain, bypass");
 
-    // Tape at C3 against its C3 root (the engine-level Tape tuning row is engine/tapeTuning).
+    // Tape at C3 against its C3 root (the engine-level Tape tuning row is engine/tapeTuning). Every check here plays
+    // Tape: the Voice engine plays the key's own pitch whatever the root (its grains are one pitch period apart), so
+    // the Root and Cents shifts are Tape's; Voice tuning is engine/voiceTuning.
     {
         StrandLockProcessor p;
-        useSaw (p);
+        useSawOnTape (p);
         const auto r = held (p, 60, 100);
         const double cents = measure::centsBetween (measure::fftFundamentalHz (r.left, kSr, 17), expectedHz (60));
         check (std::abs (cents) <= 3.0, fmt ("C3 against root C3: %+.3f cents", cents));
@@ -125,7 +136,7 @@ SL_TEST ("plugin", parametersReachTheEngine)
     for (const auto& s : shifts)
     {
         StrandLockProcessor p;
-        useSaw (p);
+        useSawOnTape (p);
         setParam (p, s.param, s.value);
         const auto r = held (p, 60, 100);
         const double cents = measure::centsBetween (measure::fftFundamentalHz (r.left, kSr, 17), expectedHz (60.0 + s.semitones));
@@ -133,7 +144,7 @@ SL_TEST ("plugin", parametersReachTheEngine)
     }
     {
         StrandLockProcessor p;
-        useSaw (p);
+        useSawOnTape (p);
         const auto r = held (p, 60, 100, { harness::pitchBend (100, 16383) });
         const double cents = measure::centsBetween (measure::fftFundamentalHz (r.left, kSr, 17), expectedHz (62.0));
         check (std::abs (cents) <= 3.0, fmt ("pitch bend fully up with Bend Range 2: C3 plays D3 (%+.3f cents)", cents));
@@ -143,7 +154,7 @@ SL_TEST ("plugin", parametersReachTheEngine)
     const std::size_t tail = 48000;
     auto level = [&] (int velocity, float velSens, float outGain, bool bypass) {
         StrandLockProcessor p;
-        useSaw (p);
+        useSawOnTape (p);
         setParam (p, params::P::outGain, outGain);
         setParam (p, params::P::velSens, velSens);
         if (bypass)
@@ -395,24 +406,31 @@ SL_TEST ("plugin", stabilityThroughProcessBlock)
            "latency 0, no input bus, stereo out, accepts MIDI");
 }
 
-SL_TEST ("plugin", voiceAndCloudPlayAsTape)
+SL_TEST ("plugin", onlyLockStandsInAsTape)
 {
-    section ("Notes set to Voice or Cloud play as Tape until M3, and the Diagnostics page says so");
+    section ("M3 part G: notes set to Voice or Cloud play as themselves; until part L, notes set to Lock play as Tape, and the "
+             "Diagnostics page says so");
 
-    for (const float engineIndex : { 1.0f, 2.0f, 0.0f })   // Voice, Cloud, Tape
+    // { Engine choice, Lock switch }: Voice, Cloud, Tape, then Cloud with Lock
+    const std::pair<float, float> settings[] = { { 1.0f, 0.0f }, { 2.0f, 0.0f }, { 0.0f, 0.0f }, { 2.0f, 1.0f } };
+    const bool lockStandsIn = engine::playedEngine (engine::Kc::lock) == engine::Kc::tape;
+    for (const auto& [engineIndex, lockOn] : settings)
     {
         StrandLockProcessor p;
         useSaw (p);
         setParam (p, params::P::engine, engineIndex);
+        setParam (p, params::P::lock, lockOn);
         const auto events = std::vector<MidiEvent> { harness::noteOn (0, 60, 100), harness::noteOn (0, 64, 100) };
         harness::render (p, kSr, 24000, harness::fixedBlocks (256), events);
         const auto s = p.getDiag().snapshot();
         const auto report = p.getDiag().reportText();
-        const bool tape = juce::exactlyEqual (engineIndex, 0.0f);
-        const char* name = tape ? "Tape" : juce::exactlyEqual (engineIndex, 1.0f) ? "Voice" : "Cloud";
-        check (s.engineReports > 0 && s.voices == 2 && s.tapeStandIns == (tape ? 0 : 2) && s.maxTapeStandIns == (tape ? 0 : 2)
-                   && report.contains ("playing as Tape instead of Voice or Cloud: " + juce::String (tape ? 0 : 2) + " now"),
-               fmt ("%s: 2 voices, %d of them standing in as Tape (most %d), and the report says so", name, s.tapeStandIns, s.maxTapeStandIns));
+        const bool lock = juce::exactlyEqual (lockOn, 1.0f);
+        const int expected = lock && lockStandsIn ? 2 : 0;
+        const char* name = lock ? "Lock" : juce::exactlyEqual (engineIndex, 0.0f) ? "Tape" : juce::exactlyEqual (engineIndex, 1.0f) ? "Voice" : "Cloud";
+        check (s.engineReports > 0 && s.voices == 2 && s.tapeStandIns == expected && s.maxTapeStandIns == expected
+                   && report.contains ("playing as Tape instead of Lock: " + juce::String (expected) + " now"),
+               fmt ("%s: 2 voices, %d of them standing in as Tape (most %d; expected %d), and the report says so", name, s.tapeStandIns,
+                    s.maxTapeStandIns, expected));
     }
 }
 

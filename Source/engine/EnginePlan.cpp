@@ -4,8 +4,11 @@
 //
 // Budget: at most B = max (16, floor (192 x 48000 / sr)) load units per sample. Over budget, the top
 // (fractional first) heads of the oldest and quietest voices fade out over 20 ms; the newest note never thins.
-// Steady heads are planned to floor (0.75 B), so the 20 ms fade tails fit under B. In M2 every note plays Tape
-// (est 2 per head); M3's grain engines only change what the heads estimate, not this planner.
+// Steady heads are planned to floor (0.75 B), so the 20 ms fade tails fit under B. The units: Tape 2 per head
+// (est; the measured peak is 1, or 2 during a jump or stutter crossfade), Voice and Cloud the active grains of a
+// head (est min (8, ceil (len / P) + 1) for Voice and min (5, ceil (len / hop) + 1) for Cloud, set by Voice::tick;
+// runGrains measures its most grains in the stretch), Lock its taps (M3 part L). The grain engines only change what
+// the heads estimate and measure, not this planner.
 //
 // The plugin's one change: a voice still in a bounded chase (Voice::chasing) is silent and waiting. The planner
 // passes it over (as if it were not in the list), so its heads get no grant; once it has caught up it starts like

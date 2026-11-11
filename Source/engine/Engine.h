@@ -86,8 +86,9 @@ namespace sl::engine
         std::int64_t filterResets = 0;    // biquad NaN resets (1.8)
         double preLimiterPeak = 0.0;      // the largest |sample| after outGain, before the limiter
 
-        // M2 until M3 (E1's addition, NOTES-M2): voices that are not done whose note asks for Voice, Cloud or Lock
-        // and plays as Tape (Voice::asTape), so the diagnostics page can say so. Always 0 once M3 plays the grains.
+        // E1's addition (NOTES-M2): voices that are not done whose note asks for an engine this build does not play
+        // yet and plays as Tape instead (Voice::asTape), so the diagnostics page can say so. From M3 part G that is
+        // Lock only (Voice and Cloud play runGrains); always 0 once part L plays Lock.
         std::int32_t tapeStandIns = 0;
     };
 

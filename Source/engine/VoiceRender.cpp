@@ -48,11 +48,14 @@ namespace sl::engine
             if (! h.on)
                 continue;
             h.rendered = true;
-            // The engines a head can run. playedEngine () (Voice.h) gives Tape for every note until M3, which adds
-            // here: kc == Kc::voice -> runGrains (h, run, true); Kc::cloud -> runGrains (h, run, false);
-            // Kc::lock -> runLock (h, run).
+            // The engines a head can run. playedEngine () (Voice.h) gives Tape for Lock notes until M3 part L, which
+            // adds the Lock arm here: Kc::lock -> runLock (h, run).
             if (kc == Kc::tape)
                 runTape (h, run);
+            else if (kc == Kc::voice)
+                runGrains (h, run, true);
+            else if (kc == Kc::cloud)
+                runGrains (h, run, false);
             if (h.peak > h.segPeak)
                 h.segPeak = h.peak;
         }

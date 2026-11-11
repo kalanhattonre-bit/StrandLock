@@ -79,8 +79,8 @@ namespace sl::diag
         void audioWaitingForSound() noexcept;
 
         /** What the engine reports with each display frame (about 30 times a second): its voices now, the notes
-            set to Voice or Cloud that play as Tape until M3 (PLUGIN-PLAN 4 M2: "the diagnostics page says so"),
-            and its counters since prepare. */
+            set to Lock that play as Tape until M3 part L (Voice and Cloud play themselves from part G; PLUGIN-PLAN
+            4 M2: "the diagnostics page says so"), and its counters since prepare. */
         struct EngineFigures
         {
             int voices = 0;
