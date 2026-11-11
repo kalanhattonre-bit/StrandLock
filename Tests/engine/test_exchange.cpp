@@ -122,6 +122,9 @@ SL_TEST ("engine", exchangeUnderLoad)
     for (int v = 0; v < 16; ++v)
         variants.push_back (model::compileSnapshot (stressClip (v), 32));
     const auto sineA = sineSample (220.0, 3.0), sineB = sineSample (330.0, 3.0);
+    // The quiet part's version, made once (compiling it for every publish made the publisher fall behind the
+    // audio thread under the sanitizers: see "the deletion reached the audio" below).
+    const auto emptyClip = model::compileSnapshot (model::newClip (1), 8);
     samples.publish (std::make_unique<engine::SampleData> (*sineA));
     snaps.publish (std::make_unique<core::Snapshot> (*variants[0]));
 
@@ -136,6 +139,7 @@ SL_TEST ("engine", exchangeUnderLoad)
     long long blocks = 0, badReads = 0, belowInUse = 0, heldOlder = 0, regressions = 0;
     int voicesAtEnd = -1;
     double quietTail = -1, loudest = 0;
+    std::int64_t emptyAt = -1;   // the first block that played a version with every note deleted
 
     std::thread audio ([&]
     {
@@ -200,13 +204,22 @@ SL_TEST ("engine", exchangeUnderLoad)
                     older = true;
             });
             heldOlder += older ? 1 : 0;
+            if (emptyAt < 0)
+            {
+                const core::Snapshot* now = proc.getAudioSnapshot();
+                if (now != nullptr && now->notes.empty())
+                    emptyAt = k;
+            }
 
             for (int ch = 0; ch < 2; ++ch)
                 for (int i = 0; i < kBlock; ++i)
                 {
                     const double x = std::abs (static_cast<double> (buffer.getSample (ch, i)));
                     loudest = std::max (loudest, x);
-                    if (k >= kQuietFrom + static_cast<std::int64_t> (0.1 * kSr))
+                    // 100 ms after the deletion reached the audio (and the keys were let go, at 9.5 s): the two
+                    // threads' pacing lets the audio run up to 96 ms ahead of the publisher (or 64 ms behind it),
+                    // so a note that starts at 9.5 s can still start before the deletion arrives
+                    if (emptyAt >= 0 && k >= std::max (emptyAt, kQuietFrom) + static_cast<std::int64_t> (0.1 * kSr))
                         tail = std::max (tail, x);
                 }
             audioAt.store (k + kBlock, std::memory_order_release);
@@ -228,7 +241,7 @@ SL_TEST ("engine", exchangeUnderLoad)
             if (at < kQuietFrom)
                 snaps.publish (std::make_unique<core::Snapshot> (*variants[static_cast<std::size_t> (i % 16)]));
             else
-                snaps.publish (std::make_unique<core::Snapshot> (*model::compileSnapshot (model::newClip (1), 8)));   // every note deleted
+                snaps.publish (std::make_unique<core::Snapshot> (*emptyClip));   // every note deleted
             if (at == static_cast<std::int64_t> (3 * kSr) || at == static_cast<std::int64_t> (7 * kSr))
             {
                 samples.publish (std::make_unique<engine::SampleData> (at < 5 * kSr ? *sineB : *sineA));
@@ -271,9 +284,14 @@ SL_TEST ("engine", exchangeUnderLoad)
            fmt ("a no-op is not a pass: in %lld blocks a releasing voice held an older snapshot than the current one (the probe's rule would have freed it)",
                 heldOlder));
     note (fmt ("largest snapshot pool seen at a collect: %zu versions", largestPool));
+    // the audio waits while the publisher is more than 96 publishes behind, the publisher while it is more than 64 ahead
+    check (emptyAt >= kQuietFrom - (64 * 48 + kBlock) && emptyAt <= kQuietFrom + 96 * 48 + kBlock,
+           fmt ("the deletion reached the audio %+.1f ms from the sample it was published for (-67 .. +99 ms: the threads' pacing and a block)",
+                static_cast<double> (emptyAt - kQuietFrom) / kSr * 1000));
     check (voicesAtEnd == 0 && juce::exactlyEqual (quietTail, 0.0),
-           fmt ("every note deleted while 1,000 snapshots a second still come in: %d voices after 0.5 s, and silence after 100 ms (peak %.3g)", voicesAtEnd,
-                quietTail));
+           fmt ("every note deleted while 1,000 snapshots a second still come in: %d voices after 0.5 s, and silence 100 ms after the deletion "
+                "reached the audio (peak %.3g)",
+                voicesAtEnd, quietTail));
 
     // 100 ms after the last publish, with no voice releasing: one version of each kind.
     {

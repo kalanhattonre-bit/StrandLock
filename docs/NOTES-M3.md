@@ -18,6 +18,8 @@ M3 part G of 3 (plan 7.5 "G"): the grain engines Voice and Cloud. Branch `m3-eng
   plays Voice and Cloud too.
 - Run 43094374797 on 2b7ba95: every new row passed but Scatter (6 checks, on both platforms): the test played the
   87 bpm row at 120 bpm (its helper's fixed tempo), so the jumps missed the 87 bpm grid. Fixed in the test.
+- Run 43099804752 on 3776cdf: every step green but one check of M2's `engine/exchangeUnderLoad` under the sanitizers
+  (Tape only, so not the grains): a timing race in the test, fixed (see "Decisions").
 - In progress: CI on the last commit, then the fast-forward of main.
 - Next: part L (see "For L" below).
 
@@ -89,6 +91,14 @@ M3 part G of 3 (plan 7.5 "G"): the grain engines Voice and Cloud. Branch `m3-eng
   as Tape fails the comparison. Freeze: Forward spreads 0.3. Refresh: Smooth moves 0.03 inside a period. The chase:
   heads left at the note start would be 0.086 away. Glide: without the glideTo link, Auto Slide Off plays 2 voices.
   The stand-in tests show grains on the display for Voice and Cloud and none for Tape and the Lock stand-in.
+- **M2's exchange stress had a race, now fixed.** `engine/exchangeUnderLoad` deletes every note at 9.5 s of audio
+  and wanted silence from 9.6 s. But the two threads pace each other loosely: the audio may run up to 96 publishes
+  (96 ms) ahead of the publisher, and the publisher compiled the empty clip afresh for every publish, which is slow
+  under the sanitizers. So the audio could reach 9.5 s, where the clip's "keep3" note starts (beat 19), before the
+  deletion arrived; the note then sounded until its 60 ms release ended, after 9.6 s (run 43099804752: peak 0.07 in
+  the tail; voices 0 at the end). It plays Tape only, so the grains did not cause it; it had passed by luck. The
+  test now compiles the empty clip once, notes the first block that plays it, checks that this lies inside the
+  pacing window (-67 .. +99 ms of 9.5 s), and wants silence from 100 ms after the later of that block and 9.5 s.
 - **The engine allocation test's sweep** (test_alloc_engine) now moves through Tape, Voice and Cloud, with Spray
   and Each grain backwards on some steps, so runGrains is counted in the Debug-CRT job too. The processor-level
   allocation tests already played Voice (the default engine) and moved the Engine parameter.
