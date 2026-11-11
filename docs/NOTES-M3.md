@@ -177,6 +177,114 @@ M3 part L of 3 (plan 7.5 "L"): the Lock engine. Branch `m3-engine`, on top of G 
 - Done: `engine/VoiceLock.cpp` (lockGrab, lockRho, runLock), the Lock arm of Voice::renderRun, `playedEngine`
   playing every engine as itself, the raw-snapshot reader in the renders harness, all 37 grains cases expected to
   run, the stand-in lines gone from the Diagnostics page and the Copy report (with their tests), the Lock rows
-  (tuning, harmonic lines, chase, allocations).
-- In progress: the first CI run on these commits.
-- Next: CI green, then this section's results and the hand-off for B, then the fast-forward of main.
+  (tuning, harmonic lines, chase, allocations). Commits 8b5ff56 (the engine) and b401898 (the rows).
+- Done: CI run 43111963519 on b401898, green on every job and step at the first try (figures below).
+- In progress: CI on this commit (notes only), then the fast-forward of main.
+- Next: part B (see "For B" below).
+
+### What was built
+
+- **`Voice::runLock (h, run)`** (`engine/VoiceLock.cpp`) is sl-engine.js runLock line by line, with lockGrab and
+  lockRho. A head captures the sample at its position (capA) and plays N taps one period of the played note apart
+  (PR = P x the rate ratio), all at the same phase th of their period, Hann-weighted across the N periods and
+  scaled by sqrt (2 / N). The sum repeats every period, so noise and chords play in tune. N is the Grain setting in
+  periods (h.nT, at most 12, set by Voice::tick) and at most half the head's grant. A re-grab (capB) crossfades in
+  over one period with equal-power fades and the correlation correction 1 / sqrt (1 + 2 rho gi go); lockRho is the
+  two captures' correlation over one period (16 phases, both channels). At the end capB becomes capA.
+- **Refresh hold.** Refresh Smooth re-grabs by itself every nA periods (h.periods). A Refresh in ms or synced
+  holds the capture until Voice::tick sets h.regrab at a refresh that is not skipped (or at a Scatter jump), as
+  E1 ported it. Spray scatters each grab with the grain engines' hash (gIdx counts the grabs).
+- **The reads.** The taps read through `PlainStretch::read`, falling back to `readReg`, as runTape and runGrains
+  do; lockRho calls readReg and hannTab, as the JS does; the tap weights read `hannTable ()` directly, as the JS
+  reads HANN. The source is the voice's own (8.2 #23). No allocation: the captures are the Head's fields.
+- **The switch.** `playedEngine (wanted)` returns `wanted`: since L no note plays as Tape except a note whose engine
+  is Tape. renderRun dispatches Kc::lock to runLock (`else runLock (h, run);`, as the JS `else`). The Lock switch on
+  Cloud (`lock = engine == cloud && (the note's or inst.lock)`), the Lock branch of Voice::tick (P, PR, dth, nT,
+  est) and the display's captures were already there (E1, E2).
+- **Lock units in the planner.** Nothing to add: Voice::tick sets est = 2 max (nT, nA, nB while crossfading),
+  runLock measures N, or N + N' during a crossfade (h.peak, then segPeak), and `measure ()` sums them. The five
+  budget-16x8-lock12-* fixtures (Lock N = 12, 16 voices x 8 heads, with thinning and 10 to 15 cuts) match the
+  prototype's stats exactly, so the planner already does what they ask.
+- **The raw-snapshot reader** (`render::rawSnapshotFromJson`, Tests/engine/EngineRender.cpp) turns the engine-only
+  snapshot of tools/fixtures/engine.js (rawSnapOut) into a core::Snapshot: the notes in the file's order, every
+  setting explicit, lanes from their Tables, glide and chain by id (the same in all three Auto Slide modes),
+  parity clip settings. renderFixtureCase sets it as the JS does (`e.setSnapshot (spec.snapshot)`).
+- **The stand-in lines are gone.** The Diagnostics page loses its Engines row; its Voices row reads "N now, most
+  M"; the version row says "test build: Tape, Voice, Cloud and Lock engines". The Copy report loses its "Engines:"
+  line and the "playing as Tape instead of Lock" part of its "Engine:" line. DiagModel no longer carries the
+  stand-in counts, and the processor no longer copies them. The Sound tab never had such a line (G checked).
+
+### Decisions and deviations
+
+- **`Stats::tapeStandIns` and `Voice::asTape` stay, always 0.** They are engine-side and cost nothing, and the engine
+  tests use them to check that no note stands in. The diagnostics side (DiagModel's figures and snapshot fields)
+  went with the lines, since nothing showed them any more. B or the fix pass may remove the engine fields too.
+- **The stand-in tests now check that every engine plays itself.** `engine/tapeStandInsCounted` became
+  `engine/noTapeStandIns` (playedEngine is the identity for all four, tapeStandIns 0, the display shows grains for
+  Voice and Cloud, one capture per head for Lock, none for Tape). `plugin/onlyLockStandsInAsTape` became
+  `plugin/everyEnginePlaysItself` (through processBlock: 2 voices each, tapeStandIns 0, the newest display frame
+  shows the engine and grains only for the grain engines, and the report's Engine line has no stand-in text). The
+  Lock part of `engine/voiceInitInPlace` now checks that a Lock voice reused in place renders bit for bit what a
+  new one renders (with Scatter and synced Refresh, so the re-grabs run), and not the Tape render.
+- **The JS local `kc` in runLock is `kRho` in C++.** A local named kc would hide the member Voice::kc (GCC -Wshadow
+  on StrandCore). Only the name differs.
+- **The raw-snapshot reader refuses a glide longer than 0.95 of its note.** The JS reads X.glide.len as it is;
+  core::resolve clamps the glide length to 0.95 l. The two agree for every shorter glide (the fixture's is 0.5 beat
+  on a 2-beat note), and a case that would differ fails loudly instead of rendering something else.
+- **No case waits for B.** `kWaitForLock` became `kWaitForB`, an empty `std::array`; `kGrainCasesNow` is 37. A case
+  B finds it must hold back goes there with its reason, and the count follows.
+- **Two negative controls for the grains fixtures:** voice-c3 played as Tape (G's) and now lock-from-noise played
+  as plain Cloud (the Lock switch off): blockRms[0] 0.0515 against the prototype's 0.0557, far outside 1e-4.
+- **Lock tuning runs 18 renders, not 12.** The JS gates Refresh Smooth and 120 ms; the M3 table also names 400 ms,
+  so it is gated too (within 0.15 cents in the prototype and here). The measure is the JS periodF0 (Lock repeats
+  exactly every period), ported to `GrainRig` with its Hermite read (samples outside the render read 0). The
+  sources are the JS test's: noise seed 5, and the chord C3 E3 G3. Negative control: Pitch +0.1 st reads +9.82 cents.
+- **"Harmonic lines > 10 dB over the floor"** is the JS gate: the worst Lock harmonicity (mean power on the lines
+  k f, k = 1 .. 8, over the mean power in the gaps) is more than plain Cloud's on the same noise plus 10 dB. Plain
+  Cloud reads -0.1 dB, so this is also more than 10 dB over the gaps.
+- **The Lock chase** is G's chase test with a Lock note (Cloud, lock on the note and the instrument). The chased
+  Lock note shows one capture (its one head) on the display, so it plays Lock, not a stand-in.
+- **The engine allocation sweep** now cycles Tape, Voice, Cloud and Lock (Spray on Cloud and Lock, N = 12 on one
+  step), and checks that display frames showed Lock voices playing (72 of them). The processor-level allocation
+  tests already move the Engine and Lock parameters at random, so Lock can run there too (not counted there).
+
+### For B
+
+- **State of the branch:** every engine plays itself; nothing stands in as Tape. All 37 grains cases of
+  renders.json run and match (`kWaitForB` is empty). The planner is the JS planner (NOTES-M2 E2); with Lock playing,
+  the five budget-16x8-lock12-* fixtures already match the prototype's stats exactly (thinned heads, cuts, max
+  load, budget), on both platforms.
+- **B's rows still to write** (plan 4, M3 table, and 7.5 "B"): budget (max load <= B at 44.1 / 48 / 96 kHz for Voice,
+  Cloud and Lock N = 12; the 6-note Voice arpeggio keeping the newest note's 8 heads; cuts = 0 where the prototype
+  measured none; the newest note's sounding heads 8 / 8 / 4), stereo, stability with Lock, determinism with Lock and
+  a Voice-to-Cloud chain, CPU at 96 kHz (Lock 16 x 8 N = 12 among them), fractional heads, the aliasing figure,
+  and the CUBASE-CHECKLIST M3 section.
+- **Helpers:** `GrainRig` now has `periodF0` and `harmonicity` besides G's harmonicF0, spectrum, centroid, corr and
+  stats. `render::rawSnapshotFromJson` reads any raw snapshot in the fixture encoding.
+- **Scratch scripts** that compute the prototype's Lock figures: `m3l/figs-lock.js` in the task scratchpad
+  (arguments `tuning`, `harm`, `chase`; it loads `m3g/lib.js`).
+
+### Results (CI)
+
+- Run 43111963519 on b401898, green on every job and step: Windows Release 1312 checks in 207 tests (engine 371 in
+  69, plugin 58 in 9, alloc 35 in 6, cpu 4 in 2); Linux Release 1311 in 207 (engine 371 in 69); the sanitizers'
+  contract, model and engine groups 659 in 119 (engine 370 in 69), state 142 in 20; Debug-CRT allocation run 36 in
+  6, 0 JUCE assertions; Debug snapshots 0 assertions; pluginval strictness 10 SUCCESS; the fixture check passed (24
+  files, 4.68 MB).
+- renders.json, needs grains: 37 of 37 within tolerance on both platforms, 26 bit for bit on Windows and 11 on
+  Linux (needs tape: 36 of 36, 22 and 13, as before). The Lock cases on Windows: lock-from-noise, lock-from-chord,
+  budget-16x8-lock12-48k and -96k, strand-demo-recipe-8 and raw-snapshot bit for bit; the three budget clip cases
+  (stats only) not bit for bit but with the stats exact. On Linux lock-from-noise and lock-from-chord are bit for
+  bit. Every case that is not bit for bit plays the Saw or Saw Open starter (NOTES-M2 E1).
+- Lock tuning, 18 of 18 within +-3 cents, each the prototype's figure to 4 decimals: from noise C2 +0.30 / +0.16 /
+  +0.12, C3 -0.08 / -0.04 / -0.04, C4 +1.04 / +0.55 / +0.51 cents (Smooth / 120 ms / 400 ms); from the chord C2
+  -0.66 / +1.37 / -0.15, C3 +0.78 / +1.20 / -0.04, C4 -0.72 / +0.47 / +0.03. The worst 1.37 cents. Pitch +0.1 st
+  reads +9.82 cents.
+- Harmonic lines from noise at C3: Lock 16.6 dB (Smooth), 28.9 dB (120 ms), 34.7 dB (400 ms); plain Cloud -0.1 dB.
+  The prototype's: 16.56, 28.87, 34.70 and -0.13.
+- Chase at beat 1.37: the Lock playhead equals the straight render's (difference 0), the fade ratio 0.1452 (the
+  prototype 0.1452), one capture on the display; the audio reads 0.09210 of the file at 2400 samples (the prototype
+  0.09210; the playhead 0.09187). Voice and Cloud as in G.
+- Allocations: the engine sweep through Tape, Voice, Cloud and Lock makes 0 allocations and 0 frees, with 72
+  display frames showing Lock voices and 19 voices during the bounded chase, in Release and in the Debug-CRT run.
+  The processor-level runs (Strand Demo, with the Engine and Lock parameters moving) also 0 and 0.
