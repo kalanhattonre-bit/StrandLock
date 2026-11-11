@@ -1520,6 +1520,38 @@ ProbeSynth, so main always builds and plays. I swaps ProbeSynth for the Engine. 
 5. **ProbeSynth goes.** I deletes `Source/probe/` and replaces the probe tuning test with Tape tuning; every other M0
    test that still applies keeps running.
 
+### 7.5 M3: who builds what, and the architect's decisions (2026-11-10)
+
+**Order.** M3 is engine work in files that touch each other (Voice::renderRun's dispatch, `playedEngine`, Head's grain
+slots and Lock captures, the planner), so it runs as one chain on branch `m3-engine`: G (runGrains: Voice and Cloud)
+-> L (runLock) -> B (the complete planner and the cross-engine rows). Each part fast-forwards main when CI is green,
+so main always builds and plays and a cut-off loses at most one part. Then review and a fix pass. Each part writes
+its section in `docs/NOTES-M3.md` (G, L, B, Fix) with a Progress list.
+
+**Ownership.** All three parts own `Source/engine/**`, `Tests/engine/**`, `tools/fixtures/engine.js` and
+`Tests/fixtures/engine/**` (append-only). Outside the engine they touch only what the switch needs: the Diagnostics
+and Copy-report lines and the Sound tab note that say Voice and Cloud play as Tape (G removes the Voice and Cloud
+part, L the Lock part), and `docs/CUBASE-CHECKLIST.md` (B adds an M3 section).
+- **G:** `VoiceGrains.cpp` (Voice: root-grid PSOLA with the formant shift; Cloud: free grains in ms), Spray, Each grain
+  backwards, Path kind for Voice and Cloud, `playedEngine` playing Voice and Cloud; rows: the `grains` fixture cases
+  that need no Lock, Voice tuning, formant, glide, motions, Scatter, Refresh and Skip, Spray, the grain chase.
+- **L:** `VoiceLock.cpp` (lockGrab, lockRho, runLock: Hann-weighted taps, correlation-corrected re-grab), the Lock
+  switch on Cloud, Refresh hold; rows: the Lock fixture cases, Lock tuning, the Lock chase.
+- **B:** `EnginePlan.cpp` complete (thinning, waiting heads, cuts in every engine), per-note engines and the Tape
+  switch across chains, fractional heads; rows: budget (every `budget-*` fixture stat exactly), stereo, stability,
+  determinism, CPU at 96 kHz, the aliasing figure, and every `grains` fixture case still green.
+
+**Decisions.**
+1. **Light theme contrast on what is drawn (M2 review R2-4).** The light theme's Tone (#d78000) and Sample (#b68f39)
+   lane colours and the playhead (#ed7100) are darkened, same hue, to at least 3:1 against the darker roll row
+   #eef0f5 and the strip #e8ebf6, not against #ffffff. The theme test's reference and its "no darker than needed"
+   bound move with them. Done in the M3 fix pass.
+2. **The chase's first share stays 4096 ticks (M2 review R2-9)** until Kalan's buffer size is known from the
+   checklist; at 256 samples the one-off block fits.
+3. **Question 9.6 (Tape far up).** B prints the Tape +36 st aliasing figure; the architect takes it to Kalan.
+4. **CPU.** The 96 kHz targets of the M3 table are printed and gated at > 1x real time, as written. M2's Tape figure
+   (7.6x against 8x) is reported, not chased.
+
 ---
 
 ## 8. Deviations
