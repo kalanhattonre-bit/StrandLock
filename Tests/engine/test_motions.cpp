@@ -39,12 +39,12 @@ namespace
         return e == core::Engine::tape ? "Tape" : e == core::Engine::voice ? "Voice" : "Cloud";
     }
 
-    /** A clip note on the engine eng from beat 0 at 120 bpm, loop off (the JS tests' mkSnap ([N]) and setTransport). */
-    grains::Play clipPlay (std::unique_ptr<engine::SampleData> sample, const core::Inst& inst, const rig::RawNote& n)
+    /** A clip note played from beat 0 at bpm, loop off (the JS tests' mkSnap ([N]) and setTransport). */
+    grains::Play clipPlay (std::unique_ptr<engine::SampleData> sample, const core::Inst& inst, const rig::RawNote& n, double bpm = 120)
     {
         grains::Play play (kSr, inst, std::move (sample));
         play.snapshot (rig::rawSnapshot ({ n }, 4, false));
-        play.play (120, 0, false);
+        play.play (bpm, 0, false);
         return play;
     }
 }
@@ -233,7 +233,7 @@ SL_TEST ("engine", scatterOnTheGrid)
             rig::RawNote N = grains::rawNote ("sc", 60, 0, 8, eng);
             N.motion = core::Motion::scatter;
             N.jump = jb;
-            grains::Play play = clipPlay (grains::ramp (6, kSr), inst, N);
+            grains::Play play = clipPlay (grains::ramp (6, kSr), inst, N, bpm);
             std::vector<double> pos;
             play.render (static_cast<std::int64_t> (std::round (beatSamples (7.9))), 32, [&] (std::int64_t) {
                 const engine::DisplayFrame& f = play.display();

@@ -56,7 +56,7 @@ SL_TEST ("engine", voiceFormantShift)
 
     // A no-op is not a pass: the measurement is steady, so the rise and fall are the formant's. The centre rendered
     // again with an offset of 0.002 (0.05 st) moves the centroid by well under 2 %.
-    const Measured near = voiceC3 (src, 0.002);
-    const double drift = near.centroid / centre.centroid - 1;
+    const Measured nudged = voiceC3 (src, 0.002);
+    const double drift = nudged.centroid / centre.centroid - 1;
     check (std::abs (drift) < 0.02, fmt ("negative control: a 0.05 st formant offset moves the centroid %+.2f %% (under 2 %%)", drift * 100));
 }
