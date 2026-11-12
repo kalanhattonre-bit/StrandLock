@@ -175,7 +175,12 @@ SL_TEST ("engine", deterministicAcrossBlocksAndStarts)
 //    plus a chase (Play at beat 0.3), a live key, and a transport jump. Blocks 1, 37, 700, 4096 and random 1..700
 //    equal blocks of 128 bit for bit, and so do starts after 7 and 1000 stopped samples.
 //  - An 8-head Voice chord high up (C4 .. G5), under budget pressure (heads thinned), started after 0, 7 and 1000
-//    stopped samples: bit-identical (the control grid counts from the transport start, 8.2 #21).
+//    stopped samples: bit-identical (the control grid counts from the transport start, 8.2 #21). Since the M3 fix
+//    pass (reviews R3-LB-3 and R3-1) its notes start 0.13 beat apart and end at different times, so their voices do
+//    not tick in step with the planner's grid: the prototype, whose grid counts from the engine's creation, renders
+//    it 0.0227 differently after 7 stopped samples, so a lost grid origin turns the row red. (The first version
+//    started every note at Play, where the grid changes nothing.) It is also rendered in blocks of 1, 37, 700, 4096
+//    and random 1..700: bit-identical.
 
 namespace
 {
@@ -345,20 +350,21 @@ SL_TEST ("engine", deterministicGrainEngines)
 
 SL_TEST ("engine", deterministicUnderBudgetPressure)
 {
-    section ("determinism under budget pressure: an 8-head Voice chord C4 .. G5 (heads thinned) started after 0, 7 and 1000 stopped "
-             "samples: bit-identical");
+    section ("determinism under budget pressure: an 8-head Voice chord C4 .. G5 (heads thinned), its notes 0.13 beat apart and ending at "
+             "different times, started after 0, 7 and 1000 stopped samples and rendered in 1, 37, 700, 4096 and random blocks: bit-identical");
 
     auto sample = engine::makeSampleData (signals::tone (signals::midiHz (60), 4, 48000), {}, 48000, "tone");
     std::vector<rig::RawNote> chord;
     const double keys[] = { 72, 76, 79, 84, 88, 91 };
     for (int i = 0; i < 6; ++i)
-        chord.push_back (grains::rawNote (("ch" + std::to_string (i)).c_str(), keys[i], 0, 8, core::Engine::voice));
+        chord.push_back (grains::rawNote (("ch" + std::to_string (i)).c_str(), keys[i], 0.13 * i, 0.6 + 0.37 * i, core::Engine::voice));
     auto snap = rig::rawSnapshot (chord, 4, false);
     core::Inst inst = grains::instWith (core::Engine::voice);
     inst.heads = 8;
     inst.spread = 0.5;
 
-    auto go = [&] (std::int64_t stopped, double beat, std::vector<float>& L, std::vector<float>& R, int& thinned) {
+    auto go = [&] (std::int64_t stopped, double beat, std::vector<float>& L, std::vector<float>& R, int& thinned,
+                   const std::function<int (std::int64_t)>& blocks) {
         auto e = std::make_unique<engine::Engine>();
         e->prepare (48000);
         e->setRampMs (0);
@@ -375,7 +381,7 @@ SL_TEST ("engine", deterministicUnderBudgetPressure)
         });
         thinned = 0;
         std::vector<float> l, r;
-        script.run (*e, stopped + 96000, render::fixedBlocks (128), l, r,
+        script.run (*e, stopped + 96000, blocks, l, r,
                     [&thinned] (engine::Engine& en, std::int64_t) { thinned = std::max (thinned, en.stats().thinnedHeads); });
         L.assign (l.begin() + stopped, l.end());
         R.assign (r.begin() + stopped, r.end());
@@ -383,19 +389,49 @@ SL_TEST ("engine", deterministicUnderBudgetPressure)
 
     std::vector<float> L0, R0;
     int thinned0 = 0;
-    go (0, 0, L0, R0, thinned0);
-    check (thinned0 > 0 && rmsOf (L0) > 0.01, fmt ("the chord is under budget pressure: %d heads held back (> 0), rms %.4f", thinned0, rmsOf (L0)));
+    go (0, 0, L0, R0, thinned0, render::fixedBlocks (128));
+    check (thinned0 > 0 && rmsOf (L0) > 0.01,
+           fmt ("the chord is under budget pressure: %d heads held back at the most (> 0; the prototype 30), rms %.4f (the prototype 0.2445)", thinned0,
+                rmsOf (L0)));
     int aligned = 0;
     for (const std::int64_t stopped : { 7, 1000 })
     {
         std::vector<float> L, R;
         int th = 0;
-        go (stopped, 0, L, R, th);
+        go (stopped, 0, L, R, th, render::fixedBlocks (128));
         aligned += L == L0 && R == R0 ? 1 : 0;
     }
-    check (aligned == 2, fmt ("started after 7 and 1000 stopped samples: bit-identical to the start after 0 (%d of 2)", aligned));
+    check (aligned == 2, fmt ("started after 7 and 1000 stopped samples: bit-identical to the start after 0 (%d of 2; the prototype, whose grid "
+                              "counts from the engine's creation, differs by up to 0.0227 after 7 and after 1000)",
+                              aligned));
+
+    int same = 0;
+    std::string differ;
+    for (const int size : { 1, 37, 700, 4096 })
+    {
+        std::vector<float> L, R;
+        int th = 0;
+        go (0, 0, L, R, th, render::fixedBlocks (size));
+        if (L == L0 && R == R0)
+            ++same;
+        else
+            differ += " " + std::to_string (size);
+    }
+    {
+        auto rnd = std::make_shared<signals::Lcg> (99);
+        std::vector<float> L, R;
+        int th = 0;
+        go (0, 0, L, R, th, [rnd] (std::int64_t) { return 1 + static_cast<int> (std::floor ((*rnd)() * 700)); });
+        if (L == L0 && R == R0)
+            ++same;
+        else
+            differ += " random";
+    }
+    check (same == 5, fmt ("blocks of 1, 37, 700, 4096 and random 1..700 equal blocks of 128 bit for bit (%d of 5%s%s)", same,
+                           differ.empty() ? "" : "; differ:", differ.c_str()));
+
     std::vector<float> Lc, Rc;
     int thc = 0;
-    go (0, 0.01, Lc, Rc, thc);
+    go (0, 0.01, Lc, Rc, thc, render::fixedBlocks (128));
     check (Lc != L0, "negative control: Play at beat 0.01 renders differently");
 }
