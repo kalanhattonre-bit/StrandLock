@@ -11,9 +11,14 @@
 // by Voice::tick; runLock measures N, or N + N' during a re-grab crossfade). The grain engines only change what the
 // heads estimate and measure, not this planner.
 //
-// The plugin's one change: a voice still in a bounded chase (Voice::chasing) is silent and waiting. The planner
-// passes it over (as if it were not in the list), so its heads get no grant; once it has caught up it starts like
-// a new voice (its first tick grants its own heads) and the planner runs.
+// The plugin's one change: a voice still in a bounded chase (Voice::chasing, 8.2 #22) is silent and counts as
+// waiting (plan 1.8). The planner counts it as the JS counts every voice that is not done: it can be the newest
+// note, its heads count in the steady load, and it is a thinning candidate (it has not sounded, so a thinned head of
+// it just waits). But it never gets a grant, so nothing of it sounds or can be cut before it has caught up. Once it
+// has, it starts like a new voice (its first tick grants its own allowed heads) and the planner runs. So a chord
+// whose chase is spread over a few blocks leaves room for its newest note from Play on, as the prototype's
+// chase-all-at-once does, and its late voices never push the load past B (M3 review R3-LB-2: until the fix pass the
+// planner passed chasing voices over, and a Lock N = 12 chord made 2 to 7 cuts after Play).
 //
 // M3 part B checked it complete against plan 1.8 with every engine playing (Tests/engine/test_budget.cpp): the
 // measured load stays within B at 44.1, 48 and 96 kHz in Voice, Cloud and Lock; the newest note keeps its heads;
@@ -30,7 +35,11 @@ namespace sl::engine
 {
     namespace
     {
-        inline bool planned (const Voice& v) noexcept { return ! v.done && ! v.chasing; }
+        /** Every voice the JS planner counts: not done (chasing ones too). */
+        inline bool counted (const Voice& v) noexcept { return ! v.done; }
+
+        /** A voice the planner may grant (or cut): not done and not chasing. */
+        inline bool grantable (const Voice& v) noexcept { return ! v.done && ! v.chasing; }
 
         inline void silenceHead (Head& h) noexcept
         {
@@ -55,14 +64,14 @@ namespace sl::engine
         for (int i = 0; i < numVoices; ++i)
         {
             Voice& v = voiceAt (order[static_cast<std::size_t> (i)]);
-            if (planned (v) && ! v.released && (newest == nullptr || v.serial > newest->serial))
+            if (counted (v) && ! v.released && (newest == nullptr || v.serial > newest->serial))
                 newest = &v;
         }
         if (newest == nullptr)
             for (int i = 0; i < numVoices; ++i)
             {
                 Voice& v = voiceAt (order[static_cast<std::size_t> (i)]);
-                if (planned (v) && (newest == nullptr || v.serial > newest->serial))
+                if (counted (v) && (newest == nullptr || v.serial > newest->serial))
                     newest = &v;
             }
 
@@ -70,7 +79,7 @@ namespace sl::engine
         for (int i = 0; i < numVoices; ++i)
         {
             const Voice& v = voiceAt (order[static_cast<std::size_t> (i)]);
-            if (! planned (v))
+            if (! counted (v))
                 continue;
             for (const Head& h : v.heads)
             {
@@ -83,13 +92,14 @@ namespace sl::engine
             }
         }
 
-        auto listPlanned = [this] (bool skipNewest, const Voice* nw) {
+        // the voices into scratch, in voice order: every counted voice but nw, or (grantableOnly) the grantable ones
+        auto listVoices = [this] (const Voice* nw, bool grantableOnly) {
             int n = 0;
             for (int i = 0; i < numVoices; ++i)
             {
                 const std::uint8_t slot = order[static_cast<std::size_t> (i)];
                 const Voice& v = voiceAt (slot);
-                if (planned (v) && ! (skipNewest && &v == nw))
+                if ((grantableOnly ? grantable (v) : counted (v)) && &v != nw)
                     scratch[static_cast<std::size_t> (n++)] = slot;
             }
             return n;
@@ -97,7 +107,7 @@ namespace sl::engine
 
         if (thinned > 0)
         {   // room again: bring thinned heads back, newest voices first (with hysteresis)
-            const int n = listPlanned (false, nullptr);
+            const int n = listVoices (nullptr, false);
             rt::stableInsertionSortCmp (scratch.begin(), scratch.begin() + n, [this] (std::uint8_t a, std::uint8_t b) {
                 return bySerial (voiceAt (b).serial, voiceAt (a).serial);   // (a, b) => b.serial - a.serial
             });
@@ -115,7 +125,7 @@ namespace sl::engine
         if (steady > soft)
         {
             // released voices first, then silent ones (Volume lane or envelope at -60 dB or less), then the oldest
-            const int n = listPlanned (true, newest);
+            const int n = listVoices (newest, false);
             rt::stableInsertionSortCmp (scratch.begin(), scratch.begin() + n, [this] (std::uint8_t ia, std::uint8_t ib) {
                 const Voice& a = voiceAt (ia);
                 const Voice& b = voiceAt (ib);
@@ -128,7 +138,7 @@ namespace sl::engine
                 return bySerial (a.serial, b.serial);
             });
             // a head that has not sounded yet (its voice starts at this very sample, e.g. the other notes of a chord)
-            // goes silent at once: it has no tail to fade
+            // goes silent at once: it has no tail to fade (a chasing voice's heads have never sounded: h.on is false)
             auto thin = [&steady, &fading] (Head& h, const Voice& v) {
                 h.allowed = false;
                 steady -= h.est;
@@ -183,8 +193,8 @@ namespace sl::engine
         {
             const std::uint8_t slot = order[static_cast<std::size_t> (i)];
             Voice& v = voiceAt (slot);
-            if (! planned (v))
-                continue;
+            if (! grantable (v))
+                continue;   // a chasing voice waits: no grant until it has caught up
             for (Head& h : v.heads)
             {
                 if (! (h.want && h.allowed))
@@ -228,7 +238,7 @@ namespace sl::engine
 
         if (load > B)
         {   // last resort (only reachable when new voices' first heads alone do not fit): cut the oldest tails
-            const int n = listPlanned (false, nullptr);
+            const int n = listVoices (nullptr, true);   // nothing of a chasing voice is on
             rt::stableInsertionSortCmp (scratch.begin(), scratch.begin() + n, [this] (std::uint8_t ia, std::uint8_t ib) {
                 const Voice& a = voiceAt (ia);
                 const Voice& b = voiceAt (ib);
@@ -263,7 +273,7 @@ namespace sl::engine
         for (int i = 0; i < numVoices; ++i)
         {
             const Voice& v = voiceAt (order[static_cast<std::size_t> (i)]);
-            if (planned (v))
+            if (counted (v))
                 for (const Head& h : v.heads)
                     if (h.want && ! h.allowed)
                         ++th;
