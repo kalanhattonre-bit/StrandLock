@@ -123,9 +123,10 @@ A few things to know first:
 - **StrandLock now plays its own clip.** A new StrandLock opens on the demo clip (Strand Demo) and plays it in
   time with Cubase whenever Cubase plays. You cannot see or change the notes yet: the piano roll comes in a later
   build. Your keyboard plays the sound too, at any time.
-- **Only the Tape engine plays in this build.** On the Sample tab the Engine buttons are Tape, Voice and Cloud.
-  Notes set to Voice or Cloud play as Tape for now, and the Diagnostics tab says how many do (the **Voices** line
-  in the THIS COMPUTER box). Tape plays the sound like a tape machine: higher notes play it faster.
+- **Only the Tape engine played in the M2 build.** (This was true of the M2 build only. From the M3 build on
+  every engine plays itself; see the M3 part below.) On the Sample tab the Engine buttons are Tape, Voice and
+  Cloud. In the M2 build, notes set to Voice or Cloud played as Tape, and the Diagnostics tab counted them. Tape
+  plays the sound like a tape machine: higher notes play it faster.
 - **The waveform strip** at the bottom has, on the left, the sound menu and **Browse...**; above the wave, the
   file line with **At the end**, **-**, **+** and **Show all**. The orange box on the wave is the **Region**, the
   part of the sound that plays. Moving lines on the wave show where each playhead is.
@@ -208,10 +209,18 @@ A few things to know first:
 - **Lock works with Cloud only.** With the Engine on Tape or Voice the Lock switch does nothing.
 - **The budget.** StrandLock keeps its work under a fixed limit, so Cubase never runs out of time because of it.
   With many notes and many heads, the older notes' top heads fade out over 20 ms, and the newest note keeps its
-  heads. So older notes may get thinner in a big chord. That is on purpose. A drop-out or a crackle is not. On the
-  Diagnostics tab, the **Engine health** line (THIS COMPUTER box) counts **cuts**: fade tails it had to stop at
-  once because even the fades did not fit. They should stay at 0, except with **Lock grain** at 12 or more, where
-  a fast big chord can make a few.
+  heads. So older notes may get thinner in a big chord. That is on purpose. A drop-out or a crackle is not.
+- **Cuts.** On the Diagnostics tab, the **Engine health** line (THIS COMPUTER box) counts **cuts**: fade tails
+  StrandLock had to stop at once because even the fades did not fit beside a new note. This build makes cuts on
+  purpose in these cases, so a cut count above 0 is not a fault by itself:
+  - when several notes start within a few milliseconds of each other while other notes sound (both hands
+    landing a chord together, or a fast strum). This happens at any **Lock grain**, and with Voice and Cloud at 8
+    heads too;
+  - with **Lock grain** at 11 or more at 48 kHz (12 at 44.1 kHz), or 6 or more at 96 kHz: then nearly every new
+    note cuts a tail while other notes sound, however far apart the notes are.
+
+  What I need to know is whether you can hear them. A cut may sound like a small click right when a note starts.
+  Steps 8 and 9 ask for the cut count and for what you heard.
 
 1. **Install the new build** the same way as before (Getting the test build, at the top). On the Diagnostics tab,
    the **StrandLock** line in the THIS COMPUTER box should end with "(test build: Tape, Voice, Cloud and Lock
@@ -250,14 +259,17 @@ A few things to know first:
 8. **A big chord at your normal sample rate.** Set the Engine to Cloud, turn **Lock** on and set **Heads** to 8.
    Press Play so the demo clip plays, and hold a big chord (8 notes or more, both hands). Then play fast chords one
    after the other. Does anything drop out, crackle or stop? How high does Cubase's Audio Performance meter go
-   (Studio > Audio Performance)? StrandLock has no CPU meter of its own, so this meter is the one to watch. Now turn
-   **Lock grain** to 12 waves and do the same. Then look at **Engine health** on the Diagnostics tab: how many
-   cuts does it show?
+   (Studio > Audio Performance)? StrandLock has no CPU meter of its own, so this meter is the one to watch. Look at
+   **Engine health** on the Diagnostics tab and write down the cut count. Cuts are expected when the notes of a
+   chord land within a few milliseconds of each other (see "Cuts" above). Did you hear a click when a chord
+   started? Now turn **Lock grain** to 12 waves and do the same. Here nearly every new note cuts a tail, so the
+   count goes up with every note you play. How many cuts does it show now, and do you hear clicks as notes start?
 
 9. **The same at 96 kHz, if your interface can.** Make a new empty project and set its sample rate to 96 kHz
    (Project > Project Setup, Sample Rate). Add StrandLock and repeat step 8. At 96 kHz StrandLock has half the room
    per sample, so more heads of the older notes fade out, and with Lock grain at 12 the newest note plays 4 of its
-   8 heads. Does anything drop out or crackle? How high does the Audio Performance meter go? Afterwards go back to
-   your usual sample rate.
+   8 heads. With Lock grain at 6 or more nearly every new note cuts a tail here. Does anything drop out or crackle?
+   How high does the Audio Performance meter go? How many cuts does **Engine health** show, and do you hear clicks
+   as notes start? Afterwards go back to your usual sample rate.
 
 10. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.
