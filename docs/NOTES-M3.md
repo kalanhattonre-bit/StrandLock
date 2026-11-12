@@ -449,3 +449,115 @@ top of L (main = 17fc32a when B began).
   - StrandLock has no CPU meter of its own; the checklist uses Cubase's Audio Performance meter.
   - Kalan's answers still to come from the checklist's M3 part: how the engines sound in his Cubase, and whether
     a big Lock chord at his rate or at 96 kHz crackles.
+
+## Fix
+
+The M3 fix pass: the findings of the three M3 reviews (grain parity, Lock and budget, tests and real time) and plan
+7.5 decision 1. Branch `m3-fixes`, on top of main = 4720ffe.
+
+### Progress
+
+- Done: every finding checked against the code and the prototype (in node), all seven confirmed. The fixes and
+  their tests (below). Plan 7.5 decision 1 (the light theme colours).
+- In progress: CI on the branch, then the fast-forward of main and the CI run on main.
+- Next: nothing in this pass; the architect's list below.
+
+### The findings
+
+- **R3-GP-1 (high): a Path-kind Voice, Cloud or Lock note chased far in ran away to NaN. Fixed.** Confirmed in node
+  with the C++ chase rule copied onto sl-engine.js (scratch `m3fix/path-chase.js`): a 16-beat Path note, Play at
+  beat 12, gives head 1 NaN in all three engines at 48 kHz, and at beat 6 at 96 kHz. A Path head steers to its
+  target each tick (`h.spd = (pathPos + h.scat - h.raw) / 32`), and the coarse chase step moved it 512 samples at
+  that speed: 16 times too far, so its error was multiplied by -15 each step. Now `Voice::ffAdvanceCoarse` moves a
+  Path-steered head one tick of the 512 samples (it lands on that tick's target and stays there until the next
+  coarse tick steers it again), while the Spread offset still moves the whole 512. The flag is `Voice::pathSteer`,
+  set by Voice::tick where it sets every head's speed. Steering forgets where a head came from, so the last 4096
+  fine ticks land it exactly where the JS chase does: in node the fixed rule renders bit for bit what the JS chase
+  renders, in all six cases. Speed-kind heads and every chase under 4096 ticks are unchanged.
+  Test: `engine/chaseGrainsPathFarIn` (test_chase_grains.cpp): Voice, Cloud and Lock, 16 beats, Travel path
+  0.1 -> 0.9, Play at beat 12 (48 kHz) and beat 6 (96 kHz). The chase must take coarse steps (fewer ticks replayed
+  than the note has), head 1 must be finite and within 0.002 of the straight render, and the audio must read within
+  0.01 of the playhead (a runaway head reads frame 0). The build before the fix gives NaN.
+- **R3-LB-1 (medium): the budget rows could not catch several planner bugs. Fixed.** Confirmed: I put the
+  reviewer's 24 mutations into sl-engine.js plan () and ran every scenario of test_budget.cpp in node (scratch
+  `m3fix/sim3.js`); nine of them changed no gated figure. Now the prototype's figures are gated exactly: max load,
+  heads held back and cuts of the nine layouts; the arpeggio's heads held back after each note-on (0 0 6 14 22 30),
+  waits (32 32 32 448 448 448), heads per voice (1 1 1 1 6 8) and max load 192; the two arpeggios' and the three
+  recipes' max load and heads held back. New rows, each turning red under its mutation (scratch `m3fix/sim7.js`):
+  the bring-back after the 3 newest keys let go (in budgetNewestKeepsItsHeads), and `engine/budgetThinningOrder`
+  with quietest first (loud, faint at -45 dB, silent, new), released first, a dyad after an arpeggio (the wait list
+  newest first; the last-resort cuts take tails only, oldest first) and the cut order (released tails first, at
+  96 kHz). With these and the budget-* fixtures every mutation goes red except two that change nothing the engine
+  can show: `lockHalfIsGrant` (N <= half the grant never binds, because a granted Lock head's grant is
+  2 max (nT, nA, nB)) and `measureNoReset` (a done voice's peaks are never read again).
+- **R3-LB-2 (medium): Play inside a held heavy chord made cuts the prototype does not make. Fixed.** Confirmed in
+  node with the C++ bounded chase (doChase, continueChases, finishChase) copied onto sl-engine.js (scratch
+  `m3fix/emu.js`, `chord2.js`): a Lock N = 12 x 8-head chord, Play inside it, gives 2 cuts (4 notes, 96 kHz), 6
+  (8 notes, 96 kHz) and 4 (8 notes, 48 kHz, beat 2); the prototype 0. The planner passed chasing voices over, so
+  each late voice became the newest when it caught up, after the earlier ones had sounded. Now the planner counts a
+  chasing voice as plan 1.8 says, waiting: it can be the newest note, its heads count in the steady load, and it is
+  a thinning candidate (its heads have not sounded, so a thinned one just waits). It is never granted and nothing
+  of it is cut. In node this gives 0 cuts in all eight chord cases I tried, and the chord's last note sounds 4
+  (96 kHz) or 8 (48 kHz) heads at the end, as in the prototype. Test: `engine/budgetChaseInsideLockChord`.
+- **R3-LB-3 (low) and R3-1 (medium): the budget-pressure determinism row could not see the control grid. Fixed.**
+  Confirmed in node: the old chord (every note at Play) renders bit for bit the same in the prototype after 0, 7 and
+  1000 stopped samples, although the prototype's grid counts from the engine's creation. The chord's notes now start
+  0.13 beat apart and end at different times (R3-1's layout): the prototype then differs by 0.0227 after 7 and after
+  1000 stopped samples, so a C++ build that lost the grid origin (8.2 #21) turns the row red. Still 30 heads held
+  back at the most. The same row now also renders in blocks of 1, 37, 700, 4096 and random 1..700 (the prototype
+  renders them all bit for bit).
+- **R3-2 (medium): the checklist said cuts stay at 0 except at Lock grain 12. Fixed.** Confirmed in node (scratch
+  `m3fix/cuts.js`, the prototype's planner, which the C++ matches): cuts come at the default Lock grain 4 when
+  chord notes land within about 5 ms, in Voice and Cloud at 8 heads too (the dyad row above makes 2), and with Lock
+  grain 11 or more at 48 kHz (12 at 44.1 kHz) or 6 or more at 96 kHz nearly every new note cuts a tail. The M3
+  part now has a "Cuts" bullet that says so, and steps 8 and 9 ask Kalan for the cut count and whether he hears a
+  click when notes start, instead of calling any cut a fault.
+- **R3-3 (low): the M2 part still said Voice and Cloud play as Tape. Fixed.** The bullet now says it was true of
+  the M2 build only.
+- **Plan 7.5 decision 1: the light theme's Tone, Sample and playhead colours.** Darkened in the prototype's hue
+  (HSL lightness lowered, hue and saturation kept, 8-bit rounding) to the lightest colour that reaches 3:1 against
+  both the darker roll row #eef0f5 and the strip #e8ebf6. The strip is the darker one and binds:
+  Tone #d78000 -> **#c37500** (3.140:1 on the row, 3.009:1 on the strip; the prototype's #e08600 2.430 and 2.328),
+  Sample #b68f39 -> **#a68234** (3.141 and 3.009; the prototype's #b8913a 2.576 and 2.468),
+  playhead #ed7100 -> **#d86700** (3.143 and 3.011; the prototype's #ff7a00 2.292 and 2.196).
+  Hue shifts against the prototype's: 0.11, 0.38 and 0.10 degrees. The theme test's reference is now the row and
+  the strip (>= 3:1 on both), and "no darker than needed" is under 3.1:1 on the strip.
+
+### Decisions and deviations
+
+- **A chasing voice thins first, so the voices of a long chord settle differently after Play.** With the planner
+  counting chasing voices, the voices the bounded chase starts later have not sounded when a new one begins, and the
+  prototype's own rule (a head that has not sounded goes silent at once, and voices at env 0 count as quiet) thins
+  them before the older voices that already sound. So after Play inside 16 held Tape pads the late voices keep 1
+  head and the early ones 8, where the prototype (every voice at the same sample) keeps 1 head on the oldest 8.
+  Measured in node: the same heads and load in all, 0 cuts, and every voice sounding by 0.17 s. Before the fix the
+  C++ ended like the prototype but cut tails on the way (0 to 3 cuts in those cases, 2 to 7 with Lock N = 12).
+  No cut is the plan's rule; which held notes are thinner is not audible as a fault. No fixture case is affected:
+  every fixture chase runs at once.
+- **The Path fix moves the head one tick per coarse step, not the step's 16 ticks of steering.** It lags the moving
+  target by at most one coarse step (512 samples of the path) until the fine ticks, which then land it exactly.
+  The reviewer's second option (no coarse steps for Path voices) would cost up to 16 times the ticks for the far
+  past. Plan 8.2 #22 calls the far past approximate; for Path heads it is now exact at the chase point.
+- **The new budget figures are gated exactly, as the fixtures' stats are.** They are planner decisions (integers),
+  which the C++ has matched on both platforms in every budget row so far. Each one is printed with the prototype's.
+- **The new determinism layout follows R3-1** (staggered starts and ends) rather than R3-LB-3's 0.0137-beat spacing:
+  both see the grid in the prototype (0.0227 and 0.041); R3-1's also ends notes while others thin.
+- **Stats::tapeStandIns and Voice::asTape stay** (always 0; L and B left them to this pass). The engine tests use
+  them to show that no note stands in. Removing them changes nothing Kalan sees.
+
+### For the architect
+
+- **Cuts are part of the planner, not a rare edge.** Plan 1.8 and 4 (M3) read as if cuts happen only with Lock
+  N = 12. The prototype's planner (and so the C++) cuts tails whenever a new voice's first head does not fit beside
+  the fade tails: notes that start within a few ms of each other while others sound, in every grain engine at 8
+  heads, and nearly every new note at Lock grain 11 or more (48 kHz) or 6 or more (96 kHz). A cut stops a tail at
+  once, which may click. The checklist now asks Kalan whether he hears it. If he does, the rule to look at is "a
+  new voice's first head never waits" (plan 1.8).
+- **Plan 8.2 #22 (the far past is approximate)** could say that a Path-kind head lands exactly at the chase point
+  (VoiceChase.cpp, ffAdvanceCoarse).
+- **Plan 1.8's "a voice still chasing counts as waiting"** is now what the planner does; its consequence for which
+  held notes thin after Play is above (Decisions).
+
+### Results (CI)
+
+- (filled in after CI)
