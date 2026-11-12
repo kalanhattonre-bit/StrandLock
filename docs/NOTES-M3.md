@@ -302,6 +302,150 @@ top of L (main = 17fc32a when B began).
   green on every job and step at the first try.
 - Done: two more rows after a second read of the plan: waiting heads come in within 20 ms (in
   budgetNewestKeepsItsHeads), and the Tape switch follows each note, live and across a Voice-to-Cloud chain
-  (tapeSwitchFollowsEachNote). The CUBASE-CHECKLIST M3 section.
-- In progress: CI on that commit.
-- Next: this section's results, the M3 summary, then the fast-forward of main.
+  (tapeSwitchFollowsEachNote). The CUBASE-CHECKLIST M3 section. Commit 4fae6cc.
+- Done: CI run 43149332941 on 4fae6cc, green on every job and step (results below); this section and the M3
+  summary.
+- In progress: CI on the notes commit, then the fast-forward of main.
+- Next: the M3 review and fix pass.
+
+### What was built
+
+- **The planner, checked whole.** `Engine::plan` and `Engine::measure` (EnginePlan.cpp) were already sl-engine.js
+  plan () and measure () line by line (NOTES-M2 E2). B read them again against the JS: the newest note, steady and
+  fading load, the bring-back with hysteresis (0.9 x floor (0.75 B)), the thinning order (released, then silent at
+  level x env < 1e-3, then oldest; top heads first, head 1 last; the newest only while it alone passes B), heads
+  that have not sounded going silent at once, the grants (sounding heads keep their share, the others wait newest
+  first), and the last-resort cuts of the oldest tails. They match, so the file's code did not change (its header
+  comment now says what B checked). The planner is engine-blind, as in the JS: the units come from each head's est
+  (set by Voice::tick for every engine) and its measured peak (runTape, runGrains, runLock). With every engine
+  playing since L, that makes it complete in every engine.
+- **Per-note engines and the Tape switch across chains** needed no engine code either: Voice::tick reads the
+  engine, the Lock switch and the Tape switch from the note it plays now (rn.engine, rn.lock, rn.tape, as the JS
+  reads X), and clears the grains when the engine changes inside a chain (lastKc), as the JS does.
+- **Fractional heads** were already the JS (E1): H = clamp (heads + lane + macro, 1, 8), the top head at
+  (H - floor (H)) of a full head's level, the gains slewed over 20 ms. B's row checks them in all four engines.
+- **The rows** (Tests/engine): `test_budget.cpp` (the 16 x 8 layout at three rates, the newest note's heads and
+  the waiting heads, no cuts where the prototype has none, the five budget-* fixtures' stats and newest heads, the
+  budget edge allocating nothing, in "engine" and "alloc"); `test_stereo.cpp` (four rows in all four engines);
+  `test_fractional_heads.cpp`; `test_per_note_engines.cpp` (per-note engines, the Voice -> Cloud -> Tape chain,
+  the Tape switch live and across chains); `test_aliasing.cpp` (the printed figure); additions to
+  `test_stability.cpp` (16 x 8 in every engine), `test_determinism.cpp` (the grain scenario and the chord under
+  budget pressure) and `test_cpu.cpp` (the 96 kHz grain benchmarks and the typical 48 kHz load per engine).
+- **The renders harness** (Tests/engine/EngineRender.cpp) now records display frames for stats-only cases too
+  (they have none to compare), because the budget test reads the newest note's sounding heads from the last one.
+  Filling a frame changes nothing the render or the stats depend on.
+- **docs/CUBASE-CHECKLIST.md** has a new part, "M3: the grain engines", after the M0 and M2 parts.
+
+### Decisions and deviations
+
+- **EnginePlan.cpp's code is unchanged.** The plan's "complete" asked for thinning, waiting heads and cuts in every
+  engine; E2 had ported the whole JS planner already, and G and L only had to set est and measure the peak in
+  their engines. B found nothing to add, so it added checks instead of code.
+- **"Waiting heads up to 20 ms" is not a timer**, in the JS or here. It follows from the planner: steady heads are
+  planned to at most floor (0.75 B), so once the 20 ms fade tails of thinned heads have ended, every allowed head
+  fits. B measures it: in the Voice arpeggio the newest note sounds all 8 heads within 448 samples (9.3 ms) of
+  its note-on in the prototype; the row gates <= 960 + 32 samples (20 ms and one control tick) and that some head
+  did wait (> 32).
+- **The Tape switch row** is test-engine-extra.js B's (Cloud at Speed 2: switch off keeps C3 within 75 cents,
+  the prototype +29.4; on plays C4 within 10, the prototype +0.005), plus two chains in which only one note has
+  the switch on (Voice C3 within 3 cents, Cloud C4 within 10; the prototype +0.014 and +0.005). A voice that kept
+  its first note's switch reads the second note an octave off.
+- **Rows the plan names for Tape, Voice and Cloud also run on Lock** (fractional heads, stereo, stability), since
+  Lock is a fourth way to play; each meets the same gate.
+- **Each budget row also checks that the budget was under pressure** (heads thinned at some point), so none passes
+  by doing nothing. The prototype's own figures (computed in node from sl-engine.js) are printed next to each; they
+  are equal in every row (max load, thinned heads, cuts, the arpeggio's 0 0 6 14 22 30 and 1 1 1 1 6 8).
+- **The Lock budget fixtures are checked twice:** the renders test compares their stats rows (section 5), and
+  budgetLockFixtureStats compares thinned heads, max load, B and cuts at every row and the newest note's sounding
+  heads at the end (8 / 8 / 4 at 44.1 / 48 / 96 kHz; the prototype's display). The three clip cases are not bit for
+  bit on Windows (the pad's Saw-like partials, NOTES-M2 E1) but their stats are exact.
+- **Stability with Lock makes cuts.** The JS "16 voices x 8 heads" stress uses Lock grain 12, so the Lock runs cut
+  some fade tails (5 at 44.1 kHz, 10 at 48), as the budget fixtures do. The plan's stability row does not ask for
+  0 cuts there; it asks for no non-finite sample, no filter reset, output in bounds and load <= B, which hold.
+- **CPU, as decision 4 says:** printed against the targets and gated at > 1x on Windows only. The typical Lock load
+  (8 voices x 2 heads at 48 kHz) reads 17.0x on the Windows runner against the 20x target (19.6x on Linux); every
+  other figure meets its target. Not chased.
+- **The aliasing figure is printed with a plain sentence**, and gated only on the measure itself (the band-limited
+  Saw source reads -104 dB, a naive saw -21 dB) and on each render sounding.
+- **The checklist's "CPU meter" is Cubase's Audio Performance meter.** StrandLock has no CPU meter of its own (the plan
+  does not give it one), so the M3 steps say so and point to Cubase's, as the M0 and M2 steps do.
+- **Stats::tapeStandIns and Voice::asTape stay** (always 0; L's decision). The tests use them to show no note
+  stands in. Removing them is the fix pass's call.
+
+### Results (CI)
+
+- Run 43149332941 on 4fae6cc, green on every job and step: Windows Release 1433 checks in 227 tests, 0 failed
+  (engine 476 in 86, alloc 37 in 7, cpu 18 in 4, plugin 58 in 9); Linux Release 1425 in 227 (engine 476 in 86,
+  alloc 38 in 7, cpu 9 in 4, where times are printed but not gated); the sanitizers' contract, model and engine
+  groups 764 in 136 (engine 475 in 86), state 142 in 20; Debug-CRT allocation run 38 in 7, 0 JUCE assertions;
+  Debug snapshots 0 assertions; pluginval strictness 10 SUCCESS; the fixture check passed (24 files, 4.68 MB).
+- Run 43144810679 on 5bbcef3 (the first push of B) was green on every job and step too: Windows 1426 checks in 226
+  tests, Linux 1418 in 226, the sanitizers 757 in 135 and 142 in 20, Debug-CRT 38 in 7. Every figure below that
+  both runs print is the same in both, on Windows and on Linux, except the times.
+- renders.json, needs grains: 37 of 37 within tolerance on both platforms, 26 bit for bit on Windows and 11 on
+  Linux (needs tape: 36 of 36, 22 and 13).
+- Budget, the 16 x 8 layout (max load of B, heads held back at the end, cuts), every figure the prototype's:
+  44.1 kHz (B 208) Voice 178, 96, 0; Cloud 141, 89, 0; Lock 147, 117, 5. 48 kHz (B 192) Voice 162, 99, 0; Cloud
+  132, 92, 0; Lock 120, 118, 10. 96 kHz (B 96) Voice 84, 110, 0; Cloud 72, 110, 0; Lock 80, 120, 15.
+- The Voice arpeggio (6 keys 80 ms apart): the newest keeps its 8 heads after every note-on; heads held back after
+  each note-on 0 0 6 14 22 30; sounding heads, oldest first, 1 1 1 1 6 8; max load 192 of 192, 0 cuts; the newest
+  sounds all 8 heads 32, 32, 32, 448, 448 and 448 samples after its note-on (at most 9.3 ms). All the prototype's.
+- No cuts where the prototype has none: the Lock Grain 4 arpeggio (max load 144, 30 held back), the Voice arpeggio
+  (162, 29), Strand Demo with recipes 3, 6 and 8 at Grain 12 (113, 117 and 192; 13, 4 and 32 held back).
+- The Lock N = 12 fixtures: every stats row equal. At the end, budget-16x8-lock12-48k 10 cuts, 120 held back, max
+  load 168 of 192, the newest note 8 heads; -96k 15, 124, 72 of 96, 4 heads; -clip-44.1k 15, 120, 180 of 208, 8;
+  -clip-48k 15, 120, 180 of 192, 8; -clip-96k 15, 124, 84 of 96, 4.
+- At the budget edge: 0 allocations and 0 frees, in Release and in the Debug-CRT run, with 10 and 15 cuts and 120
+  and 124 heads held back at 48 and 96 kHz. The engine sweep through all four engines (L's) also 0 and 0.
+- Fractional heads (the largest step at the changes over the steady one): Tape 0.861, Voice 1.000, Cloud 0.764,
+  Lock 0.967 (gate 1.5; the prototype's to 4 decimals). A click of twice the steady step reads 2.32.
+- Stereo (Tape / Voice / Cloud / Lock): Spread 0 on a mono source, L == R bit for bit in all four; a stereo source,
+  corr 0.0033 / 0.0035 / 0.0033 / 0.0071; Spread 0.6, corr 0.841 / 0.839 / 0.841 / 0.826; Mirror with 8 heads and
+  Spread 0.6, the mono sum loses 0.246 / 0.227 / 0.250 / 0.235 dB. All the prototype's.
+- Per-note engines: a Tape note at C5 lifts the centroid x 2.000, a Voice note x 1.037. The chain Voice -> Cloud ->
+  Tape plays on one voice (the engines voice, cloud, tape), the playhead moves 0.00133 around each joint (1x), the
+  quietest 10 ms has rms 0.151. The Tape switch: live Cloud at Speed 2 reads +29.43 cents from C3 with it off and
+  +0.005 from C4 with it on; in both chains Voice reads +0.014 cents from C3 and Cloud with the switch +0.005 from C4.
+- Stability, 16 x 8: nonFinite 0 and filterResets 0 in all six runs; pre-limiter peaks 9.1 to 32.7, output rms
+  0.34 to 0.44, peak 0.900; max load 175 of 192 (Voice), 96 (Tape), 132 (Cloud), 156 (Lock), 91 of 96 (Voice at
+  96 kHz), 152 of 208 (Lock at 44.1 kHz).
+- Determinism: the grain scenario is bit-identical across blocks of 1, 37, 700, 4096 and random sizes and after 7
+  and 1000 stopped samples (rms 0.306); the Voice chord under pressure (30 heads held back) is bit-identical after
+  0, 7 and 1000 stopped samples.
+- CPU on the Windows runner, best of 3 (run 43149332941, then 43144810679): at 96 kHz, 16 x 8, Cloud with 140 ms
+  grains 7.55x and 7.83x, Lock N = 12 8.20x and 8.52x, Voice around C5 6.64x and 6.91x (targets 2.0x); at 48 kHz,
+  8 voices x 2 heads, Tape 39.4x and 39.7x, Voice 29.5x and 30.5x, Cloud 21.8x and 22.0x, Lock 16.8x and 17.0x
+  (targets 20x: Lock is short of it); M2's Tape 16 x 8 at 96 kHz 8.2x twice (target 8x). On Linux (not gated)
+  10.8x, 11.4x, 9.5x; 54.6x, 42.0x, 30.7x, 23.1x; Tape 10.7x.
+- Aliasing, Tape on the Saw at 48 kHz, the energy off the harmonic lines: -42.13 dB at +0 st, -27.77 at +12, -19.58
+  at +24 and -15.10 at +36 (the prototype's to 2 decimals). The measure itself: the Saw source -104.1 dB, a naive
+  saw -21.4 dB.
+
+## M3 summary
+
+- **What M3 built.** Every engine plays itself now: Tape (M2), Voice and Cloud (part G, runGrains), and Cloud with
+  the Lock switch (part L, runLock). The budget planner (E2's port of the JS) is complete in all of them, and part B
+  checked it with every engine playing. Spray, Refresh hold, Each grain backwards, the Tape switch, Path kind for
+  Voice and Cloud, per-note engines, chains across engines and fractional heads all play as in the prototype. The
+  default sound (Voice) plays as in the prototype.
+- **Against the prototype.** All 37 grains cases of renders.json are within the section 5 tolerances on both
+  platforms (26 bit for bit on Windows, 11 on Linux), and the 36 Tape cases are still green (22 and 13). Every
+  case that is not bit for bit plays the Saw, Saw that opens up or pad starter (NOTES-M2 E1).
+- **The M3 table.** Every row is a gated test, except the timing figures (printed against their targets, gated at
+  faster than real time on Windows, decision 4) and the aliasing figure (printed). The figures are in the G, L and
+  B results above.
+- **Tests at the merge head** (run 43149332941): Windows Release 1433 checks in 227 tests, Linux Release 1425 in
+  227, the sanitizers 764 in 136 and 142 in 20, the Debug-CRT allocation run 38 in 7, pluginval strictness 10,
+  all passed.
+- **The aliasing figure, for open question 6.** Played three octaves above its recorded pitch (+36 semitones), the
+  Tape engine turns the Saw into a note in which about 3 % of the sound (-15.1 dB) is aliasing: tones that are not
+  part of the note. Two octaves up it is about 1 % (-19.6 dB), one octave up 0.2 % (-27.8 dB), and at the recorded
+  pitch 0.006 % (-42.1 dB). The prototype measures the same.
+- **Open for the review and the fix pass.**
+  - The typical Lock load at 48 kHz (8 voices x 2 heads) runs about 17x real time on the Windows runner against a
+    20x target (printed, not chased, decision 4). Every other CPU figure meets its target.
+  - Decision 1 (the light theme's darker Tone, Sample and playhead colours) is the fix pass's.
+  - Stats::tapeStandIns and Voice::asTape are still in the engine, always 0.
+  - StrandLock has no CPU meter of its own; the checklist uses Cubase's Audio Performance meter.
+  - Kalan's answers still to come from the checklist's M3 part: how the engines sound in his Cubase, and whether
+    a big Lock chord at his rate or at 96 kHz crackles.
