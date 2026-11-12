@@ -458,8 +458,10 @@ The M3 fix pass: the findings of the three M3 reviews (grain parity, Lock and bu
 ### Progress
 
 - Done: every finding checked against the code and the prototype (in node), all seven confirmed. The fixes and
-  their tests (below). Plan 7.5 decision 1 (the light theme colours).
-- In progress: CI on the branch, then the fast-forward of main and the CI run on main.
+  their tests (below). Plan 7.5 decision 1 (the light theme colours). Commits 9cd2ec5 .. e11c4bb.
+- Done: CI run 43160312596 on e11c4bb, green on every job and step at the first try (results below). The light
+  snapshots looked at: the darker Tone and Sample colours and the playhead read clearly on the roll and the strip.
+- In progress: CI on this commit (notes only), then the fast-forward of main and the CI run on main.
 - Next: nothing in this pass; the architect's list below.
 
 ### The findings
@@ -560,4 +562,28 @@ The M3 fix pass: the findings of the three M3 reviews (grain parity, Lock and bu
 
 ### Results (CI)
 
-- (filled in after CI)
+- Run 43160312596 on e11c4bb, green on every job and step: Windows Release 1476 checks in 230 tests, Linux Release
+  1468 in 230, the sanitizers' contract, model and engine groups 806 in 139 and the state group 142 in 20, the
+  Debug-CRT allocation run 38 in 7 (0 JUCE assertions), Debug snapshots 0 assertions, pluginval strictness 10
+  SUCCESS, the fixture check passed. renders.json: needs grains 37 of 37 within tolerance (26 bit for bit on
+  Windows, 11 on Linux), needs tape 36 of 36 (22 and 13), as before.
+- The Path chase far in (Voice, Cloud, Lock; 48 kHz at beat 12, 96 kHz at beat 6): 4413 ticks replayed for 9001
+  ticks of note (coarse steps taken), head 1 equal to the straight render's (0.705000 and 0.402500, difference 0,
+  the prototype's), the audio reading 0.70507 / 0.70716 / 0.70513 and 0.40247 / 0.40701 / 0.40252 of the file
+  (the prototype 0.70480 / 0.70708 / 0.70530 and 0.40255 / 0.40692 / 0.40245).
+- The Lock chord, Play inside it: 0 cuts in all three (before the fix 2, 6 and 4 in node); chase ticks 6014, 12110,
+  12110 (spread over blocks); heads held back 28, 60, 56 (the prototype's); max load 84 of 96, 72 of 96, 156 of
+  192; the chord's last note sounds 4, 4 and 8 heads (the prototype's).
+- The budget figures, now gated exactly, all equal the prototype's on both platforms: the nine layouts (as in B's
+  results), the arpeggio (waits 32 32 32 448 448 448, held back 0 0 6 14 22 30, per voice 1 1 1 1 6 8, max 192),
+  the arpeggios 144 / 30 and 162 / 29, the recipes 113 / 13, 117 / 4, 192 / 32. The new rows: bring-back
+  1/1,7/7,8/8 (8 held back, 0 cuts); quietest first 1/1,8/8,1/1,8/8 (14, 0); released first 8/8,r2/2,8/8 (6, 0);
+  the dyad 1/1,1/1,1/6,6/8,1/1,7/7 then 1/1,1/1,1/1,6/6,1/1,8/8 (2 cuts); the cut order 1/8,r0/3,1/1 ..
+  1/1,r0/3,8/8 (1 cut).
+- Determinism under budget pressure: 30 heads held back at the most, rms 0.2445 (the prototype's); bit-identical
+  after 7 and 1000 stopped samples and in blocks of 1, 37, 700, 4096 and random 1..700.
+- The light theme: Tone #c37500 3.140:1 on the roll row and 3.009:1 on the strip, Sample #a68234 3.141 and 3.009,
+  the playhead #d86700 3.143 and 3.011; hues 36.00 / 41.05 / 28.61 degrees against the prototype's 35.89 / 41.43 /
+  28.71.
+- The aliasing figure is unchanged: Tape at +36 st on the Saw, -15.10 dB of the energy off the harmonic lines (the
+  prototype -15.10 dB), about 3.1 % of the sound.
