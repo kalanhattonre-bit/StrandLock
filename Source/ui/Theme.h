@@ -45,8 +45,9 @@ namespace sl::ui
     /** All 77, in shell.html's order. */
     extern const std::array<TokenText, kNumTokens> kTokens;
 
-    /** The light tokens StrandLock darkens (same hue) to at least 3:1 against the light roll, where the
-        prototype's are 2.6 to 2.9 (PLUGIN-PLAN 7.4 decision 2). Every other value is the prototype's own. */
+    /** The light tokens StrandLock darkens (same hue) to at least 3:1 against the darker light roll row
+        (row-black #eef0f5) and the light strip (strip-bg #e8ebf6), where the prototype's are 2.2 to 2.6
+        (PLUGIN-PLAN 7.4 decision 2, 7.5 decision 1). Every other value is the prototype's own. */
     inline constexpr std::array<Tok, 3> kDarkenedLight { Tok::laneTone, Tok::laneSample, Tok::playhead };
 
     /** A CSS value read: "#rrggbb", "rgba(r,g,b,a)", or a plain number (the four a-* opacities). */

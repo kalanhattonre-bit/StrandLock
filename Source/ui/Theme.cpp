@@ -11,9 +11,11 @@ namespace sl::ui
 {
     // Copied from prototype-v4/src/shell.html (:root, and :root[data-theme="light"]). The theme test checks
     // every name and value against Tests/fixtures/ui/theme.json, which tools/fixtures/ui.js reads from the
-    // same file. Three light values are StrandLock's own (PLUGIN-PLAN 7.4 decision 2, Kalan's answer 9.1): the
-    // Tone and Sample lane colours and the playhead, darkened in the same hue to 3:1 against the light roll
-    // (white). The test checks those three for >= 3:1 instead of equality (kDarkenedLight in Theme.h).
+    // same file. Three light values are StrandLock's own (PLUGIN-PLAN 7.4 decision 2, Kalan's answer 9.1, and 7.5
+    // decision 1): the Tone and Sample lane colours and the playhead, darkened in the same hue to 3:1 against what
+    // is drawn under them: the darker roll row (row-black #eef0f5) and the strip (strip-bg #e8ebf6). M2 had
+    // measured 3:1 against white, which the roll never draws. The test checks those three for >= 3:1 instead of
+    // equality (kDarkenedLight in Theme.h).
     const std::array<TokenText, kNumTokens> kTokens { {
         { "bg",              "#151618",               "#f3f4f7" },
         { "panel",           "#1d1e21",               "#ffffff" },
@@ -55,7 +57,7 @@ namespace sl::ui
         { "ruler-tick",      "#5d6169",               "#b8bdcc" },
         { "link",            "#b58cff",               "#7b4fe0" },
         { "handle-ring",     "#151618",               "#ffffff" },
-        { "playhead",        "#ff7a00",               "#ed7100" },   // light: darkened to 3:1 (decision 2; shell.html #ff7a00)
+        { "playhead",        "#ff7a00",               "#d86700" },   // light: darkened to 3:1 on #e8ebf6 (shell.html #ff7a00)
         { "box-fill",        "rgba(181,140,255,.12)", "rgba(123,79,224,.10)" },
         { "box-line",        "#b58cff",               "#7b4fe0" },
         { "node-sel",        "#ffffff",               "#22242a" },
@@ -63,10 +65,10 @@ namespace sl::ui
         { "lane-pitch",      "#3ee6a8",               "#0b9e74" },
         { "lane-amp",        "#4f8bff",               "#2f6fe8" },
         { "lane-vib",        "#e05cff",               "#b03fd6" },
-        { "lane-tone",       "#ff9f1c",               "#d78000" },   // light: darkened to 3:1 (decision 2; shell.html #e08600)
+        { "lane-tone",       "#ff9f1c",               "#c37500" },   // light: darkened to 3:1 on #e8ebf6 (shell.html #e08600)
         { "lane-formant",    "#ff4d8d",               "#e0306f" },
         { "lane-hollow",     "#22c3e6",               "#0fa0c2" },
-        { "lane-sample",     "#e2c275",               "#b68f39" },   // light: darkened to 3:1 (decision 2; shell.html #b8913a)
+        { "lane-sample",     "#e2c275",               "#a68234" },   // light: darkened to 3:1 on #e8ebf6 (shell.html #b8913a)
         { "on-lane",         "#111111",               "#ffffff" },
         { "a-act",           "0.42",                  "0.38" },
         { "a-act-sel",       "0.62",                  "0.55" },

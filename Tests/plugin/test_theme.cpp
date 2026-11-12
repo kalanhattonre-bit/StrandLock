@@ -2,7 +2,9 @@
 // Tests/fixtures/ui/theme.json with the same values, the accents are the plan's, and the lane lines and the
 // playhead keep at least 2.5:1 contrast against the roll in both themes. From M2 (7.4 decision 2) three light
 // tokens are StrandLock's own: the Tone and Sample lane colours and the playhead, darkened in the prototype's
-// hue to at least 3:1 against the roll; the test checks those for that instead of equality.
+// hue; the test checks those instead of equality. Since the M3 fix pass (7.5 decision 1) the reference is what is
+// drawn under them, the darker roll row #eef0f5 and the strip #e8ebf6 (M2 used white, which the roll never
+// draws): at least 3:1 against both, and no darker than needed (under 3.1:1 against the strip, the darker one).
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -219,19 +221,27 @@ SL_TEST ("theme", themeLaneContrast)
                && std::abs (ui::contrastRatio (protoHead, light[Tok::roll]) - 2.61) < 0.005,
            "the plan's figures for the prototype's palette: light Tone 2.77, dark Pitch 11.86, light playhead 2.61");
 
-    // Decision 2 (Kalan's answer 9.1): in the light theme the Tone and Sample lane colours and the playhead are
-    // darkened, in the same hue, to at least 3:1 against the roll; the prototype's were 2.6 to 2.9.
+    // Decision 2 (Kalan's answer 9.1) and 7.5 decision 1 (M2 review R2-4): in the light theme the Tone and Sample
+    // lane colours and the playhead are darkened, in the same hue, to at least 3:1 against what is drawn under them,
+    // the darker roll row (row-black #eef0f5) and the strip (strip-bg #e8ebf6); the prototype's were 2.2 to 2.6
+    // there. The strip is the darker of the two, so "no darker than needed" is under 3.1:1 against the strip.
+    const auto rowBlack = light[Tok::rowBlack], strip = light[Tok::stripBg];
+    check (rowBlack == juce::Colour (0xffeef0f5) && strip == juce::Colour (0xffe8ebf6)
+               && ui::relativeLuminance (strip) < ui::relativeLuminance (rowBlack),
+           "light: the references are the roll row #EEF0F5 and the strip #E8EBF6 (the darker one)");
     for (const Tok t : ui::kDarkenedLight)
     {
         const auto ours = light[t], proto = fixtureColour (doc, true, t);
-        const double now = ui::contrastRatio (ours, light[Tok::roll]), before = ui::contrastRatio (proto, light[Tok::roll]);
+        const double onRow = ui::contrastRatio (ours, rowBlack), onStrip = ui::contrastRatio (ours, strip);
+        const double beforeRow = ui::contrastRatio (proto, rowBlack), beforeStrip = ui::contrastRatio (proto, strip);
         const double hueShift = std::abs (hueOf (ours) - hueOf (proto));
         const auto* name = ui::kTokens[static_cast<std::size_t> (t)].name;
-        check (now >= 3.0 && before < 3.0, fmt ("light %s: %s is %.3f:1 against the roll (the prototype's %s was %.3f)", name,
-                                                ours.toDisplayString (false).toRawUTF8(), now,
-                                                proto.toDisplayString (false).toRawUTF8(), before));
-        check (hueShift < 0.5 && ui::relativeLuminance (ours) < ui::relativeLuminance (proto) && now < 3.1,
-               fmt ("light %s: the same hue (%.2f and %.2f degrees), darker, and no darker than needed (under 3.1:1)", name,
-                    hueOf (ours), hueOf (proto)));
+        check (onRow >= 3.0 && onStrip >= 3.0 && beforeRow < 3.0 && beforeStrip < 3.0,
+               fmt ("light %s: %s is %.3f:1 against the roll row and %.3f:1 against the strip (the prototype's %s was %.3f and %.3f)", name,
+                    ours.toDisplayString (false).toRawUTF8(), onRow, onStrip, proto.toDisplayString (false).toRawUTF8(), beforeRow,
+                    beforeStrip));
+        check (hueShift < 0.5 && ui::relativeLuminance (ours) < ui::relativeLuminance (proto) && onStrip < 3.1,
+               fmt ("light %s: the same hue (%.2f and %.2f degrees), darker, and no darker than needed (%.3f:1 against the strip, under 3.1)",
+                    name, hueOf (ours), hueOf (proto), onStrip));
     }
 }
