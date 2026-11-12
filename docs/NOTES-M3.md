@@ -298,6 +298,10 @@ top of L (main = 17fc32a when B began).
 
 - Done: the B rows as tests (test_budget, test_stereo, test_fractional_heads, test_per_note_engines, test_aliasing,
   the grain additions to test_stability, test_determinism and test_cpu); the renders harness keeps the display of
-  stats-only cases (the budget test reads the newest note's heads from it). First CI run pending.
-- In progress: CI on the first push.
-- Next: the CUBASE-CHECKLIST M3 section, this section's results, the M3 summary, then the fast-forward of main.
+  stats-only cases (the budget test reads the newest note's heads from it). Commit 5bbcef3; CI run 43144810679
+  green on every job and step at the first try.
+- Done: two more rows after a second read of the plan: waiting heads come in within 20 ms (in
+  budgetNewestKeepsItsHeads), and the Tape switch follows each note, live and across a Voice-to-Cloud chain
+  (tapeSwitchFollowsEachNote). The CUBASE-CHECKLIST M3 section.
+- In progress: CI on that commit.
+- Next: this section's results, the M3 summary, then the fast-forward of main.

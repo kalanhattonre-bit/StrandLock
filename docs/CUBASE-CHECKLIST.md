@@ -3,7 +3,8 @@
 The first test build (M0) was the "probe": the StrandLock window with its final look, all of its knobs, and a
 plain saw sound you can play. It was there to find out how Cubase treats StrandLock on your computer, and its
 steps below (The checklist) still apply. The M2 build plays the real sound engine: its own steps are in
-**M2: the first real sound** at the end. Please go through them and send back your answers and the text from the
+**M2: the first real sound**. The M3 build adds the grain engines (Voice, Cloud and Lock): its steps are in
+**M3: the grain engines** at the end. Please go through them and send back your answers and the text from the
 **Copy report** button.
 
 ## Getting the test build
@@ -188,3 +189,75 @@ A few things to know first:
     buffer size from the M0 part, step 1, tells how much room it has.)
 
 12. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.
+
+## M3: the grain engines
+
+From this build on every engine plays: Tape, Voice, Cloud, and Cloud with the Lock switch. The M0 and M2 steps
+above still apply; this part is about the new engines. Please go through it and send back your answers and the
+text from **Copy report**.
+
+A few things to know first:
+- **The default sound now plays with the Voice engine**, as in the prototype. (In the M2 build notes set to Voice
+  or Cloud played as Tape; that is over.) Voice keeps the character of the sound when you play higher or lower.
+  Tape plays it faster or slower, like a tape machine.
+- **The controls are on the Sample tab.** First row: the **Engine** buttons (Tape, Voice, Cloud), the **Lock**
+  switch, the **Motion** buttons and **Jump every**. Second row: the knobs **Speed**, **Heads**, **Spread**,
+  **Voice grain**, **Cloud grain**, **Lock grain**, **Spray**, **Drift**, **Pitch**, **Refresh time** and **Skip**.
+  Third row: the **Refresh** buttons (Smooth, Free, Synced), **Every**, **Lock to the beat**, **Tape**, **Each grain
+  backwards** and **Head tune**.
+- **Lock works with Cloud only.** With the Engine on Tape or Voice the Lock switch does nothing.
+- **The budget.** StrandLock keeps its work under a fixed limit, so Cubase never runs out of time because of it.
+  With many notes and many heads, the older notes' top heads fade out over 20 ms, and the newest note keeps its
+  heads. So older notes may get thinner in a big chord. That is on purpose. A drop-out or a crackle is not. On the
+  Diagnostics tab, the **Engine health** line (THIS COMPUTER box) counts **cuts**: fade tails it had to stop at
+  once because even the fades did not fit. They should stay at 0, except with **Lock grain** at 12 or more, where
+  a fast big chord can make a few.
+
+1. **Install the new build** the same way as before (Getting the test build, at the top). On the Diagnostics tab,
+   the **StrandLock** line in the THIS COMPUTER box should end with "(test build: Tape, Voice, Cloud and Lock
+   engines)".
+
+2. **The default sound, on Voice.** Add StrandLock to a new Instrument track. The strip shows "Saw that opens up"
+   and the Engine is Voice. Play C3, then single notes up and down the keyboard, then a few chords. Does it sound
+   like the prototype did? Is it in tune with a Cubase piano? Play C1 and C5: does the sound keep its character,
+   without the "chipmunk" change Tape gives it? Press Play in Cubase: the demo clip now plays with Voice too.
+
+3. **Tape, Voice, Cloud and Lock on a few starters.** From the sound menu on the strip pick **Saw**, **Evolving
+   pad**, **Vowel aah to ooh** and **Noise** in turn. For each: hold C3 and then a chord, and switch the Engine
+   between Tape, Voice and Cloud. Then, on Cloud, turn **Lock** on and off. Does each engine sound different? With
+   Lock on, Noise should turn into a pitched tone that plays in tune: does it?
+
+4. **On one of your songs.** Load one of your songs (**Browse...** or drag it in), set a Region around a part
+   you like, and try the same four: Tape, Voice, Cloud, and Cloud with Lock. Which ones do you like? Does anything
+   sound broken (clicks, buzzing, silence, a note that does not stop)?
+
+5. **Motion on Voice and on Cloud.** Set the Engine to Voice, hold a key, and try each **Motion** button: Forward,
+   Backward, Bounce, Mirror (set **Heads** to 2 or more), Freeze (the sound stands still on one moment, which Tape
+   cannot do), and Scatter (it jumps in time with Cubase; press Play to hear it in time, and **Jump every** sets
+   how often). Then the same with the Engine on Cloud. Does each one do what its name says?
+
+6. **Heads, Spread and Spray.** On Cloud, hold a chord and turn **Heads** slowly from 1 to 8: the sound gets
+   thicker, and between whole numbers the next head fades in. Do you hear a click or a jump while you turn it?
+   Turn **Spread** up: the heads move apart in the sound and spread from left to right. Turn **Spray** up: the
+   grains scatter around each head. Does each knob do what you expect?
+
+7. **Refresh and Each grain backwards.** On Voice and then on Cloud, try the **Refresh** buttons. **Smooth**: the
+   heads move on steadily. **Free**: each head grabs a moment and repeats it, with a new grab every **Refresh
+   time**. **Synced**: a new grab every **Every** note value, in time with Cubase (press Play). With Free or Synced,
+   turn **Skip** up: some grabs are left out. Then turn **Each grain backwards** on: every grain plays reversed.
+   Does each one work?
+
+8. **A big chord at your normal sample rate.** Set the Engine to Cloud, turn **Lock** on and set **Heads** to 8.
+   Press Play so the demo clip plays, and hold a big chord (8 notes or more, both hands). Then play fast chords one
+   after the other. Does anything drop out, crackle or stop? How high does Cubase's Audio Performance meter go
+   (Studio > Audio Performance)? StrandLock has no CPU meter of its own, so this meter is the one to watch. Now turn
+   **Lock grain** to 12 waves and do the same. Then look at **Engine health** on the Diagnostics tab: how many
+   cuts does it show?
+
+9. **The same at 96 kHz, if your interface can.** Make a new empty project and set its sample rate to 96 kHz
+   (Project > Project Setup, Sample Rate). Add StrandLock and repeat step 8. At 96 kHz StrandLock has half the room
+   per sample, so more heads of the older notes fade out, and with Lock grain at 12 the newest note plays 4 of its
+   8 heads. Does anything drop out or crackle? How high does the Audio Performance meter go? Afterwards go back to
+   your usual sample rate.
+
+10. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.

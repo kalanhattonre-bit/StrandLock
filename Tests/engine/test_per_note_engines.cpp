@@ -4,12 +4,18 @@
 //    prototype, > 1.7) and a Voice note at C5 keeps it (x 1.04, < 1.25); the display shows each engine;
 //  - a chain Voice -> Cloud -> Tape plays on one voice: the engine follows each note (the display), the playhead
 //    carries on across both joints, and the sound never stops (every 10 ms window keeps an rms above 0.05; the
-//    prototype's quietest is 0.151).
+//    prototype's quietest is 0.151);
+//  - the Tape switch (grain read rate x |speed|) belongs to each note too (prototype-v4/tests/test-engine-extra.js B):
+//    live Cloud at Speed 2 keeps C3 with it off (+-75 cents, the granular smear the JS allows) and plays C4 with it on
+//    (+-10); in a chain Voice (off) -> Cloud (on) and Cloud (on) -> Voice (off) at Speed 2, each note reads with its
+//    own switch: Voice C3 within +-3 cents, Cloud with the switch on C4 within +-10. A voice that kept its first
+//    note's switch would read the second note an octave off, so both directions are checked.
 // Group "engine".
 
 #include "engine/GrainRig.h"
 #include "engine/VoiceRig.h"
 #include "support/Check.h"
+#include "support/Measure.h"
 #include "support/TestRegistry.h"
 #include "support/TestSignals.h"
 
@@ -34,6 +40,35 @@ namespace
     {
         static const char* names[] = { "tape", "voice", "cloud", "lock" };
         return kc >= 0 && kc < 4 ? names[kc] : "none";
+    }
+
+    /** The JS sine (f, secs, sr, amp = 0.5): amp sin (2 pi f i / sr), Float32. */
+    std::vector<float> sine (double f, double secs, double sr)
+    {
+        const auto n = static_cast<std::size_t> (std::llround (secs * sr));
+        std::vector<float> x (n);
+        for (std::size_t i = 0; i < n; ++i)
+            x[i] = static_cast<float> (0.5 * std::sin (2 * 3.141592653589793 * f * static_cast<double> (i) / sr));
+        return x;
+    }
+
+    /** The JS peakHz (x, sr, 40, 6000, 16, start): the strongest spectral peak from 40 Hz to 6 kHz in 2^16 samples from
+        start, refined by a parabola on the dB magnitudes. */
+    double peakHz (const std::vector<float>& x, double sr, std::int64_t start)
+    {
+        constexpr int order = 16;
+        const std::size_t n = std::size_t { 1 } << order;
+        const std::vector<double> m = grains::spectrum (x, start, order);
+        const double bin = sr / static_cast<double> (n);
+        const std::size_t lo = std::max<std::size_t> (2, static_cast<std::size_t> (std::floor (40 / bin)));
+        const std::size_t hi = std::min<std::size_t> (n / 2 - 2, static_cast<std::size_t> (std::ceil (6000 / bin)));
+        std::size_t bk = lo;
+        for (std::size_t k = lo; k <= hi; ++k)
+            if (m[k] > m[bk])
+                bk = k;
+        const double a = 20 * std::log10 (m[bk - 1] + 1e-30), b = 20 * std::log10 (m[bk] + 1e-30), c = 20 * std::log10 (m[bk + 1] + 1e-30);
+        const double den = a - 2 * b + c;
+        return (static_cast<double> (bk) + (std::abs (den) > 1e-12 ? 0.5 * (a - c) / den : 0.0)) * bin;
     }
 }
 
@@ -111,4 +146,77 @@ SL_TEST ("engine", chainSwitchesEngine)
     for (std::int64_t a = 960; a + 480 <= static_cast<std::int64_t> (2.9 * kSr); a += 480)
         quietest = std::min (quietest, rig::rms (play.L, a, a + 480));
     check (quietest > 0.05, fmt ("no gap: the quietest 10 ms window has rms %.4f (> 0.05; the prototype 0.151)", quietest));
+}
+
+SL_TEST ("engine", tapeSwitchFollowsEachNote)
+{
+    section ("the Tape switch (grain read rate x |speed|) at Speed 2 on a C3 sine: live Cloud with it off and on, and chains Voice (off) "
+             "-> Cloud (on) and Cloud (on) -> Voice (off): each note reads with its own switch");
+
+    const std::vector<float> src = sine (signals::midiHz (60), 8, kSr);
+    struct Live
+    {
+        bool tape;
+        int wantKey;
+        double tol, proto;   // the prototype's cents (node)
+    };
+    const Live lives[] = { { false, 60, 75, 29.427 }, { true, 72, 10, 0.005 } };
+    for (const Live& x : lives)
+    {
+        core::Inst inst = grains::instWith (core::Engine::cloud);
+        inst.speed = 2;
+        inst.tape = x.tape;
+        grains::Play play (kSr, inst, grains::mono (src, kSr));
+        play.e->noteOn (60, 1);
+        play.render (static_cast<std::int64_t> (std::llround (1.6 * kSr)));
+        const double f = peakHz (play.L, kSr, static_cast<std::int64_t> (play.L.size()) - 65536);
+        const double c = measure::centsBetween (f, signals::midiHz (x.wantKey));
+        check (std::abs (c) <= x.tol, fmt ("live Cloud, Speed 2, Tape switch %s: %.3f Hz, %+.3f cents from %s (+-%.0f; the prototype %+.3f)",
+                                           x.tape ? "on" : "off", f, c, x.wantKey == 72 ? "C4" : "C3", x.tol, x.proto));
+    }
+
+    struct Chain
+    {
+        const char* name;
+        core::Engine first;
+        bool firstTape;
+        core::Engine second;
+        bool secondTape;
+        const char* engines;
+    };
+    const Chain chains[] = { { "Voice (off) -> Cloud (on)", core::Engine::voice, false, core::Engine::cloud, true, "voice cloud" },
+                             { "Cloud (on) -> Voice (off)", core::Engine::cloud, true, core::Engine::voice, false, "cloud voice" } };
+    for (const Chain& x : chains)
+    {
+        rig::RawNote a = grains::rawNote ("t0", 60, 0, 4, x.first);
+        a.tape = x.firstTape;
+        rig::RawNote b = grains::rawNote ("t1", 60, 4, 4, x.second);
+        b.tape = x.secondTape;
+        core::Inst inst = grains::instWith (core::Engine::voice);
+        inst.speed = 2;
+        grains::Play play (kSr, inst, grains::mono (src, kSr));
+        play.snapshot (rig::rawSnapshot ({ a, b }, 4, true));
+        play.play (120, 0, false);
+        int maxVoices = 0;
+        std::string engines;
+        play.render (static_cast<std::int64_t> (4 * kSr), 128, [&] (std::int64_t i) {
+            maxVoices = std::max (maxVoices, play.e->stats().voices);
+            if (i == 48000 || i == 144000)
+            {
+                const engine::DisplayFrame& f = play.display();
+                engines += std::string (engines.empty() ? "" : " ") + (f.numVoices == 1 ? engineName (f.voices[0].engine) : "?");
+            }
+        });
+        check (maxVoices == 1 && engines == x.engines,
+               fmt ("%s: one voice (most %d), the engines %s (expected %s)", x.name, maxVoices, engines.c_str(), x.engines));
+        // each note's own switch: on reads the C3 sine at 2x (C4, +-10 cents), off keeps C3 (Voice, +-3 cents)
+        const double f1 = peakHz (play.L, kSr, 24000), f2 = peakHz (play.L, kSr, 120000);
+        const double c1 = measure::centsBetween (f1, signals::midiHz (x.firstTape ? 72 : 60));
+        const double c2 = measure::centsBetween (f2, signals::midiHz (x.secondTape ? 72 : 60));
+        const double tol1 = x.firstTape ? 10 : 3, tol2 = x.secondTape ? 10 : 3;
+        check (std::abs (c1) <= tol1 && std::abs (c2) <= tol2,
+               fmt ("%s: note 1 %.3f Hz (%+.3f cents from %s, +-%.0f), note 2 %.3f Hz (%+.3f cents from %s, +-%.0f); the prototype +0.014 and "
+                    "+0.005 cents in either order",
+                    x.name, f1, c1, x.firstTape ? "C4" : "C3", tol1, f2, c2, x.secondTape ? "C4" : "C3", tol2));
+    }
 }

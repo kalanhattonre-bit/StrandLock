@@ -3,7 +3,8 @@
 //  - the prototype's 16 notes x 8 heads layout (notes 0.05 beat apart at 120 bpm, the pad starter; Voice, Cloud and
 //    Lock N = 12; 44.1, 48 and 96 kHz): the measured max load (stats ().maxGrains) never passes B (208, 192, 96);
 //  - Voice, 8 heads, 6 live keys 80 ms apart at 48 kHz: the newest note keeps all 8 heads after every note-on, and
-//    the sounding heads never decrease toward newer voices (the oldest thin first);
+//    the sounding heads never decrease toward newer voices (the oldest thin first); and the heads that wait for the
+//    fade tails come in within 20 ms (plan 1.8 "waiting heads");
 //  - cuts = 0 where the prototype measured none: Lock 8 heads Grain 4 and Voice 8 heads, arpeggios of 6 notes
 //    0.1 s apart, and Strand Demo with recipes 3, 6 and 8 at 8 heads;
 //  - Lock N = 12 x 8 heads, the five budget-* cases of engine/renders.json: cuts, thinned heads, max load and B at
@@ -166,19 +167,33 @@ SL_TEST ("engine", budgetLayoutStaysUnderB)
 SL_TEST ("engine", budgetNewestKeepsItsHeads)
 {
     section ("budget: Voice, 8 heads, 6 live keys (C5 up) 80 ms apart at 48 kHz: the newest keeps all 8 heads after every note-on; "
-             "the sounding heads never decrease toward newer voices");
+             "the sounding heads never decrease toward newer voices; waiting heads come in within 20 ms");
 
     core::Inst inst = grains::instWith (core::Engine::voice);
     inst.heads = 8;
     inst.spread = 0.5;
     grains::Play play (kSr, inst, grains::mono (signals::tone (signals::midiHz (60), 4, kSr), kSr));
-    std::string newest, thinned;
-    bool allKept = true;
+    std::string newest, thinned, waits;
+    bool allKept = true, allCameIn = true;
     int thinnedLast = 0;
+    std::int64_t longestWait = 0;
     for (int i = 0; i < 6; ++i)
     {
         play.e->noteOn (84 + i, 1);
-        play.render (static_cast<std::int64_t> (std::llround (0.08 * kSr)));
+        // Waiting heads (plan 1.8): a head that has not sounded yet waits at most 20 ms for the fade tails to leave
+        // room. The display is read every 32 samples (one control tick) until the newest shows all 8 heads.
+        const auto from = static_cast<std::int64_t> (play.L.size());
+        std::int64_t cameIn = -1;
+        play.render (static_cast<std::int64_t> (std::llround (0.08 * kSr)), 32, [&play, &cameIn, from] (std::int64_t done) {
+            if (cameIn >= 0)
+                return;
+            const engine::DisplayVoice* held = newestHeld (play.display());
+            if (held != nullptr && held->numHeads == 8 && soundingHeads (*held) == 8)
+                cameIn = done - from;
+        });
+        allCameIn = allCameIn && cameIn >= 0 && cameIn <= 960 + 32;
+        longestWait = std::max (longestWait, cameIn);
+        waits += " " + std::to_string (cameIn);
         const engine::DisplayFrame& f = play.display();
         const engine::DisplayVoice* nv = newestHeld (f);
         bool kept = nv != nullptr && nv->numHeads == 8;
@@ -191,6 +206,9 @@ SL_TEST ("engine", budgetNewestKeepsItsHeads)
         thinned += " " + std::to_string (thinnedLast);
     }
     check (allKept, "the newest note keeps all 8 heads (on, not thinned, level > 0.3) after every note-on:" + newest);
+    check (allCameIn && longestWait > 32,
+           "waiting heads come in within 20 ms: samples from each note-on until the newest sounds all 8 heads" + waits
+               + " (each <= 960 + one 32-sample tick, and > 32 at least once, so some heads waited; the prototype 32 32 32 448 448 448)");
     check (thinnedLast > 0, "older notes thin when busy (8 heads x 8 grains at C5): heads held back after each note-on" + thinned
                                 + " (the prototype 0 0 6 14 22 30)");
     const engine::DisplayFrame& f = play.display();
