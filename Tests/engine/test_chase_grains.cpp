@@ -5,6 +5,10 @@
 // 1's position on the display 2432 samples after Play is within 0.002 of the straight render's at the same song
 // sample, and the 10 ms chase fade-in gives rms (0 .. 2.5 ms) / rms (12.5 .. 15 ms) in 0.02 .. 0.3 (the JS
 // criteria). Group "engine".
+//
+// chaseGrainsPathFarIn (M3 fix pass, review R3-GP-1): Play far into a 16-beat Path-kind note, where the bounded chase
+// takes coarse steps (8.2 #22). A Path head steers to its target each tick, and the coarse step used to move it 512
+// samples at that steering speed, so its position ran to infinity and NaN and the note played frame 0 of the file.
 
 #include "engine/GrainRig.h"
 #include "support/Check.h"
@@ -61,6 +65,45 @@ namespace
         }
         return p;
     }
+
+    struct PathProbe
+    {
+        double pos = std::nan ("");       // head 1's display position `at` samples after Play
+        double decoded = std::nan ("");   // the read position the audio says at 2400 samples (+-100)
+        std::int64_t chaseTicks = 0;      // stats ().chaseTicks
+        int voices = 0;
+    };
+
+    /** One 16-beat Path-kind note (Travel 0.1 -> 0.9 of the Region) from beat 0 at sr, on eng (lock: Cloud with the
+        Lock switch); Play at `beat`; the display read `at` samples after Play, `total` samples rendered in all. */
+    PathProbe playPathFrom (double sr, core::Engine eng, bool lock, double beat, std::int64_t at, std::int64_t total)
+    {
+        core::Inst inst = grains::instWith (eng);
+        inst.lock = lock;
+        rig::RawNote n = grains::rawNote ("pk", 60, 0, 16, eng);
+        n.lock = lock;
+        n.travel = 1;   // Path
+        rig::LaneSpec lane;
+        lane.set = true;
+        lane.fn = [] (double u) { return 0.1 + 0.8 * u; };
+        n.lanes[static_cast<std::size_t> (core::LaneId::travel)] = lane;
+        grains::Play play (sr, inst, grains::ramp (8, sr));
+        play.snapshot (rig::rawSnapshot ({ n }, 5, false));
+        play.play (120, beat, false);
+        play.render (at);
+        PathProbe p;
+        const engine::DisplayFrame& f = play.display();
+        p.voices = f.numVoices;
+        if (f.numVoices == 1 && f.voices[0].numHeads > 0 && f.voices[0].heads[0].index == 0)
+            p.pos = f.voices[0].heads[0].pos;
+        if (total > at)
+        {
+            play.render (total - at);
+            p.decoded = play.decodeAt (2400, 100);
+        }
+        p.chaseTicks = play.e->stats().chaseTicks;
+        return p;
+    }
 }
 
 SL_TEST ("engine", chaseGrainsAt137)
@@ -101,5 +144,51 @@ SL_TEST ("engine", chaseGrainsAt137)
         check (std::abs (fromStart.pos - straight.pos) > 0.05,
                fmt ("negative control: %s heads that start at the note start instead are %.4f away (far outside 0.002)", name,
                     std::abs (fromStart.pos - straight.pos)));
+    }
+}
+
+SL_TEST ("engine", chaseGrainsPathFarIn)
+{
+    section ("chase, grain engines, far into a Path-kind note (M3 review R3-GP-1): 16-beat Voice, Cloud and Lock notes with a Travel path "
+             "0.1 -> 0.9, Play at beat 12 (48 kHz) and beat 6 (96 kHz): the chase takes coarse steps, head 1 is finite and within 0.002 of "
+             "the straight render, and the audio reads within 0.01 of it");
+
+    struct Rate
+    {
+        double sr;
+        double beat;
+        double protoPos;          // the prototype's head 1 at kAfter samples (its chase replays every tick)
+        double protoDecoded[3];   // the prototype's audio read position at 2400 samples: Voice, Cloud, Lock
+    };
+    struct Kind
+    {
+        core::Engine eng;
+        bool lock;
+        const char* name;
+    };
+    const Kind kinds[3] = { Kind { core::Engine::voice, false, "Voice" }, Kind { core::Engine::cloud, false, "Cloud" },
+                            Kind { core::Engine::cloud, true, "Lock" } };
+    for (const Rate& rate : { Rate { 48000, 12, 0.70500, { 0.70480, 0.70708, 0.70530 } }, Rate { 96000, 6, 0.40250, { 0.40255, 0.40692, 0.40245 } } })
+    {
+        const auto kPlay = static_cast<std::int64_t> (std::round (rate.beat * 60 / 120.0 * rate.sr));   // 288000 at both rates
+        const std::int64_t everyTick = kPlay / engine::kCtrl + 1;   // the ticks a chase that never takes coarse steps replays
+        for (int k = 0; k < 3; ++k)
+        {
+            const Kind& kind = kinds[k];
+            const PathProbe chased = playPathFrom (rate.sr, kind.eng, kind.lock, rate.beat, kAfter, static_cast<std::int64_t> (0.2 * rate.sr));
+            const PathProbe straight = playPathFrom (rate.sr, kind.eng, kind.lock, 0, kPlay + kAfter, 0);
+            const double d = chased.pos - straight.pos;
+            check (chased.chaseTicks > 0 && chased.chaseTicks < everyTick,
+                   fmt ("%s at %.0f kHz, Play at beat %.0f: the chase took coarse steps (%lld ticks replayed for %lld ticks of note)", kind.name,
+                        rate.sr / 1000, rate.beat, static_cast<long long> (chased.chaseTicks), static_cast<long long> (everyTick)));
+            check (chased.voices == 1 && std::isfinite (chased.pos) && std::isfinite (straight.pos) && std::abs (d) <= 0.002,
+                   fmt ("%s at %.0f kHz: the chased playhead %.6f, the straight render's %.6f at the same song sample (%+.2e; within 0.002; the "
+                        "prototype %.5f)",
+                        kind.name, rate.sr / 1000, chased.pos, straight.pos, d, rate.protoPos));
+            check (std::abs (chased.decoded - straight.pos) <= 0.01,
+                   fmt ("%s at %.0f kHz: the audio reads %.5f of the file at 2400 samples, within 0.01 of the playhead %.5f (the prototype %.5f; "
+                        "a runaway head reads frame 0)",
+                        kind.name, rate.sr / 1000, chased.decoded, straight.pos, rate.protoDecoded[k]));
+        }
     }
 }

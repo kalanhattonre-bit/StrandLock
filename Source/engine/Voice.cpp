@@ -126,6 +126,7 @@ namespace sl::engine
 
         chasing = false;
         chaseK = 0;
+        pathSteer = false;
         reanchorSlack = 0;
     }
 

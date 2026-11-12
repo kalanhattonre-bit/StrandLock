@@ -2,10 +2,11 @@
 //
 // The JS chase replays every 32-sample tick from the chain's first note to the chase point in one go (up to 2^17
 // ticks per voice). Here the far past is coarse: a tick that lies more than 4096 ticks before the chase point is
-// replayed once per 16 (one tick, then ffAdvance (512)), and the last 4096 ticks are replayed one by one, exactly
-// as the JS. A chase of at most 4096 ticks (every fixture case) is therefore the JS chase, bit for bit. The
-// engine may also spread one chase over several blocks (chaseBegin, chaseRun with a tick budget, chaseEnd); the
-// voice is silent until chaseEnd. Block sizes never change the result: the steps depend on samples only.
+// replayed once per 16 (one tick, then ffAdvance (512); a head steered along a Path moves one tick of it, see
+// ffAdvanceCoarse), and the last 4096 ticks are replayed one by one, exactly as the JS. A chase of at most 4096
+// ticks (every fixture case) is therefore the JS chase, bit for bit. The engine may also spread one chase over
+// several blocks (chaseBegin, chaseRun with a tick budget, chaseEnd); the voice is silent until chaseEnd. Block
+// sizes never change the result: the steps depend on samples only.
 
 #include "engine/Voice.h"
 
@@ -35,7 +36,7 @@ namespace sl::engine
             // coarse while, after this step, more than 4096 ticks still lie before the chase point
             if (kNow - (kk + coarseStep) > fineSpan)
             {
-                ffAdvance (static_cast<double> (coarseStep));
+                ffAdvanceCoarse (static_cast<double> (coarseStep));
                 kk += coarseStep;
             }
             else
@@ -84,6 +85,21 @@ namespace sl::engine
         for (Head& h : heads)
         {
             h.raw += h.spd * n;
+            h.off += h.dOff * n;
+        }
+    }
+
+    void Voice::ffAdvanceCoarse (double n) noexcept
+    {
+        // A Path head's speed is (target - raw) / 32: one tick at it lands on the target. 512 samples at it would
+        // overshoot by 15 times the distance, so each coarse step multiplied the error by -15 and the position ran
+        // to infinity and NaN far into a long Path note (M3 review R3-GP-1). The head now moves one tick and sits
+        // on that tick's target until the next coarse tick steers it again. The last 4096 ticks (fine, as the JS)
+        // then land it where the JS chase does: steering forgets where the head came from.
+        const double steps = pathSteer ? static_cast<double> (kCtrl) : n;
+        for (Head& h : heads)
+        {
+            h.raw += h.spd * steps;
             h.off += h.dOff * n;
         }
     }

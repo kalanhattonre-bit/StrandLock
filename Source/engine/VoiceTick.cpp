@@ -314,6 +314,7 @@ namespace sl::engine
         const std::int32_t seed = I.seed;
         const bool pathKind = travel == TravelPlay::path;
         const double pathPos = lv[L_TRAVEL] * L;
+        pathSteer = pathKind;   // every head's spd below steers to the Path (the coarse chase step reads it)
         if (! posInit)
         {
             const core::StartSnap& sp = X.start;

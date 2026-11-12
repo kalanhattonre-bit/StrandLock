@@ -194,6 +194,11 @@ namespace sl::engine
         /** ffAdvance (n): every head moves n samples at its speed (and its Spread offset at its slew). */
         void ffAdvance (double n) noexcept;
 
+        /** The coarse chase step (n = 512): ffAdvance (n), except that heads steered along a Path (pathSteer) move
+            one tick (32 samples) at their speed, which puts them on the last tick's target, and stay there. At
+            their steering speed a 512-sample step would overshoot by 15 times the distance and run away. */
+        void ffAdvanceCoarse (double n) noexcept;
+
         /** ffChain (kk): while chasing, hand over to every chained note that has started by sample kk. */
         void ffChain (std::int64_t kk) noexcept;
 
@@ -264,6 +269,9 @@ namespace sl::engine
         // A chase spread over blocks (chaseBegin .. chaseEnd).
         bool chasing = false;
         std::int64_t chaseK = 0;                // the sample the replayed ticks have reached
+        // The last tick steered the heads along a Path (Path kind on Voice, Cloud or Lock: spd = (target - raw) / 32,
+        // which lands on the target in one tick). A coarse chase step moves such heads one tick, not 512 samples.
+        bool pathSteer = false;
 
     private:
         void initCommon (VoiceContext& context, const VoiceSource& source, VoiceKind voiceKind, double startBeat, std::int64_t pass,
