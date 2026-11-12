@@ -288,3 +288,16 @@ M3 part L of 3 (plan 7.5 "L"): the Lock engine. Branch `m3-engine`, on top of G 
 - Allocations: the engine sweep through Tape, Voice, Cloud and Lock makes 0 allocations and 0 frees, with 72
   display frames showing Lock voices and 19 voices during the bounded chase, in Release and in the Debug-CRT run.
   The processor-level runs (Strand Demo, with the Engine and Lock parameters moving) also 0 and 0.
+
+## B
+
+M3 part B of 3 (plan 7.5 "B"): the complete budget planner and the rows that cross engines. Branch `m3-engine`, on
+top of L (main = 17fc32a when B began).
+
+### Progress
+
+- Done: the B rows as tests (test_budget, test_stereo, test_fractional_heads, test_per_note_engines, test_aliasing,
+  the grain additions to test_stability, test_determinism and test_cpu); the renders harness keeps the display of
+  stats-only cases (the budget test reads the newest note's heads from it). First CI run pending.
+- In progress: CI on the first push.
+- Next: the CUBASE-CHECKLIST M3 section, this section's results, the M3 summary, then the fast-forward of main.

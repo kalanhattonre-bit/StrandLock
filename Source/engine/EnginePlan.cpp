@@ -14,6 +14,11 @@
 // The plugin's one change: a voice still in a bounded chase (Voice::chasing) is silent and waiting. The planner
 // passes it over (as if it were not in the list), so its heads get no grant; once it has caught up it starts like
 // a new voice (its first tick grants its own heads) and the planner runs.
+//
+// M3 part B checked it complete against plan 1.8 with every engine playing (Tests/engine/test_budget.cpp): the
+// measured load stays within B at 44.1, 48 and 96 kHz in Voice, Cloud and Lock; the newest note keeps its heads;
+// thinning fades and never cuts where the prototype cuts nothing; and with Lock N = 12 x 8 heads the cuts, thinned
+// heads and the newest note's heads equal the prototype's exactly. Nothing in this file had to change for that.
 
 #include "engine/Engine.h"
 

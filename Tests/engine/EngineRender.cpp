@@ -287,7 +287,6 @@ namespace sl::test::render
         const auto n = static_cast<std::int64_t> (c["n"].asNumber());
         const int res = c.contains ("res") ? static_cast<int> (c["res"].asNumber()) : 256;
         const JsonValue& o = c["out"];
-        const bool statsOnly = ! o.contains ("blockRms");
         const bool trace = o.contains ("trace");
 
         auto e = std::make_unique<engine::Engine>();
@@ -371,7 +370,10 @@ namespace sl::test::render
                     const engine::Stats s = e->stats();
                     out.stats.push_back ({ p, s.voices, s.grains, s.thinnedHeads, s.maxGrains, s.budget, s.cuts, s.steals });
                 }
-                if (p % kDisplayEvery == 0 && ! statsOnly)
+                // Every case records its display frames, stats-only cases too (they carry none to compare): M3 part
+                // B's budget test reads the newest note's sounding heads from them. Filling a frame changes nothing
+                // that the render or the stats depend on.
+                if (p % kDisplayEvery == 0)
                 {
                     e->fillDisplay (*frame);
                     out.displayAt.push_back (p);

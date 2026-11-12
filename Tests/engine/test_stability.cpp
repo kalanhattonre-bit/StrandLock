@@ -2,9 +2,13 @@
 // and 16 live chords keeps every health counter at 0 and the output in bounds; the health counters do count (a
 // source too loud to be real, a source with NaN); 300 simultaneous starts keep the 256 earliest and start the rest
 // at the next segment (stats ().deferredStarts) while the 64-voice pool cuts its oldest stealing voices; a deleted
-// note's voice keeps its snapshot's epoch until it is done, an edited note's voice follows at once. Group "engine".
+// note's voice keeps its snapshot's epoch until it is done, an edited note's voice follows at once. M3 part B: 16
+// voices x 8 heads in every engine (Voice, Tape, Cloud and Lock at 48 kHz, Voice at 96, Lock at 44.1) keep the
+// health counters at 0, the output in bounds and the load within the budget. Group "engine".
 
 #include "engine/EngineRender.h"
+#include "engine/GrainRig.h"
+#include "engine/VoiceRig.h"
 #include "support/Check.h"
 #include "support/TestRegistry.h"
 #include "support/TestSignals.h"
@@ -21,9 +25,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -272,4 +278,79 @@ SL_TEST ("engine", noTapeStandIns)
     check (shown[0] == static_cast<int> (engine::Kc::tape) && shown[1] == static_cast<int> (engine::Kc::voice)
                && shown[2] == static_cast<int> (engine::Kc::cloud) && shown[3] == static_cast<int> (engine::Kc::lock),
            "the display shows the engine each note asks for");
+}
+
+SL_TEST ("engine", stability16x8EveryEngine)
+{
+    section ("stability in every engine (M3 part B; prototype-v4/tests/test-engine.js \"16 voices x 8 heads\"): 16 clip notes x 8 heads, "
+             "moving Pitch and Formant lanes, all four motions, Spread 1, Spray 0.3, Output Gain +12 dB, 3 s: no non-finite sample, no "
+             "filter reset, output in bounds, the load within the budget");
+
+    const std::vector<float> t1 = signals::tone (signals::midiHz (60), 4, 48000, signals::ToneOpts { 0, 0.6, 0 });
+    const std::vector<float> nz = signals::noise (4, 48000, 6, 0.4);
+    std::vector<float> ls (t1.size()), rs (t1.size());
+    for (std::size_t i = 0; i < t1.size(); ++i)
+    {
+        ls[i] = static_cast<float> (static_cast<double> (t1[i]) + static_cast<double> (nz[i]));
+        rs[i] = static_cast<float> (static_cast<double> (t1[i]) - static_cast<double> (nz[i]) * 0.5);
+    }
+    struct Run
+    {
+        const char* name;
+        core::Engine engine;
+        bool lock;
+        int sr;
+    };
+    const Run runs[] = { { "Voice", core::Engine::voice, false, 48000 }, { "Tape", core::Engine::tape, false, 48000 },
+                         { "Cloud", core::Engine::cloud, false, 48000 }, { "Lock", core::Engine::cloud, true, 48000 },
+                         { "Voice", core::Engine::voice, false, 96000 }, { "Lock", core::Engine::cloud, true, 44100 } };
+    const core::Motion motions[] = { core::Motion::forward, core::Motion::mirror, core::Motion::scatter, core::Motion::bounce };
+    for (const Run& x : runs)
+    {
+        std::vector<rig::RawNote> notes;
+        for (int i = 0; i < 16; ++i)
+        {
+            rig::RawNote n = grains::rawNote (("x" + std::to_string (i)).c_str(), 36 + ((i * 7) % 60), i * 0.05, 6, x.engine);
+            n.lock = x.lock;
+            n.motion = motions[i % 4];
+            auto set = [&n] (core::LaneId id, double v, std::function<double (double)> fn) {
+                rig::LaneSpec& s = n.lanes[static_cast<std::size_t> (id)];
+                s.set = true;
+                s.value = v;
+                s.fn = std::move (fn);
+            };
+            const double ph = i;
+            set (core::LaneId::heads, 1, {});
+            set (core::LaneId::amp, 1, {});
+            set (core::LaneId::pitch, 0, [ph] (double u) { return 0.5 + 0.4 * std::sin (u * 20 + ph); });
+            set (core::LaneId::formant, 0, [ph] (double u) { return 0.5 + 0.5 * std::sin (u * 13 + ph); });
+            set (core::LaneId::grain, 0.2 + (i % 3) * 0.3, {});
+            notes.push_back (n);
+        }
+        core::Inst inst = grains::instWith (x.engine);
+        inst.lock = x.lock;
+        inst.outGain = 12;
+        inst.spread = 1;
+        inst.spray = 0.3;
+        inst.grainLock = 12;
+        grains::Play play (static_cast<double> (x.sr), inst, engine::makeSampleData (ls, rs, 48000, "tone+noise"));
+        play.snapshot (rig::rawSnapshot (notes, 4, false));
+        play.play (120, 0, true);
+        play.render (static_cast<std::int64_t> (3) * x.sr);
+        const engine::Stats st = play.e->stats();
+        bool finite = true;
+        for (std::size_t i = 0; i < play.L.size(); ++i)
+            finite = finite && std::isfinite (play.L[i]) && std::isfinite (play.R[i]);
+        const double rms = std::max (rmsOf (play.L), rmsOf (play.R)), peak = std::max (peakOf (play.L), peakOf (play.R));
+        const double kHz = x.sr / 1000.0;
+        check (finite && st.nonFinite == 0 && st.filterResets == 0,
+               fmt ("%s at %.1f kHz: every sample finite, nonFinite = %lld, filterResets = %lld", x.name, kHz, static_cast<long long> (st.nonFinite),
+                    static_cast<long long> (st.filterResets)));
+        check (st.preLimiterPeak > 0.05 && rms > 0.01 && peak <= 0.98,
+               fmt ("%s at %.1f kHz: pre-limiter peak %.3f > 0.05, output rms %.4f > 0.01, peak %.4f <= 0.98", x.name, kHz, st.preLimiterPeak, rms,
+                    peak));
+        check (st.maxGrains <= st.budget,
+               fmt ("%s at %.1f kHz: max load %d <= B %d (%d heads held back at the end, %lld cuts, %d voices)", x.name, kHz, st.maxGrains, st.budget,
+                    st.thinnedHeads, static_cast<long long> (st.cuts), st.voices));
+    }
 }
