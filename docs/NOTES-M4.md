@@ -196,7 +196,8 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
 - `Source/ui/roll/NoteLayerCache`: every note's drawing in one image the size of the view, in device pixels.
   `noteChanges` compares the new state with what the image shows, note by note (its version pointer, whether it
   is selected or primary, its slide), and marks the old and new bounds of each note that changed; the next paint
-  clears those device pixels and draws again, clipped to them, every note they touch, in drawing order. The view's
+  clears each marked rectangle and draws every note that reaches it again, in drawing order, the clear and the
+  notes through one clip. The view's
   size, scroll and zoom, the theme, the mode, the tempo, the vibrato rate, the slide settings and the device scale
   are its Key: a change draws every note again, and so does a change of more than 48 notes or of the order of the
   notes that did not change.
@@ -238,6 +239,18 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
   window, software in the tests) and drawn with no resampling, so it stays sharp at every UI Scale; the rows, the
   overlay and the playhead are drawn directly on every paint. A Direct2D image whose device went away is drawn
   again in full (JUCE's cached component images do the same).
+- **A changed rectangle is cleared through the clip its notes are drawn through.** The first version cleared the
+  rectangle with Image::clear and then drew the notes through a clip. JUCE's software renderer gave exactly a full
+  redraw's pixels, but Direct2D (the renderer of a Windows window, and of the Windows test runner's images) did
+  not: run 44195077235 found 111 pixels along the rectangles' edge rows that differed from a full redraw (the layer
+  itself, up to 255 levels), while two full Direct2D redraws agreed and the software renderer differed in none:
+  Direct2D places its clip's edge rows apart from a separate clear's. Drawing each rectangle as a patch at an
+  offset (run 44198028167) fixed the edges but rounded the coordinates differently inside (30 pixels, up to 6
+  levels, with both renderers). Now the clear goes through the same clip as the notes (whatever pixels the clip
+  holds are the ones cleared and drawn again), the notes keep the full redraw's transform, and every note within
+  2 px of the rectangle is drawn, so a clip a pixel larger still gets every note that reaches it. A row the clip
+  leaves out keeps its pixels, which are right: a rectangle's edges hold only notes that did not change (the changed
+  notes' bounds carry 14 px of room). The perf test gates the picture with both renderers.
 - **A note's bounds** are its line, ribbons and dots plus 14 px: JUCE mitres a stroke's joints up to 3 widths (the
   selected line is 3.2 px), and the dots reach 7 px past the line.
 - **"Moving one note repaints at most 3 notes' bounds"** is measured on the note layer: a moved note marks its old
