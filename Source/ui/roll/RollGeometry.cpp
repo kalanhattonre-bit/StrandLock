@@ -1,6 +1,7 @@
 #include "RollGeometry.h"
 
 #include "core/Curves.h"
+#include "core/JsCompat.h"
 #include "model/ClipEdit.h"
 #include "model/Generators.h"
 #include "model/Node.h"
@@ -74,6 +75,8 @@ namespace sl::ui::roll
             for (auto it = cache.begin(); it != cache.end();)
                 it = keep.count (it->first) != 0 ? std::next (it) : cache.erase (it);
         }
+        // a clip with fewer bars makes the roll narrower: the scroll stays inside it
+        setScroll (scrX, scrY);
     }
 
     void RollGeometry::setInst (const core::Inst& i)
@@ -90,6 +93,78 @@ namespace sl::ui::roll
     {
         bw = std::isfinite (beatWidth) ? clampD (beatWidth, kMinBeatWidth, kMaxBeatWidth) : kDefaultBeatWidth;
         rh = std::isfinite (rowHeight) ? clampD (rowHeight, kMinRowHeight, kMaxRowHeight) : kDefaultRowHeight;
+        setScroll (scrX, scrY);
+    }
+
+    //==============================================================================================
+    double RollGeometry::contentWidth() const noexcept
+    {
+        const double beats = clip != nullptr ? totalBeats (*clip) : 0.0;
+        return std::ceil (beats * bw + 60.0);
+    }
+
+    double RollGeometry::contentHeight() const noexcept
+    {
+        return std::ceil ((double) kRows * rh);
+    }
+
+    void RollGeometry::setViewSize (double width, double height)
+    {
+        viewW = std::isfinite (width) && width > 0.0 ? width : 0.0;
+        viewH = std::isfinite (height) && height > 0.0 ? height : 0.0;
+        setScroll (scrX, scrY);
+    }
+
+    void RollGeometry::setScroll (double x, double y)
+    {
+        // what a browser does with a scroller's scrollLeft and scrollTop: 0 .. the content's size less the view's
+        const double maxX = std::max (0.0, contentWidth() - viewW), maxY = std::max (0.0, contentHeight() - viewH);
+        scrX = std::isfinite (x) ? clampD (x, 0.0, maxX) : 0.0;
+        scrY = std::isfinite (y) ? clampD (y, 0.0, maxY) : 0.0;
+    }
+
+    void RollGeometry::zoomBy (double h, double v)
+    {
+        // sl-ui.js zoom (h, v): the beat and row at the view's centre, the new zoom, then the scroll that keeps them
+        const double centreBeat = (scrX + viewW / 2.0) / bw, centreRow = (scrY + viewH / 2.0) / rh;
+        setZoom (bw * h, core::jsRound (rh * v));
+        setScroll (centreBeat * bw - viewW / 2.0, centreRow * rh - viewH / 2.0);
+    }
+
+    void RollGeometry::wheelZoom (bool zoomIn, double viewX)
+    {
+        // sl-ui.js's Ctrl + wheel: the beat under the pointer stays under it
+        const double beat = (viewX + scrX) / bw;
+        setZoom (bw * (zoomIn ? 1.15 : 1.0 / 1.15), rh);
+        setScroll (beat * bw - viewX, scrY);
+    }
+
+    void RollGeometry::centreOnNotes()
+    {
+        // sl-ui.js init: centre on most of the notes (the median pitch, 5 semitones up)
+        std::vector<double> ps;
+        if (clip != nullptr)
+            for (const auto& n : clip->notes)
+                ps.push_back (n->p);
+        std::sort (ps.begin(), ps.end());
+        const double mid = ps.empty() ? 66.0 : ps[ps.size() / 2] + 5.0;
+        setScroll (scrX, std::max (0.0, cy (mid) - viewH / 2.0));
+    }
+
+    RollGeometry::ViewState RollGeometry::viewState() const noexcept
+    {
+        ViewState s;
+        s.zoomH = bw / kDefaultBeatWidth;
+        s.zoomV = rh / kDefaultRowHeight;
+        s.scrollBeat = scrX / bw;
+        s.scrollRow = scrY / rh;
+        return s;
+    }
+
+    void RollGeometry::setViewState (const ViewState& s)
+    {
+        setZoom (kDefaultBeatWidth * s.zoomH, core::jsRound (kDefaultRowHeight * s.zoomV));
+        setScroll (s.scrollBeat * bw, s.scrollRow * rh);
     }
 
     int RollGeometry::pitchAt (double y) const noexcept

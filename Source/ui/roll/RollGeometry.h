@@ -3,8 +3,10 @@
 // The piano roll's geometry (PLUGIN-PLAN 4 M4, 7.6 R1; sl-ui.js "roll geometry"): beats <-> x, pitch rows <-> y, the
 // drawn line of a note (its pitch lane, its glide and its vibrato squiggle), where each lane's nodes sit, the end
 // dots, the glide diamonds and the segment bend diamonds, and what a point hits. All in roll pixels: x = beats x
-// beat width, y = rows from the top (MIDI 96) x row height, with nothing scrolled (the view adds its scroll).
-// Pure C++ (no JUCE), the prototype's arithmetic in its order; tested against Tests/fixtures/roll/geometry.json.
+// beat width, y = rows from the top (MIDI 96) x row height, with nothing scrolled. The view part (its size, the
+// scroll, the zoom buttons, the wheel zoom) turns view pixels into roll pixels and back.
+// Pure C++ (no JUCE), the prototype's arithmetic in its order; tested against Tests/fixtures/roll/geometry.json
+// and, for the view, against values from sl-ui.js's zoom, wheel and first-view lines (test_roll_geometry.cpp).
 
 #include "core/Inst.h"
 #include "core/Lanes.h"
@@ -104,8 +106,51 @@ namespace sl::ui::roll
         double rowHeight() const noexcept { return rh; }
         double laneHeight() const noexcept { return rh * kLaneRows; }
 
-        /** The view's scroll in roll pixels (what the top left corner of the view shows). */
-        double scrollX = 0.0, scrollY = 0.0;
+        //==========================================================================================
+        // The view onto the roll (sl-ui.js: the scroller over its spacer). The roll is contentWidth x contentHeight
+        // pixels; the view shows viewWidth x viewHeight of it from the scroll, and the scroll stays inside the roll
+        // the way a browser keeps a scroller's scroll. The gestures take roll pixels: the view hands them
+        // toRoll (its point), and draws at toView (a roll point).
+
+        /** The roll's size in whole pixels (sl-ui.js sizeSpacer): the clip's beats plus 60 px across, every row down. */
+        double contentWidth() const noexcept;
+        double contentHeight() const noexcept;
+
+        /** The view's size in pixels (not finite or under 0: 0). The scroll is kept inside the roll. */
+        void setViewSize (double width, double height);
+        double viewWidth() const noexcept { return viewW; }
+        double viewHeight() const noexcept { return viewH; }
+
+        /** The scroll in roll pixels: what the view's top left corner shows, kept in 0 .. the roll's size less the
+            view's (not finite: 0). A new clip or zoom keeps it inside the roll too. */
+        void setScroll (double x, double y);
+        double scrollX() const noexcept { return scrX; }
+        double scrollY() const noexcept { return scrY; }
+
+        /** A point of the view in roll pixels (sl-ui.js rollPos), and a roll point in the view. */
+        Point toRoll (double viewX, double viewY) const noexcept { return { viewX + scrX, viewY + scrY }; }
+        Point toView (double rollX, double rollY) const noexcept { return { rollX - scrX, rollY - scrY }; }
+
+        /** The zoom buttons (sl-ui.js zoom (h, v)): the beat width times h (12..400) and the row height times v,
+            rounded to whole pixels (8..30); the beat and the row at the view's centre stay there. */
+        void zoomBy (double h, double v);
+
+        /** Ctrl + the mouse wheel over the roll: the beat width times 1.15 (in) or divided by 1.15 (out), 12..400;
+            the beat under the pointer (viewX, view pixels) stays under it. */
+        void wheelZoom (bool zoomIn, double viewX);
+
+        /** The first view of a clip (sl-ui.js init): the row 5 semitones above the clip's median pitch (66 with no
+            notes) in the middle of the view, never above the top. The sideways scroll is left as it is. */
+        void centreOnNotes();
+
+        /** The zoom and scroll as UIST keeps them: zoom factors of 64 px per beat and 14 px per row, the scroll in
+            beats and rows. setViewState rounds the row height to whole pixels, as the zoom buttons leave it. */
+        struct ViewState
+        {
+            double zoomH = 1.0, zoomV = 1.0, scrollBeat = 0.0, scrollRow = 0.0;
+        };
+        ViewState viewState() const noexcept;
+        void setViewState (const ViewState& s);
 
         //==========================================================================================
         // Rows and beats.
@@ -202,6 +247,7 @@ namespace sl::ui::roll
         core::Inst inst = core::defaultInst();
         double bpm = 120.0;
         double bw = kDefaultBeatWidth, rh = kDefaultRowHeight;
+        double viewW = 0.0, viewH = 0.0, scrX = 0.0, scrY = 0.0;
 
         mutable model::GlideMap glides;   // computeGlides of the clip shown, for its instrument's slide mode and time
         mutable model::ClipPtr glidesClip;
