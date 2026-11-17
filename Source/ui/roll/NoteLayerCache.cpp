@@ -271,20 +271,32 @@ namespace sl::ui::roll
         }
         area.consolidate();
 
+        // Each rectangle is drawn on its own, in a patch of the layer's image type the rectangle's size, with no
+        // clip, then put in place of what the layer showed there (cleared, then the patch drawn at a whole-pixel
+        // offset). Drawing into the layer through a clip would be shorter, but Direct2D draws a clip's edge rows
+        // differently from the same rows drawn unclipped (CI run 44195077235: 111 pixels along the edges), and
+        // the patch is the same drawing as a full redraw, moved by whole pixels.
+        const auto patchType = image.getPixelData()->createType();
         for (const auto& r : area)
         {
-            image.clear (r);
             const auto inRoll = juce::Rectangle<double> ((double) r.getX() / s + sx, (double) r.getY() / s + sy,
                                                          (double) r.getWidth() / s, (double) r.getHeight() / s);
-            juce::Graphics g (image);
-            g.reduceClipRegion (r);
-            g.addTransform (toImage);
-            for (const auto& n : vis)
-                if (painter.noteBounds (*n).intersects (inRoll))
-                {
-                    painter.paintNote (g, *n, st.isSelected (n->id));
-                    ++stats.notesDrawn;
-                }
+            juce::Image patch (juce::Image::ARGB, r.getWidth(), r.getHeight(), true, *patchType);
+            {
+                juce::Graphics pg (patch);
+                pg.addTransform (toImage.translated ((float) -r.getX(), (float) -r.getY()));
+                for (const auto& n : vis)
+                    if (painter.noteBounds (*n).intersects (inRoll))
+                    {
+                        painter.paintNote (pg, *n, st.isSelected (n->id));
+                        ++stats.notesDrawn;
+                    }
+            }
+            image.clear (r);
+            {
+                juce::Graphics g (image);
+                g.drawImageAt (patch, r.getX(), r.getY());
+            }
             ++stats.rects;
             stats.pixels += (double) r.getWidth() * (double) r.getHeight();
         }

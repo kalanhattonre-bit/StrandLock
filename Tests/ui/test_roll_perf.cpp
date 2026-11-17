@@ -295,10 +295,12 @@ SL_TEST ("ui", rollMoveRepaintsThreeNotes)
            fmt ("repainting only that over the picture before gives the full repaint's picture: %d pixels differ (largest %d)",
                 m.diff.differing, m.diff.largest));
 
-    // the window's own renderer, as a figure
+    // the window's own renderer (Direct2D on Windows): the same picture too
     const auto n = moveOneNote (juce::NativeImageType());
-    note (fmt ("native renderer: %d note drawings, %d rectangles, %.2f ms; %d pixels differ from its full repaint (largest %d)",
-               n.partial.notesDrawn, n.partial.rects, n.partial.ms, n.diff.differing, n.diff.largest));
+    check (n.diff.differing == 0 && n.cache.differing == 0,
+           fmt ("native renderer: %d note drawings, %d rectangles, %.2f ms; %d pixels differ from its full repaint (largest %d), "
+                "%d in the note layer itself", n.partial.notesDrawn, n.partial.rects, n.partial.ms, n.diff.differing, n.diff.largest,
+                n.cache.differing));
     note (fmt ("native renderer: of those, %d inside the area asked for, %d within 2 px of its edge; around (%d, %d, %d x %d); %s",
                n.diff.insideAsked, n.diff.atAskedEdge, n.diff.where.getX(), n.diff.where.getY(), n.diff.where.getWidth(), n.diff.where.getHeight(),
                n.diff.samples.toRawUTF8()));

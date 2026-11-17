@@ -7,14 +7,15 @@
 // note, what its image shows: the note version (the model shares every note an edit did not touch, so a moved
 // note is a new pointer), whether it is selected or the primary note, and its slide (the note before a moved
 // note slides somewhere else now). noteChanges compares the new state with that, note by note, and marks the old
-// and the new bounds of each note that changed; the next paint clears those device pixels and draws again, inside
-// them only, every note they touch, in the drawing order. Everything else the notes depend on (the view's size,
+// and the new bounds of each note that changed; the next paint draws every note they touch again, in the drawing
+// order, into a patch the size of each marked rectangle, and puts the patch in place of what the layer showed there. Everything else the notes depend on (the view's size,
 // scroll and zoom, the theme, the mode, the tempo, the vibrato rate, the slide settings, the device scale) is the
 // Key: when it changes, the whole layer is drawn again. So is a change of more than maxChangedNotes notes, or of
 // the order of notes that did not change.
 //
-// A partial update draws exactly what a full one draws inside the cleared rectangles (the same notes, the same
-// order, the same arithmetic), so the image after it is the image a full redraw would give (test_roll_perf).
+// A partial update draws exactly what a full one draws inside the marked rectangles (the same notes, the same
+// order, the same arithmetic, moved by whole pixels, and no clip: Direct2D draws a clip's edges differently), so
+// the image after it is the image a full redraw would give, with JUCE's renderer and with Direct2D (test_roll_perf).
 //
 // The image is made with the type the paint's renderer prefers (Direct2D in a Windows window, software in the
 // tests on Linux), and drawn without resampling. Message thread only.
