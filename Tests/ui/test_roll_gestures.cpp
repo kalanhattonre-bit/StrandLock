@@ -8,7 +8,11 @@
 // grid) at the snapped position, a drag moves with grid and scale snap, an end dot bends only after 0.4 row, and every
 // finished gesture is exactly one undo step (none for a click that changes nothing).
 
+#include <juce_audio_processors/juce_audio_processors.h>
+
 #include "RollRig.h"
+
+#include "PluginProcessor.h"
 
 #include "core/Inst.h"
 #include "core/JsCompat.h"
@@ -760,4 +764,44 @@ SL_TEST ("ui", rollOneUndoStepPerGesture)
     r2.undo();
     check (clickNothing && oneStep && model::sameClip (*r2.doc.current(), *c0),
            "a click on a note that moves 2 px sideways selects it with 0 undo steps; dragged a row up it is 1 step \"Move notes\", and Undo puts it back");
+}
+
+SL_TEST ("ui", rollDragPublishesWithoutHistory)
+{
+    section ("Roll gestures in the plugin: a drag's steps reach the engine while it moves, and its release is one undo step");
+
+    // decision 2 through the real processor: RollHost's commit is pushUndoStep, the document publishes every version
+    StrandLockProcessor proc;
+    auto out = proc.editClip ("Spread notes", spreadClip());
+    proc.waitForSnapshot();
+    ui::roll::RollGestures g ({ proc.getDocument(), [&proc] (const std::string& l) { return proc.pushUndoStep (l, {}); }, {}, {} });
+    g.settings().inst.glideMode = core::GlideMode::off;
+    proc.getDocument().setSelection ({ "d3" }, std::string ("d3"));
+    g.sync();
+    const auto start = proc.getDocument().current();
+    const model::Note& n = *modelfx::findNote (*start, "d3");
+    const auto& geo = g.geometry();
+    const double x = (n.s + n.l * 0.5) * geo.beatWidth(), y = geo.baseYAt (n, 0.5);
+
+    g.pointerDown (x, y, {}, 1e6);
+    int published = 0, rowsUp = 0;
+    bool historyStill = true;
+    for (int k = 1; k <= 3; ++k)
+    {
+        const auto v0 = proc.getDocument().version();
+        g.pointerMove (x, y - k * geo.rowHeight(), {});
+        const auto v1 = proc.getDocument().version();
+        const bool reached = proc.waitForSnapshot() && proc.getSnapshotPublisher().stats().publishedVersion == v1;
+        published += v1 == v0 + 1 && reached ? 1 : 0;
+        rowsUp += fixture::same (modelfx::findNote (*proc.getDocument().current(), "d3")->p, n.p + k) ? 1 : 0;
+        historyStill = historyStill && proc.undoLabel() == std::optional<std::string> ("Spread notes");
+    }
+    g.pointerUp();
+    const bool oneStep = proc.undoLabel() == std::optional<std::string> ("Move notes");
+    proc.undo();
+    const bool undone = model::sameClip (*proc.getDocument().current(), *start) && proc.undoLabel() == std::optional<std::string> ("Spread notes");
+    check (out.accepted && published == 3 && rowsUp == 3,
+           fmt ("each of the 3 moves made a new clip version, a row higher, that the publisher compiled and handed to the audio thread (%d, %d)", published, rowsUp));
+    check (historyStill, "no undo step while the drag moves");
+    check (oneStep && undone, "the release is one undo step \"Move notes\"; Undo puts the note back and leaves \"Spread notes\" next");
 }

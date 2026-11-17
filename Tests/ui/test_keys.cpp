@@ -12,6 +12,7 @@
 #include "support/TestRegistry.h"
 #include "ui/KeyRouter.h"
 
+#include <algorithm>
 #include <map>
 #include <string>
 #include <vector>
@@ -54,7 +55,8 @@ namespace
         }
     };
 
-    /** Every key a test presses: the printable ASCII keys, both cases of the letters, and the special keys. */
+    /** Every key a test presses, once each: the printable ASCII keys (both cases of the letters) and the special keys
+        (Space is ASCII 32, so it is in the list once). */
     std::vector<int> allKeyCodes()
     {
         std::vector<int> codes;
@@ -70,6 +72,8 @@ namespace
                              juce::KeyPress::numberPad9, juce::KeyPress::numberPadAdd, juce::KeyPress::numberPadSubtract,
                              juce::KeyPress::numberPadDelete, juce::KeyPress::playKey, juce::KeyPress::stopKey })
             codes.push_back (c);
+        std::sort (codes.begin(), codes.end());
+        codes.erase (std::unique (codes.begin(), codes.end()), codes.end());
         return codes;
     }
 
