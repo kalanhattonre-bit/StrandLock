@@ -1,12 +1,15 @@
 #include "ClipDocument.h"
 
+#include "core/JsCompat.h"
 #include "core/Lanes.h"
 #include "core/Music.h"
 #include "model/History.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <memory>
+#include <unordered_set>
 #include <utility>
 
 namespace sl::doc
@@ -165,6 +168,7 @@ namespace sl::doc
             clip = next;
             bytes = r.bytes;
             v = ++ver;
+            pruneLocked (*next);
         }
         out.result = std::move (r);
         out.version = v;
@@ -186,6 +190,7 @@ namespace sl::doc
             clip = newClip;
             bytes = size;
             v = ++ver;
+            pruneLocked (*newClip);
         }
         if (onClipChanged)
             onClipChanged (newClip, v);
@@ -218,6 +223,127 @@ namespace sl::doc
         np.sound = r;
     }
 
+    //==============================================================================================
+    // The roll's state.
+
+    RollState ClipDocument::rollState() const
+    {
+        const std::lock_guard<std::mutex> hold (readLock);
+        return roll;
+    }
+
+    void ClipDocument::selectLocked (const model::Clip& c, std::vector<std::string> ids, std::optional<std::string> primary)
+    {
+        const model::IdSet exists = model::idSet (c, model::Ids::all());
+        std::vector<std::string> set;
+        std::unordered_set<std::string> seen;
+        for (auto& id : ids)
+            if (exists.count (id) != 0 && seen.insert (id).second)
+                set.push_back (std::move (id));
+        std::string p = primary ? *primary : roll.primary;
+        if (! p.empty() && exists.count (p) == 0)
+            p.clear();
+        if (! p.empty() && seen.count (p) == 0)
+        {
+            if (primary)
+            {
+                set.push_back (p);
+                seen.insert (p);
+            }
+            else
+            {
+                p.clear();
+            }
+        }
+        if (p.empty() && ! set.empty())
+            p = set.front();
+        roll.selected = std::move (set);
+        roll.primary = std::move (p);
+        if (roll.activeNode && seen.count (roll.activeNode->id) == 0)
+            roll.activeNode.reset();
+    }
+
+    void ClipDocument::pruneLocked (const model::Clip& c)
+    {
+        const model::IdSet exists = model::idSet (c, model::Ids::all());
+        std::vector<std::string> keep;
+        for (const auto& id : roll.selected)
+            if (exists.count (id) != 0)
+                keep.push_back (id);
+        const bool primaryOk = ! roll.primary.empty() && exists.count (roll.primary) != 0;
+        if (keep.size() != roll.selected.size() || (! roll.primary.empty() && ! primaryOk))
+            selectLocked (c, std::move (keep), primaryOk ? roll.primary : std::string());
+        if (roll.activeNode)
+        {
+            const auto& a = *roll.activeNode;
+            const model::Note* n = nullptr;
+            for (const auto& q : c.notes)
+                if (q->id == a.id)
+                {
+                    n = q.get();
+                    break;
+                }
+            const int len = n != nullptr ? (int) model::noteLane (*n, a.lane).size() : -1;
+            if (n == nullptr || len != a.len || a.k >= len)
+                roll.activeNode.reset();
+        }
+    }
+
+    void ClipDocument::setSelection (std::vector<std::string> ids, std::optional<std::string> primary)
+    {
+        const std::lock_guard<std::mutex> hold (readLock);
+        selectLocked (*clip, std::move (ids), std::move (primary));
+    }
+
+    void ClipDocument::setPrimary (const std::string& id)
+    {
+        const std::lock_guard<std::mutex> hold (readLock);
+        if (! id.empty() && ! roll.isSelected (id))
+        {
+            auto ids = roll.selected;
+            ids.push_back (id);
+            selectLocked (*clip, std::move (ids), id);
+        }
+        else if (id != roll.primary)
+        {
+            roll.primary = id;
+        }
+    }
+
+    void ClipDocument::setMode (double m)
+    {
+        const std::lock_guard<std::mutex> hold (readLock);
+        const double r = std::isfinite (m) ? core::jsRound (m) : 1.0;
+        roll.mode = (int) std::clamp (r, 1.0, 8.0);
+        if (roll.activeNode && roll.activeNode->lane != roll.activeLane())
+            roll.activeNode.reset();
+    }
+
+    void ClipDocument::setSubLane (core::LaneId lane)
+    {
+        if (std::find (std::begin (core::kSampleLanes), std::end (core::kSampleLanes), lane) == std::end (core::kSampleLanes))
+            return;
+        const std::lock_guard<std::mutex> hold (readLock);
+        roll.subLane = lane;
+        roll.mode = 8;
+        if (roll.activeNode && roll.activeNode->lane != roll.activeLane())
+            roll.activeNode.reset();
+    }
+
+    void ClipDocument::setActiveNode (std::optional<ActiveNode> node)
+    {
+        const std::lock_guard<std::mutex> hold (readLock);
+        if (node && node->len == 0)
+            for (const auto& q : clip->notes)
+                if (q->id == node->id)
+                {
+                    node->len = (int) model::noteLane (*q, node->lane).size();
+                    break;
+                }
+        roll.activeNode = std::move (node);
+    }
+
+    //==============================================================================================
     void ClipDocument::writeAtomics (const state::InstState& s) noexcept
     {
         atomics.seed.store (s.seed);

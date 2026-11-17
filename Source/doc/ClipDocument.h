@@ -16,8 +16,10 @@
 // from any thread. Two locks: edits are serialised with one, reads take a short one, and onClipChanged runs
 // after both are released.
 
+#include "RollState.h"
 #include "SnapshotPublisher.h"
 
+#include "core/Lanes.h"
 #include "model/ClipCodec.h"
 #include "model/ClipEdit.h"
 #include "params/ParamBridge.h"
@@ -27,7 +29,9 @@
 #include <cstdint>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace sl::doc
 {
@@ -100,6 +104,34 @@ namespace sl::doc
         std::function<void (const model::ClipPtr&, std::uint64_t version)> onClipChanged;
 
         //==========================================================================================
+        // The roll's state (PLUGIN-PLAN 7.6: selection, mode, active lane). Read from any thread; changed on the
+        // message thread. Every new clip version drops what it no longer holds: selected notes that are gone (the
+        // primary then falls to the first one left), and the inspector's node when its note, lane or node count
+        // changed (sl-ui.js pruneSelection and validateNodes).
+
+        RollState rollState() const;
+
+        /** sl-ui.js setSel (ids, primary): the ids the clip holds (repeats once), in this order. primary: nothing =
+            keep the current primary (dropped when it is not among the ids), an empty string = none, an id = that
+            note (added to the selection when missing). With no primary the first id is it. The inspector's node
+            goes when its note is no longer selected. */
+        void setSelection (std::vector<std::string> ids, std::optional<std::string> primary = std::nullopt);
+
+        /** sl-ui.js setPrimary: a selected note becomes the primary one; a note not selected joins the selection
+            first. An empty id clears the primary. */
+        void setPrimary (const std::string& id);
+
+        /** Mode 1..8 (rounded and clamped; 1 for a value that is not finite). The inspector's node goes when it is
+            not on the new mode's lane. */
+        void setMode (double mode);
+
+        /** Mode 8 with this Sample sub-lane (Travel, Heads, Grain or Refresh; any other lane is ignored). */
+        void setSubLane (core::LaneId lane);
+
+        /** The inspector's node (nothing = none). Its node count is taken from the clip when len is 0. */
+        void setActiveNode (std::optional<ActiveNode> node);
+
+        //==========================================================================================
         /** The toast for a refused result: the note cap ("That would make 4100 notes; the limit is 4096."), the
             encoded size, or the snapshot budget. */
         static std::string refusalText (const model::EditResult& refused, bool tooDetailed, std::size_t tableBytes);
@@ -107,6 +139,10 @@ namespace sl::doc
     private:
         EditOutcome accept (model::EditResult r);
         void writeAtomics (const state::InstState& s) noexcept;
+
+        // With readLock held: the selection rules on clip c.
+        void selectLocked (const model::Clip& c, std::vector<std::string> ids, std::optional<std::string> primary);
+        void pruneLocked (const model::Clip& c);
 
         params::NonParamAtomics& atomics;
 
@@ -119,5 +155,6 @@ namespace sl::doc
         std::uint64_t ver = 0;
         std::size_t bytes = 0;
         NonParamState np;
+        RollState roll;
     };
 }
