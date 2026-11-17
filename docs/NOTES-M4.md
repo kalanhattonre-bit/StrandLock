@@ -249,6 +249,11 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
 - **The roll's snapshots fold the tool tabs,** as the prototype does when it first opens on a laptop, so the roll
   has the room; the editor's own snapshots (test_editor) keep the tab open and show the roll smaller. The Build
   pictures keep the first view; Pitch, Tone and Sample scroll to their selected notes.
+- **A note for the architect: the roll is small in a new instance.** At 1100 x 680 with the Sample tab open (a new
+  instance's UIST), M0's layout leaves the roll 158 px tall (a 128 px canvas, 9 rows). The prototype folds its tabs
+  on a first open when the window is under 900 px high (sl-ui.js init), which gives the roll about 360 px. UIST's
+  `folded` cannot tell a new instance from a project saved unfolded (as with the view), and its default is the state
+  format's, so R2 leaves it: folding a new instance needs the architect (a UIST default, or a flag).
 - **Not R2's:** the hint bar's texts and the selection row's buttons still say "in M4" (R3); the mouse on the roll
   (R3); the Grid menu, Freehand, Multi and Slide into buttons (R3 sets `settings ()`); hover ghosts (M5 calls
   `setGhost`); Sample mode's thumbnails (M6).

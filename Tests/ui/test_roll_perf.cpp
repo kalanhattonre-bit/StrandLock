@@ -84,9 +84,12 @@ namespace
     struct PixelDiff
     {
         int differing = 0, largest = 0;
+        int insideAsked = 0, atAskedEdge = 0;   // of the differing pixels: inside the area asked for, within 2 px of its edge
+        juce::Rectangle<int> where;             // around the differing pixels
+        juce::String samples;                   // a few of them: x,y a -> b
     };
 
-    PixelDiff compare (const juce::Image& a, const juce::Image& b)
+    PixelDiff compare (const juce::Image& a, const juce::Image& b, const juce::RectangleList<int>* asked = nullptr)
     {
         PixelDiff d;
         if (a.getBounds() != b.getBounds())
@@ -102,7 +105,21 @@ namespace
                 const int m = std::max ({ std::abs ((int) ca.getRed() - (int) cb.getRed()), std::abs ((int) ca.getGreen() - (int) cb.getGreen()),
                                           std::abs ((int) ca.getBlue() - (int) cb.getBlue()), std::abs ((int) ca.getAlpha() - (int) cb.getAlpha()) });
                 if (m > 0)
+                {
                     ++d.differing;
+                    const juce::Rectangle<int> px (x, y, 1, 1);
+                    d.where = d.where.isEmpty() ? px : d.where.getUnion (px);
+                    if (d.differing <= 6)
+                        d.samples << x << "," << y << " #" << ca.toDisplayString (true) << "->#" << cb.toDisplayString (true) << "; ";
+                    if (asked != nullptr)
+                    {
+                        d.insideAsked += asked->containsPoint (juce::Point<int> (x, y)) ? 1 : 0;
+                        bool edge = false;
+                        for (const auto& r : *asked)
+                            edge = edge || (r.expanded (2).contains (x, y) && ! r.reduced (2).contains (x, y));
+                        d.atAskedEdge += edge ? 1 : 0;
+                    }
+                }
                 d.largest = std::max (d.largest, m);
             }
         return d;
@@ -191,7 +208,7 @@ namespace
     {
         ui::roll::NoteLayerCache::Change change;
         ui::roll::NoteLayerCache::Stats partial;
-        PixelDiff diff;
+        PixelDiff diff, diffEach, fullTwice, cache;   // cache: the note layer after the update against after a full one
         double repainted = 0.0, canvas = 0.0;
         bool moved = false;
         int undoSteps = 0;
@@ -234,11 +251,24 @@ namespace
             view.paintEntireComponent (gr, true);
         }
         m.partial = view.getCache().lastRender();
+        const auto layerAfterUpdate = view.getCache().getImage().createCopy();
+        // the same, one rectangle at a time (a renderer may clip to several rectangles through a mask)
+        auto partialEach = before.createCopy();
+        for (const auto& r : asked)
+        {
+            juce::Graphics gr (partialEach);
+            gr.reduceClipRegion (r);
+            view.paintEntireComponent (gr, true);
+        }
 
         // and a full repaint of the same state
         view.invalidateAll();
         const auto full = shot (view, type);
-        m.diff = compare (partial, full);
+        m.cache = compare (layerAfterUpdate, view.getCache().getImage().createCopy());
+        m.diff = compare (partial, full, &asked);
+        m.diffEach = compare (partialEach, full, &asked);
+        view.invalidateAll();
+        m.fullTwice = compare (full, shot (view, type));
         return m;
     }
 }
@@ -269,6 +299,15 @@ SL_TEST ("ui", rollMoveRepaintsThreeNotes)
     const auto n = moveOneNote (juce::NativeImageType());
     note (fmt ("native renderer: %d note drawings, %d rectangles, %.2f ms; %d pixels differ from its full repaint (largest %d)",
                n.partial.notesDrawn, n.partial.rects, n.partial.ms, n.diff.differing, n.diff.largest));
+    note (fmt ("native renderer: of those, %d inside the area asked for, %d within 2 px of its edge; around (%d, %d, %d x %d); %s",
+               n.diff.insideAsked, n.diff.atAskedEdge, n.diff.where.getX(), n.diff.where.getY(), n.diff.where.getWidth(), n.diff.where.getHeight(),
+               n.diff.samples.toRawUTF8()));
+    note (fmt ("the note layer itself after the update against after a full repaint: %d pixels differ (largest %d) native, %d software",
+               n.cache.differing, n.cache.largest, m.cache.differing));
+    note (fmt ("repainted one rectangle at a time: %d pixels differ (largest %d) with the native renderer, %d with software",
+               n.diffEach.differing, n.diffEach.largest, m.diffEach.differing));
+    note (fmt ("native renderer: two full repaints of the same state differ in %d pixels (largest %d); software: %d",
+               n.fullTwice.differing, n.fullTwice.largest, m.fullTwice.differing));
     check (n.moved && ! n.change.all && n.change.rects.size() <= 3,
            fmt ("with the native renderer too the move marks %d notes' bounds", (int) n.change.rects.size()));
 }
