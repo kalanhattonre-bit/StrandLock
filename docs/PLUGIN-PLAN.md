@@ -1563,6 +1563,38 @@ part, L the Lock part), and `docs/CUBASE-CHECKLIST.md` (B adds an M3 section).
 4. **CPU.** The 96 kHz targets of the M3 table are printed and gated at > 1x real time, as written. M2's Tape figure
    (7.6x against 8x) is reported, not chased.
 
+### 7.6 M4: who builds what, and the architect's decisions (2026-11-17)
+
+**Order.** M4's files lean on each other (the view draws what the gestures change, through one geometry), so it runs
+as one chain on branch `m4-roll`, each part fast-forwarding main when CI is green: R1 (the headless half: geometry,
+gestures, document state, undo steps, the inspector's pure helpers, key routing) -> R2 (drawing: the roll, its note
+layer cache, ruler, piano strip, playhead, snapshots, drawing cost) -> R3 (the roll made live: mouse and keys wired to
+R1's gestures, node editing on screen, Freehand, the inspector panel, Undo / Redo buttons, the hint bar, and an M4
+section in `docs/CUBASE-CHECKLIST.md`). Then review and a fix pass. Each part writes its section in
+`docs/NOTES-M4.md` (R1, R2, R3, Fix) with a Progress list.
+
+**Ownership.** All three parts own `Source/ui/roll/**`, `ui/KeyRouter`, `ui/HintBar`, `ui/Toast`, `doc/ClipDocument`
+(selection, mode, active lane), `doc/EditHistory` where the undo steps need it, `Tests/ui/**`, and
+`Tests/fixtures/ui/inspector.json` (append-only). They touch `MainView`, `PluginEditor` and the processor only to put
+the roll in place of the placeholder and to connect the document; the engine, the model and the state format are
+not M4's (a need there goes in NOTES-M4).
+
+**Decisions.**
+1. **Gestures are a pure state machine** (`RollGestures`) that takes pointer and key events in roll coordinates and
+   returns model edits: every M4 gesture row is tested without a mouse, and the view only translates JUCE mouse
+   events into those calls.
+2. **One finished gesture = one undo step**, pushed when the gesture ends (mouse up), never per drag move; a gesture
+   that changes nothing pushes none. A drag publishes intermediate clips to the engine (so Kalan hears the note move)
+   without touching the history.
+3. **Keys.** Shortcuts (Undo, Redo, Delete, Select all, Duplicate, the mode numbers 1-8) work only with Keys on, through
+   `KeyRouter`; with Keys off every key goes to Cubase, and Space always does (M0's rule). The top bar gets Undo and Redo
+   buttons that work with Keys off.
+4. **Looks follow the v4 prototype**, read from `prototype-v4/src/sl-ui.js` and `shell.html`; v3 screenshots in
+   `StrandLock-handoff/reference/screenshots/v3-*.png` show layout intent only. The third-party "inspiration-lines"
+   images there are never copied, committed or published.
+5. **The roll replaces the placeholder line** ("The piano roll arrives in M4..."); the demo clip shows as notes, and
+   the playhead is the display slot's.
+
 ---
 
 ## 8. Deviations
