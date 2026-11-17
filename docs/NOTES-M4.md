@@ -170,3 +170,110 @@ inspector's pure helpers and key routing. Branch `m4-roll`. Nothing here draws o
   pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4.87 MB). The `ui` group: 35 tests, 200
   checks on both platforms. `rollViewScrollAndZoom`: 0 of 16 view states differ from sl-ui.js (within 1e-9 px) on
   both platforms; the float32 row height 17.99999976158142 comes back as 18.
+
+## R2
+
+Drawing the roll (plan 7.6 R2): the roll in place of M0's placeholder, its note layer cache, the ruler, the piano
+keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch `m4-roll`, from R1's b233192.
+
+### Progress
+
+- Done: `ui/roll/RollPainter`, `NoteLayerCache`, `Ruler`, `PianoStrip`, `RollView`; `RollGeometry::glideMap ()`;
+  the roll in `MainView` (decision 5) and the display frames to it from `PluginEditor`; the tests
+  `test_roll_snapshots` (20 pictures of the table, 6 for review), `test_roll_perf` and `test_roll_view`, all in
+  group `ui`. First CI round: run 44191205369 on 2c8ae57.
+- In progress: CI, then the snapshots looked at and compared with the v4 screenshots.
+- Next: this section's CI figures, then the fast-forward of main; then R3 from the hand-off below.
+
+### Files
+
+- `Source/ui/roll/RollPainter`: sl-ui.js drawRoll (rows in the key's colours, the grid), ribbonPath and drawNote
+  (the ribbons in lane order with the active lane last and stronger, the Travel middle line, the note line with
+  its squiggle, the start ring and the end dot), drawLinks, drawHandles (the slide diamonds, the active lane's
+  nodes and dashed line, the segment diamonds), drawGhost, the box and the readout, read line by line, every colour
+  a theme token. `PaintState` is what one picture is drawn from; `noteBounds` and `overlayBounds` say where things
+  draw, so the view repaints only those.
+- `Source/ui/roll/NoteLayerCache`: every note's drawing in one image the size of the view, in device pixels.
+  `noteChanges` compares the new state with what the image shows, note by note (its version pointer, whether it
+  is selected or primary, its slide), and marks the old and new bounds of each note that changed; the next paint
+  clears those device pixels and draws again, clipped to them, every note they touch, in drawing order. The view's
+  size, scroll and zoom, the theme, the mode, the tempo, the vibrato rate, the slide settings and the device scale
+  are its Key: a change draws every note again, and so does a change of more than 48 notes or of the order of the
+  notes that did not change.
+- `Source/ui/roll/RollView`: the ruler with the zoom buttons at its right end, the keys, the canvas (rows, the
+  cache's image, the overlay, the readout, the playhead) and two scroll bars. It owns R1's `RollGestures` and
+  draws with its geometry. `refresh ()` is the only place it reads the document: it takes the clip, the
+  selection, the mode, the instrument, the tempo, the readout and the box as one `PaintState`, and repaints what
+  changed (the whole roll for a `ViewKey` change, else the cache's rectangles and the overlay where it was and is).
+- `Source/ui/roll/Ruler`, `PianoStrip`: sl-ui.js drawRuler and drawPiano with their scroll; a key press plays
+  through the CommandQueue (auditionOn at 0.8 while held, auditionOff on release).
+- `MainView`: the `RollView` where the placeholder was; `setMode` and the saved mode reach the document through
+  the gestures; `tick` hands it the host's tempo and refreshes it (15 Hz); its toasts go to the view's toast.
+  `PluginEditor::takeDisplayFrame` hands it each new display frame (30 Hz): the playhead and the keys played live.
+
+### Decisions and deviations
+
+- **The zoom buttons sit at the right end of the ruler,** not in the top bar as in the prototype. The top bar has
+  no room at 900 px (the M0 layout fills about 750 of its 860 px), R3 adds Undo, Redo and the roll's buttons
+  there, and M4 touches MainView only to put the roll in. They keep the prototype's labels (H-, H+, V-, V+ with its
+  minus sign) and tooltips, and the ruler's ticks stop before them.
+- **The playhead is the display slot's (decision 5) and shows only while Cubase plays.** The prototype also shows
+  it at its own start marker while stopped; in the plugin Cubase's transport has none to show. The ruler's
+  playhead triangle (the prototype's start marker) follows the playhead the same way. The prototype moves its
+  playhead every animation frame by extrapolating from the last display message; the plugin draws each frame's
+  beat at 30 Hz, which is what the frames carry.
+- **The keys played live light up** (the display frame's live voices that are not released), as the prototype
+  lights the keys its MIDI input holds.
+- **The slide link's mark is a vector chain,** not the link emoji (JUCE's fonts have none; R1 made the same call for
+  the menu).
+- **The ruler's ticks are rounded** to whole pixels like the grid's lines under them (the prototype rounds the grid
+  and not the ticks, so a tick can sit half a pixel off its line).
+- **The scroll is kept on whole pixels** in the view (zoom, wheel, scroll bars, the first view), as a browser keeps
+  a scroller's: rows and grid lines stay sharp. RollGeometry itself still takes any scroll (R1's tests).
+- **The first view and UIST (R1's question).** UIST's defaults (zoom 1, scroll 0) read as "never saved": the view
+  centres on the notes then (the prototype's first open). Scroll 0 at zoom 1 is the top of the roll (C6), which
+  nobody would save on purpose; the only cost is that such a project opens centred. Every zoom and scroll is
+  written back to UIST. A note for the architect: a "view saved" flag in UIST would remove the guess.
+- **The note layer is in device pixels, made with the renderer's preferred image type** (Direct2D in a Windows
+  window, software in the tests) and drawn with no resampling, so it stays sharp at every UI Scale; the rows, the
+  overlay and the playhead are drawn directly on every paint. A Direct2D image whose device went away is drawn
+  again in full (JUCE's cached component images do the same).
+- **A note's bounds** are its line, ribbons and dots plus 14 px: JUCE mitres a stroke's joints up to 3 widths (the
+  selected line is 3.2 px), and the dots reach 7 px past the line.
+- **"Moving one note repaints at most 3 notes' bounds"** is measured on the note layer: a moved note marks its old
+  and new bounds (one rectangle when they overlap), and a note whose slide changed marks its bounds (old and new in
+  one). Moving a note that another note slides into (and that slides into none) marks exactly 3; the roll repaints
+  those and the slide link's old and new place. Inside them every note they touch is drawn again (clipped), so a
+  dense clip draws more note drawings than 3. A move that re-voices several automatic slides (a note in a legato
+  chord) marks more notes, as it must: their lines changed.
+- **The roll's snapshots fold the tool tabs,** as the prototype does when it first opens on a laptop, so the roll
+  has the room; the editor's own snapshots (test_editor) keep the tab open and show the roll smaller. The Build
+  pictures keep the first view; Pitch, Tone and Sample scroll to their selected notes.
+- **Not R2's:** the hint bar's texts and the selection row's buttons still say "in M4" (R3); the mouse on the roll
+  (R3); the Grid menu, Freehand, Multi and Slide into buttons (R3 sets `settings ()`); hover ghosts (M5 calls
+  `setGhost`); Sample mode's thumbnails (M6).
+- **The JUCE source in the scratchpad** (`juce-8.0.15/modules`) had no files, only its git pack. The tree was
+  checked out from that pack into `scratchpad/juce-x` (JUCE 8.0.15's own commit), with no download.
+
+### Hand-off for R3 (the live roll)
+
+- **The mouse.** `RollView::Canvas` (private, in RollView.cpp) is the component under the mouse; it has no mouse
+  handlers yet. Give it mouseDown, mouseDrag, mouseUp (and a lost capture) that call the view, which turns
+  `e.position` into roll pixels with `getGeometry ().toRoll (x, y)` and calls `getGestures ().pointerDown (x, y,
+  { shift, ctrl-or-cmd }, Time::getMillisecondCounterHiRes ())`, `pointerMove`, `pointerUp`; a right press calls
+  `contextMenu`. **Call `refresh ()` after every one of them**: refresh reads the document, the readout and the box,
+  and repaints only what changed (the moved notes' bounds, the handles, the readout, the links). The wheel is done.
+- **Commands and keys.** The buttons and `KeyRouter`'s actions call the gestures' commands (`setMode` goes through
+  `MainView::setMode`, which already hands the mode to the roll), then `refresh ()`. Undo and Redo are
+  `proc.undo ()` / `proc.redo ()`, then `refresh ()`.
+- **Settings.** `getGestures ().settings ()`: `snap` (the Grid menu; write UIST `gridBeats` too; the grid redraws on
+  the next refresh), `free` (`toggleFreehand ()`), `multi`. `inst` and `bpm` are refreshed by the view; leave them.
+- **Toasts.** The gestures' toasts already reach MainView's toast through `onToast`.
+- **The hint bar and the selection row** still carry M0's "in M4" texts; their texts are sl-ui.js `modeHint` and
+  `updateSelInfo`.
+- **What the view draws by itself:** the readout and the box come from the gestures at each refresh; the slide
+  diamonds, nodes and segment diamonds from the document's selection, primary note and inspector node; M5 calls
+  `setGhost (clip)` for its hover previews.
+- **Tests.** `RollView` runs headless (a processor, a Theme, `setBounds`); `takeRepaintLog ()` says what a refresh
+  asked to repaint, and `getCache ().lastRender ()` what the next paint drew again. `test_roll_perf`'s
+  `moveOneNote` shows how to check a gesture's repaint against a full repaint pixel for pixel.
