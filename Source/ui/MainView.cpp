@@ -184,112 +184,6 @@ namespace sl::ui
     };
 
     //==============================================================================================
-    RollPlaceholder::RollPlaceholder (const Theme& t)
-        : theme (t)
-    {
-        setInterceptsMouseClicks (false, false);
-    }
-
-    void RollPlaceholder::setPlayhead (std::optional<double> beat)
-    {
-        const bool same = beat.has_value() == playhead.has_value() && (! beat.has_value() || juce::exactlyEqual (*beat, *playhead));
-        if (! same)
-        {
-            playhead = beat;
-            repaint();
-        }
-    }
-
-    void RollPlaceholder::paint (juce::Graphics& g)
-    {
-        const auto all = getLocalBounds();
-        g.setColour (theme (Tok::roll));
-        g.fillRect (all);
-
-        const auto grid = all.withTrimmedLeft (pianoWidth).withTrimmedTop (rulerHeight);
-        const auto piano = juce::Rectangle<int> (0, rulerHeight, pianoWidth, all.getHeight() - rulerHeight);
-        const auto ruler = juce::Rectangle<int> (pianoWidth, 0, all.getWidth() - pianoWidth, rulerHeight);
-        const int beats = bars * 4;
-        const float beatWidth = (float) grid.getWidth() / (float) beats;
-
-        // Rows: one per semitone from topNote down, the black keys' rows darker, a line under every B.
-        for (int note = topNote, y = grid.getY(); y < grid.getBottom(); --note, y += rowHeight)
-        {
-            const int pc = ((note % 12) + 12) % 12;
-            const bool black = pc == 1 || pc == 3 || pc == 6 || pc == 8 || pc == 10;
-            g.setColour (black ? theme (Tok::rowBlack) : theme (Tok::row));
-            g.fillRect (grid.getX(), y, grid.getWidth(), rowHeight);
-            g.setColour (pc == 0 ? theme (Tok::octLine) : theme (Tok::rowLine));
-            g.fillRect (grid.getX(), y + rowHeight - 1, grid.getWidth(), 1);
-
-            // The piano key for the row, and the C names (Cubase: 60 = C3).
-            g.setColour (black ? theme (Tok::pianoBlack) : theme (Tok::pianoWhite));
-            g.fillRect (piano.getX(), y, black ? pianoWidth * 3 / 5 : pianoWidth, rowHeight);
-            if (black)
-            {
-                g.setColour (theme (Tok::pianoWhite));
-                g.fillRect (piano.getX() + pianoWidth * 3 / 5, y, pianoWidth * 2 / 5, rowHeight);
-            }
-            g.setColour (theme (Tok::pianoOut));
-            g.fillRect (piano.getX(), y + rowHeight - 1, pianoWidth, 1);
-            if (pc == 0)
-            {
-                g.setColour (theme (Tok::pianoText));
-                g.setFont (Theme::px (9.5f));
-                g.drawText (core::noteName (note), juce::Rectangle<int> (piano.getX(), y, pianoWidth - 3, rowHeight),
-                            juce::Justification::centredRight, false);
-            }
-        }
-
-        // Grid: sixteenths, beats, bars.
-        for (int i = 0; i <= beats * 4; ++i)
-        {
-            const float x = (float) grid.getX() + beatWidth * (float) i / 4.0f;
-            const Tok tok = i % 16 == 0 ? Tok::gridBar : i % 4 == 0 ? Tok::gridBeat : Tok::gridSub;
-            g.setColour (theme (tok));
-            g.fillRect (juce::Rectangle<float> (x, (float) grid.getY(), 1.0f, (float) grid.getHeight()));
-        }
-
-        // Ruler and corner.
-        g.setColour (theme (Tok::hdr));
-        g.fillRect (ruler);
-        g.fillRect (0, 0, pianoWidth, rulerHeight);
-        g.setColour (theme (Tok::line));
-        g.fillRect (0, rulerHeight - 1, all.getWidth(), 1);
-        g.fillRect (pianoWidth - 1, 0, 1, all.getHeight());
-        g.setFont (Theme::px (11.0f));
-        for (int b = 0; b < bars; ++b)
-        {
-            const float x = (float) ruler.getX() + beatWidth * 4.0f * (float) b;
-            g.setColour (theme (Tok::rulerTick));
-            g.fillRect (juce::Rectangle<float> (x, 0.0f, 1.0f, (float) rulerHeight));
-            g.setColour (theme (Tok::rulerText));
-            g.drawText (juce::String (b + 1), juce::Rectangle<float> (x + 4.0f, 0.0f, 30.0f, (float) rulerHeight),
-                        juce::Justification::centredLeft, false);
-        }
-
-        // The host's playhead while Cubase plays, folded onto these 4 bars.
-        if (playhead.has_value())
-        {
-            const double beat = std::fmod (std::fmod (*playhead, (double) beats) + (double) beats, (double) beats);
-            const float x = (float) grid.getX() + beatWidth * (float) beat;
-            g.setColour (theme (Tok::playhead));
-            g.fillRect (juce::Rectangle<float> (x - 1.0f, 0.0f, 2.0f, (float) all.getHeight()));
-        }
-
-        // What comes here, and when.
-        const juce::String message ("The piano roll arrives in M4. Until then StrandLock plays its demo clip with Cubase, and your keys.");
-        const auto font = Theme::px (12.0f);
-        const float w = juce::jmin ((float) grid.getWidth() - 24.0f, Theme::textWidth (font, message) + 28.0f);
-        const auto box = juce::Rectangle<float> (w, 30.0f).withCentre (grid.toFloat().getCentre());
-        g.setColour (theme (Tok::tipBg));
-        g.fillRoundedRectangle (box, 8.0f);
-        g.setColour (theme (Tok::tipTxt));
-        g.setFont (font);
-        g.drawFittedText (message, box.reduced (12.0f, 2.0f).toNearestInt(), juce::Justification::centred, 2, 0.85f);
-    }
-
-    //==============================================================================================
     MainView::MainView (const Theme& t, StrandLockProcessor& p)
         : theme (t),
           processor (p),
@@ -306,7 +200,7 @@ namespace sl::ui
           deleteNotes (t, "Delete"),
           clearAll (t, "Clear all"),
           tabStrip (t, juce::StringArray (kTabNames, numTabs)),
-          roll (t),
+          roll (t, p),
           strip (t, p)
     {
         // Top bar.
@@ -372,6 +266,7 @@ namespace sl::ui
         addChildComponent (diagViewport);
 
         addAndMakeVisible (roll);
+        roll.onToast = [this] (const juce::String& text) { showToast (text); };
         addAndMakeVisible (strip);
         strip.onToast = [this] (const juce::String& text, int ms) { showToast (text, ms); };
         toast = std::make_unique<ToastView> (t);
@@ -386,6 +281,7 @@ namespace sl::ui
         for (int i = 0; i < 4; ++i)
             if (ui.subLane == core::laneInfo (core::kSampleLanes[i]).code)
                 subLane = i;
+        roll.setMode (mode, subLane);
         for (int i = 0; i < numTabs; ++i)
             if (ui.tab == kTabIds[i])
                 openTabIndex = i;
@@ -479,6 +375,7 @@ namespace sl::ui
         mode = juce::jlimit (1, 8, newMode);
         if (newSubLane >= 0 && newSubLane < 4)
             subLane = newSubLane;
+        roll.setMode (mode, subLane);
         paintModes();
         updateHint();
         saveUiState();
@@ -562,7 +459,10 @@ namespace sl::ui
             repaint (topBarArea);
         }
 
-        roll.setPlayhead (s.hasPosition && s.playing && s.hasPpq ? std::optional<double> (s.ppq) : std::nullopt);
+        // the roll: the host's tempo (the vibrato's squiggle), then what the document holds now (the playhead comes
+        // from the display frames, at 30 Hz: PluginEditor::takeDisplayFrame)
+        roll.setHostBpm (s.hasBpm ? std::optional<double> (s.bpm) : std::nullopt);
+        roll.refresh();
         strip.refresh();
 
         if (openTabIndex == diagTab && ! folded)
@@ -614,7 +514,7 @@ namespace sl::ui
     {
         // Just under the roll's ruler, so the bar numbers stay readable (fix pass R2-6) and, in a 560 px window, the
         // roll's note under it too; on the pane when the roll is hidden.
-        return roll.isVisible() ? roll.getY() + RollPlaceholder::rulerHeight + 4 : paneArea.getY() + 10;
+        return roll.isVisible() ? roll.getY() + roll::RollView::rulerHeight + 4 : paneArea.getY() + 10;
     }
 
     const juce::String& MainView::getToastText() const noexcept

@@ -3,7 +3,7 @@
 // The editor's whole layout in logical pixels (PLUGIN-PLAN 4 M0): the v4 prototype's page (shell.html) with
 // what M0 has behind it. From the top: the top bar (logo, wordmark, theme toggle, Keys, the host's tempo, UI
 // Scale), the state banner when there is one, the mode bar (1 Build .. 8 Sample with the four Sample chips),
-// the selection row, the tool tabs and their pane, the roll (a placeholder until M4), the waveform strip with
+// the selection row, the tool tabs and their pane, the piano roll (ui/roll/RollView, M4), the waveform strip with
 // the loaded sound (ui/strip/WaveStrip), and the hint bar. The Diagnostics tab takes the pane and the roll's room.
 //
 // The editor scales this component as one piece (the UI Scale) and owns the theme, the Keys switch and the
@@ -14,6 +14,7 @@
 #include "sounds/StarterSounds.h"
 #include "ui/Controls.h"
 #include "ui/DiagnosticsPage.h"
+#include "ui/roll/RollView.h"
 #include "ui/strip/WaveStrip.h"
 
 #include <array>
@@ -27,25 +28,6 @@ class StrandLockProcessor;
 namespace sl::ui
 {
     class TabPanel;
-
-    /** The empty roll until M4: ruler, piano keys, rows and grid in the theme's colours, the host's playhead,
-        and one line saying what comes when. */
-    class RollPlaceholder final : public juce::Component
-    {
-    public:
-        explicit RollPlaceholder (const Theme&);
-
-        /** Where the host is, in beats, while it plays (nothing while stopped). */
-        void setPlayhead (std::optional<double> beat);
-
-        void paint (juce::Graphics&) override;
-
-        static constexpr int pianoWidth = 40, rulerHeight = 20, rowHeight = 14, bars = 4, topNote = 79;
-
-    private:
-        const Theme& theme;
-        std::optional<double> playhead;
-    };
 
     class MainView final : public juce::Component
     {
@@ -63,8 +45,8 @@ namespace sl::ui
         void setKeysOn (bool on);
         void setUiScalePercent (int percent);
 
-        /** The editor's timer: the host's tempo and position, the Diagnostics page, the loaded sound, the
-            Region and the banner. */
+        /** The editor's timer: the host's tempo, the roll (what the document holds now), the Diagnostics page, the
+            loaded sound, the Region and the banner. */
         void tick (const diag::DiagModel::Snapshot&, bool keysOn);
 
         void showDropOverlay (bool show, const juce::String& what = {});
@@ -98,7 +80,7 @@ namespace sl::ui
         TabStrip& getTabStrip() noexcept { return tabStrip; }
         DiagnosticsPage& getDiagnosticsPage() noexcept { return *diagPage; }
         WaveStrip& getStrip() noexcept { return strip; }
-        RollPlaceholder& getRoll() noexcept { return roll; }
+        roll::RollView& getRoll() noexcept { return roll; }
         FlatButton& getModeButton (int modeNumber) noexcept;
         TabPanel* getTabPanel (int tab) const noexcept;
         const juce::String& getTempoText() const noexcept { return tempoText; }
@@ -152,7 +134,7 @@ namespace sl::ui
         juce::Viewport paneViewport, diagViewport;
         std::unique_ptr<DiagnosticsPage> diagPage;
 
-        RollPlaceholder roll;
+        roll::RollView roll;
         WaveStrip strip;
         std::vector<ParamSynced*> synced;   // every control bound to a parameter (the panels and the strip)
         std::unique_ptr<ToastView> toast;

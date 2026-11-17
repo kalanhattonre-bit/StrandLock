@@ -263,9 +263,13 @@ void StrandLockEditor::showSoundReports()
 
 void StrandLockEditor::takeDisplayFrame()
 {
-    // The engine's newest frame, when the processor has a display slot (the integration step makes it).
+    // The engine's newest frame: the strip's heads, the roll's playhead and the keys played live (plan 7.6
+    // decision 5: the playhead is the display slot's).
     if (auto* slot = proc.getDisplaySlot(); slot != nullptr && slot->takeLatest())
+    {
         view.getStrip().setDisplayFrame (&slot->latest());
+        view.getRoll().setDisplayFrame (&slot->latest());
+    }
 }
 
 void StrandLockEditor::timerCallback()

@@ -11,9 +11,9 @@
     the Keys switch and the drops.
 
     Its 30 Hz timer (PLUGIN-PLAN 7.4 decision 1, 1.3, 1.5) moves every control to its parameter's value (no
-    control uses JUCE's attachments), hands the engine's newest display frame to the waveform strip, shows the
-    sound loader's results as toasts, refreshes the Diagnostics page (15 times a second) and frees the versions
-    the audio thread no longer reads (10 times a second).
+    control uses JUCE's attachments), hands the engine's newest display frame to the waveform strip and the roll
+    (its playhead), shows the sound loader's results as toasts, refreshes the roll and the Diagnostics page (15
+    times a second) and frees the versions the audio thread no longer reads (10 times a second).
 
     Keys: OFF, StrandLock never takes the keyboard (no component wants focus, and a click does not take it
     from Cubase). ON, a click gives StrandLock the keyboard and it keeps the keys it receives, except Space,
