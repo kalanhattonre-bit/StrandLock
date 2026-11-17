@@ -170,6 +170,10 @@ namespace sl::ui::roll
         //==========================================================================================
         // A note.
 
+        /** The glides of the clip shown, for the instrument's slide mode and time (computeGlides, made once per
+            clip version): the slide links the roll draws, and what a note's line ends in. */
+        const model::GlideMap& glideMap() const;
+
         /** Its drawn line (cached per note version and zoom, tempo, vibrato rate and glide). */
         const NoteGeom& geom (const model::Note& n) const;
 

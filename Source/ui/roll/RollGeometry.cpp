@@ -252,6 +252,12 @@ namespace sl::ui::roll
         return slot;
     }
 
+    const model::GlideMap& RollGeometry::glideMap() const
+    {
+        refreshGlides();
+        return glides;
+    }
+
     const NoteGeom& RollGeometry::geom (const model::Note& n) const
     {
         return entry (n).g;
