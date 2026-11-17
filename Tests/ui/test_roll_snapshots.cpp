@@ -95,6 +95,7 @@ namespace
         juce::Rectangle<int> canvas;                 // the roll's canvas, image pixels
         std::vector<juce::Point<int>> slideDiamonds; // the primary note's slide diamonds, image pixels
         int playheadX = -1;                          // the playhead's column, image pixels
+        juce::Rectangle<int> box;                    // the box being dragged, image pixels
         int visibleNotes = 0;                        // notes the roll shows
     };
 
@@ -162,10 +163,11 @@ namespace
             }
             if (s.boxAndGhost)
             {
-                // a box from beat 13, C5 (empty space) to beat 15, F#4; and a ghost of the c3 chord two semitones up
-                const double x0 = 13.0 * geo.beatWidth(), y0 = geo.cy (84.0);
+                // a box from beat 13, E4 (empty space in the first view) to beat 15, C#4; and a ghost of the
+                // c3 chord two semitones up
+                const double x0 = 13.0 * geo.beatWidth(), y0 = geo.cy (76.0);
                 gestures.pointerDown (x0, y0, {}, 1000.0);
-                gestures.pointerMove (x0 + 2.0 * geo.beatWidth(), y0 + 6.0 * geo.rowHeight(), {});
+                gestures.pointerMove (x0 + 2.0 * geo.beatWidth(), y0 + 3.0 * geo.rowHeight(), {});
                 model::Clip ghost = *doc.current();
                 for (auto& n : ghost.notes)
                     if (n->id == "sd-19" || n->id == "sd-20" || n->id == "sd-21" || n->id == "sd-22")
@@ -200,6 +202,9 @@ namespace
                 }
             if (const auto ph = roll.getPlayhead())
                 out.playheadX = toImage (*ph * geo.beatWidth(), 0.0).x;
+            if (const auto b = gestures.box())
+                out.box = juce::Rectangle<int>::leftTopRightBottom (toImage (b->x0, b->y0).x, toImage (b->x0, b->y0).y,
+                                                                    toImage (b->x1, b->y1).x, toImage (b->x1, b->y1).y);
             const auto visible = juce::Rectangle<double> (geo.scrollX(), geo.scrollY(), geo.viewWidth(), geo.viewHeight());
             out.visibleNotes = (int) ui::roll::RollPainter (st).visibleNotes (visible).size();
         }
@@ -282,6 +287,13 @@ SL_TEST ("ui", rollSnapshotsShowTheMode)
                     playing.playheadX, playheadPixels, P[Tok::playhead].toDisplayString (false).toRawUTF8(), playing.canvas.getHeight()));
         const int none = countNear (build.image, column, P[Tok::playhead], 10);
         check (none < 10, fmt ("%s: stopped, no playhead there (%d pixels)", themeName (theme), none));
+
+        // a box dragged on empty space: its dashed outline in the box colour
+        const auto boxed = shoot ({ theme, 1, 100, 0, 0, false, false, true });
+        const int outline = countNear (boxed.image, boxed.box.expanded (2), P[Tok::boxLine], 24) - countNear (boxed.image, boxed.box.reduced (3), P[Tok::boxLine], 24);
+        check (boxed.box.getWidth() > 100 && outline > 100,
+               fmt ("%s: the box being dragged (%d x %d) has its dashed outline in the box colour (%d pixels)", themeName (theme),
+                    boxed.box.getWidth(), boxed.box.getHeight(), outline));
     }
 }
 

@@ -172,6 +172,8 @@ SL_TEST ("ui", rollViewZoomAndScroll)
                 geo.scrollX(), geo.scrollY()));
 
     // the wheel: a notch scrolls about 100 px; with Shift sideways; with Ctrl it zooms in time around the pointer
+    // (beats twice as wide first: the 4 bars of the demo clip are only 34 px wider than the view)
+    view.zoomBy (2.0, 1.0);
     auto& canvas = view.getCanvas();
     const double y0 = geo.scrollY();
     spin (view, canvas, { 300.0f, 100.0f }, -kNotch, juce::ModifierKeys());
@@ -185,7 +187,7 @@ SL_TEST ("ui", rollViewZoomAndScroll)
     const double beatUnder = (300.0 + geo.scrollX()) / geo.beatWidth();
     spin (view, canvas, { 300.0f, 100.0f }, kNotch, juce::ModifierKeys::ctrlModifier);
     const double after = (300.0 + geo.scrollX()) / geo.beatWidth();
-    check (near (geo.beatWidth(), 64.0 * 1.15, 1e-9) && near (after, beatUnder, 1.0 / geo.beatWidth()),
+    check (near (geo.beatWidth(), 128.0 * 1.15, 1e-9) && near (after, beatUnder, 1.0 / geo.beatWidth()),
            fmt ("Ctrl + a notch up zooms in time 1.15 times (%.2f px a beat); the beat under the pointer stays (%.4f -> %.4f)",
                 geo.beatWidth(), beatUnder, after));
     const double bw = geo.beatWidth(), yPiano = geo.scrollY();
