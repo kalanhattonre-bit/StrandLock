@@ -28,6 +28,7 @@
 #include "doc/RollState.h"
 #include "model/ClipEdit.h"
 #include "model/Clip.h"
+#include "model/LaneFormat.h"
 #include "model/Shapes.h"
 
 #include <array>
