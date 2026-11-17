@@ -196,17 +196,17 @@ namespace sl::ui::roll
         };
 
         const Entry& entry (const model::Note& n) const;
-        void refreshGlides();
+        void refreshGlides() const;
 
         model::ClipPtr clip;
         core::Inst inst = core::defaultInst();
         double bpm = 120.0;
         double bw = kDefaultBeatWidth, rh = kDefaultRowHeight;
 
-        model::GlideMap glides;
-        model::ClipPtr glidesClip;
-        core::GlideMode glidesMode = core::GlideMode::legato;
-        double glidesTime = -1.0;
+        mutable model::GlideMap glides;   // computeGlides of the clip shown, for its instrument's slide mode and time
+        mutable model::ClipPtr glidesClip;
+        mutable core::GlideMode glidesMode = core::GlideMode::legato;
+        mutable double glidesTime = -1.0;
 
         mutable std::unordered_map<std::uint64_t, Entry> cache;   // by Note::serial
     };

@@ -10,8 +10,10 @@ inspector's pure helpers and key routing. Branch `m4-roll`.
 
 ### Progress
 
-- Done: `doc/RollState.h` and the roll state in `ClipDocument` (selection, primary, mode, sub-lane, the
-  inspector's node), `ui/roll/RollGeometry.h` (declarations), `ui/roll/InspectorText` (the six pure helpers),
-  `tools/fixtures/roll.js` (geometry and gesture fixtures recorded from sl-ui.js itself).
-- In progress: the first CI round on this work.
-- Next: RollGeometry.cpp, RollGestures, KeyRouter, the four test files, then CI green and the merge.
+- Done:  and the roll state in  (selection, primary, mode, sub-lane, the
+  inspector's node), , ,  (the six pure helpers),
+  ,  (geometry and gesture fixtures recorded from sl-ui.js itself), and the
+  tests ( green in CI run 44135943909; , ,
+  ,  written).
+- In progress: the first CI round on the gestures, the geometry and the keys.
+- Next: CI green, the decisions and figures below, the hand-off for R2 and R3, rebase and merge.

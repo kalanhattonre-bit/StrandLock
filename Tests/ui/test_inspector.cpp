@@ -71,7 +71,7 @@ SL_TEST ("ui", inspectorHelpersMatchFixture)
         return;
     const auto& cases = doc["cases"];
     const double tol = fixture::num (doc["tolerance"]["values"]);
-    check (tol == 1e-9 || std::abs (tol - 1e-9) < 1e-15, fmt ("the file's value tolerance is 1e-9 (%g)", tol));
+    check (fixture::withinAbs (tol, 1e-9, 1e-15), fmt ("the file's value tolerance is 1e-9 (%g)", tol));
 
     std::size_t r1 = 0, m6 = 0, other = 0;
     for (std::size_t i = 0; i < cases.size(); ++i)

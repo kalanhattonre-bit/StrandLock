@@ -191,6 +191,9 @@ namespace sl::doc
             bytes = size;
             v = ++ver;
             pruneLocked (*newClip);
+            // a state load, Undo and Redo let go of the inspector's node: it may name another node in this clip
+            // (sl-ui.js applyState)
+            roll.activeNode.reset();
         }
         if (onClipChanged)
             onClipChanged (newClip, v);

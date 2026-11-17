@@ -42,7 +42,7 @@ function source() {
   if (pageText) return pageText;
   let t = fs.readFileSync(path.join(C.SRC, 'sl-ui.js'), 'utf8');
   t = injectOnce(t, /const api = \{\n/, 'const api = {\n    __roll: { cy, pitchAt, geom, glides, baseYAt, valueY, laneValue, nodeXY, segXY, glideHandles, noteBox, hitNote, hitNode, hitSeg, onNoteLine, handleNotes, ' +
-    'app, setZoom: (bw, rh) => { BW = bw; RH = rh; } },\n', 'SLApp api');
+    'app, getDrag: () => drag, setZoom: (bw, rh) => { BW = bw; RH = rh; } },\n', 'SLApp api');
   t = injectOnce(t, /function openMenu\(cx, cyy, items\) \{\n/, 'function openMenu(cx, cyy, items) {\n    if (window.__menuHook) window.__menuHook(items);\n', 'openMenu');
   pageText = t;
   return t;
@@ -463,7 +463,7 @@ function gestures() {
   const rnd = C.rng(4404);
   const ids = demo().notes.map(n => n.id);
   for (let mode = 1; mode <= 8; mode++) {
-    for (let r = 0; r < 1; r++) {
+    for (let r = 0; r < (mode === 8 ? 4 : 2); r++) {
       const sub = ['travel', 'heads', 'grain', 'refresh'][r];
       const selN = 1 + Math.floor(rnd() * 3);
       const sel = []; for (let i = 0; i < selN; i++) { const id = ids[Math.floor(rnd() * ids.length)]; if (!sel.includes(id)) sel.push(id); }
@@ -482,9 +482,11 @@ function gestures() {
           const dbl = rnd() < 0.15;
           if (dbl) { S.click(x, y, mods); S.at(90); }
           S.down(x, y, mods);
+          // a press that starts a box on empty space only clicks: what a box selects is M5's (BoxSelect), not part of these cases
+          const boxed = !!(S.R.getDrag() && S.R.getDrag().t === 'box');
           const moves = Math.floor(rnd() * 4);
           let mx = x, my = y;
-          for (let m = 0; m < moves; m++) { mx += (rnd() - 0.5) * 120; my += (rnd() - 0.5) * 60; S.move(mx, my, rnd() < 0.2 ? { shiftKey: true } : {}); }
+          for (let m = 0; m < moves; m++) { mx += (rnd() - 0.5) * 120; my += (rnd() - 0.5) * 60; const mm = rnd() < 0.2 ? { shiftKey: true } : {}; if (!boxed) S.move(mx, my, mm); }
           S.up(mx, my);
           S.at(700);
         }
@@ -496,6 +498,7 @@ function gestures() {
     notes: ['start: the selection, primary, active node, note order and arming after the setup; each step after lists only what changed in it: changed = {id, note} for a new note (C.note shape) or {id, set} with the fields that changed (set.c / set.gen: only the lanes that changed, null = flat at the default / none); removed = ids that went',
       'each case runs the prototype page (sl-ui.js in a stub DOM) from a fresh start: input.clip, then input.setup (mode, subLane, snap = the grid in beats with 0 = Free, free = Freehand on, multi, sel and primary, inst = a patch on the init sound preset, bpm); BW 64, RH 14, nothing scrolled',
       'steps: down / move / up (x, y in roll pixels, mods), menu (a right-click at x, y; pick = the item clicked, null = none; menu = what it showed: #header, - separator, ~disabled, [a|*b] a row with b on); t = the page clock in ms (two presses within 320 ms and 22 px on the same kind of thing are a double-click)',
+      'the seeded sequences (2 per mode, 4 in Sample mode: one per sub-lane; 7 gestures each) never drag a box on empty space: a press there only clicks, because what a box selects is M5 (BoxSelect)',
       'after.notes = false: the notes were not recorded in that step (Freehand paints in between); the next step lists its changes against the last recorded notes',
       'after: order = every note id in clip order; changed notes in the C.note shape; hist = undo steps since the setup and label the newest; sel in time order; active = [id, lane, k] of the inspector node; readout and toast texts (null = none)'],
     clips: { 'voice-lead': C.clip(named['voice-lead']) },

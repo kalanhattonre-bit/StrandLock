@@ -92,7 +92,8 @@ namespace sl::doc
         EditOutcome apply (model::Clip proposed);
 
         /** Holds this clip as it is (a state load, Undo and Redo, a new instance): no caps, because the decoder
-            already holds the same limits and history states were accepted once. A new version. */
+            already holds the same limits and history states were accepted once. A new version; the selection keeps the
+            notes the clip still holds, and the inspector's node is let go. */
         void replace (model::ClipPtr clip);
 
         void setNonParam (const NonParamState& np);
