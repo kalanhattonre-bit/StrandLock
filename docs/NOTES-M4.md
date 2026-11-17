@@ -18,8 +18,9 @@ inspector's pure helpers and key routing. Branch `m4-roll`. Nothing here draws o
 - Done (second session): the view part of `RollGeometry` (the roll's size, the view's size, the scroll kept inside
   the roll, view <-> roll pixels, the zoom buttons, Ctrl + wheel zoom, the first view, UIST's view state) and its
   test `rollViewScrollAndZoom`. The first session left `scrollX` and `scrollY` as unused fields, so "beats <-> x with
-  zoom and scroll" was not yet there.
-- Next: CI green on the view part, its figures here, then fast-forward main.
+  zoom and scroll" was not yet there. CI green on 77f2ad7 (run 44176806795, figures below).
+- In progress: CI on this commit (notes only), then the fast-forward of main.
+- Next: R2 (drawing), from the hand-off below.
 
 ### Files
 
@@ -163,3 +164,9 @@ inspector's pure helpers and key routing. Branch `m4-roll`. Nothing here draws o
   the roll, Keys off left the document alone and Keys on did each action with its undo step.
 - No snapshot changed: R1 draws nothing (the editor, MainView and the painters are untouched), so the snapshot
   artifact holds M3's images.
+- Run 44176806795 on 77f2ad7 (the view part), green on every job and step: Windows Release 1540 checks in 246
+  tests, Linux Release 1532 in 246, the sanitizers' contract, model and engine groups 808 in 139 and the state group
+  142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug snapshots 0 JUCE assertions,
+  pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4.87 MB). The `ui` group: 35 tests, 200
+  checks on both platforms. `rollViewScrollAndZoom`: 0 of 16 view states differ from sl-ui.js (within 1e-9 px) on
+  both platforms; the float32 row height 17.99999976158142 comes back as 18.
