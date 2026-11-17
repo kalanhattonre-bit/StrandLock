@@ -1146,9 +1146,18 @@ part suggestions as chips (D10), the engine suggestion (E3), root suggestions th
 to accept; like Detect it is not an undo step, because the root belongs to the sound, 2.4), int16 storage for long
 files, a 10-minute length limit with "load a part" above it (the SMPL loaded range), the exact Region edges,
 embedding with its saved answer, the opt-in library and Locate (C4), and drag sources tested on Kalan's checklist
-results.
+results. Also **fast reads without aliasing** (question 9.6, Kalan 2026-11-17: in v1): after a decode the
+SampleManager worker builds octave levels of the sound (each one half-band low-passed and decimated by 2, levels 1-3,
+so up to 8x; in int16 when the sound is int16), and every read faster than 1x (Tape, the Tape switch, and grains that
+read above 1x such as a raised formant) reads level L = floor(log2 |rate|) at rate / 2^L, crossfading between
+neighbouring levels across one control tick so a pitch sweep never steps. A read at or below 1x never touches a
+level, so it stays bit for bit with M3. The prototype has none of this (a deviation for 8.2): fixture cases whose
+reads exceed 1x run with the levels switched off (a test-only engine switch) and stay bit for bit with the prototype,
+and the rows below check the levels on.
 
-**Files.** `Source/analysis/*`, `doc/SampleManager` (library, embed, locate, int16, loaded range), `state/StateChunks`
+**Files.** `Source/analysis/*`, `doc/SampleManager` (library, embed, locate, int16, loaded range, octave levels),
+`engine/SampleData.h`, `SourceRead.h` and `Region` (the level choice), `Tests/engine/test_aliasing.cpp` (gated from
+M7), `state/StateChunks`
 SMPL file references and SAUD, `ui/strip/PartChips`, suggestion line, `Tests/analysis/test_detect.cpp`,
 `Tests/plugin/test_embed.cpp`, `test_locate.cpp`, `test_long_file.cpp`, `test_part_load.cpp`,
 `test_region_precision.cpp`, `test_root.cpp`, `Tests/fixtures/analysis/detect.json`.
@@ -1163,6 +1172,8 @@ SMPL file references and SAUD, `ui/strip/PartChips`, suggestion line, `Tests/ana
 | Region precision | section 3's test: a one-bar part on a 10-minute file, 0 frames of drift over 64 passes; host automation plays the parameter's value |
 | root | Detect and an accepted root suggestion change rootNote and rootCents and push 0 undo steps; Undo of a sound change restores that sound's root and cents; applying a suggested key is 1 undo step; the analysis cache reloads "no clear pitch" and "no key" as such (hasPitch, hasKey) |
 | locate order | with the original moved: library (if on) by hash, then embedded bytes, then the Locate banner with every setting kept |
+| fast reads (9.6) | the Saw on Tape at +12, +24 and +36 st at 44.1, 48 and 96 kHz: at most -40 dB of the energy off the harmonic lines (M3 printed -27.8 / -19.6 / -15.1 dB at 48 kHz); +0 st and every renders.json case that reads at or below 1x bit for bit with the M3 build; every case that reads above 1x bit for bit with the prototype when the levels are switched off; a sweep C3 -> C6 over 2 s on Tape and on a Voice note with the formant at +12 st: largest step at each level change / steady largest step < 1.5 |
+| fast reads: memory and CPU | the levels take at most the sound's own bytes again (so at most 2x in all; the long-files row's budget becomes 2 x 115.2 MB + 16 MB), built on the worker with 0 allocations on the audio thread at the swap; Tape 16 voices x 8 heads at 96 kHz with every head above 2x: printed against M3's figure (target at most 15 % slower), gate > 1x real time |
 
 ### M8 Performance: Rec, live template, wheels, presets, import
 
@@ -1671,7 +1682,9 @@ part, L the Lock part), and `docs/CUBASE-CHECKLIST.md` (B adds an M3 section).
    file loads its first 10 minutes and says so (7.4).
 4. **Mod wheels** move only the keys played live, as in the prototype.
 5. **Engines:** Tape / Voice / Cloud is fixed at the first release; a fourth engine would come as a separate switch.
-6. **Tape far up:** decided after M3 measures how harsh it is; the architect brings Kalan the figure.
+6. **Tape far up: fix it in v1** (Kalan 2026-11-17). M3 measured the Saw on Tape at 48 kHz with -42.1 / -27.8 /
+   -19.6 / -15.1 dB of its energy off the harmonic lines at +0 / +12 / +24 / +36 st (the prototype's figures; at
+   +36 st about 3 % of the sound is aliasing). M7 builds it: the "fast reads" rows of the M7 table.
 7. **Quick Controls:** a one-time README step is fine if Cubase does not pick the macros up by itself. M9.
 8. **Lock at 96 kHz:** keep the prototype's thinning (the newest Lock note plays 4 of its 8 heads at B = 96).
 9. **Play inside long notes:** keep the bounded chase (1.8); such notes may come in up to about 0.35 s after Play.
