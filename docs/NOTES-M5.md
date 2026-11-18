@@ -17,8 +17,9 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
 - Done: CI green on 8c6adfb (run 44306677829, figures below); every picture of its artifact looked at (the 10 new
   ones against connect.png, walk.png, tools.png and ns.png, and the M4 pictures the bar now changes).
 - Done (second session): the one fault the pictures showed, fixed: on a 900 x 560 window an open drawer had 60 px
-  and scrolled, but JUCE drew no scroll bar on its 46 px view (decisions below); test `selectionBarSmallWindow`.
-- In progress: CI on this commit, then the fast-forward of main.
+  and scrolled, but JUCE drew no scroll bar on its 46 px view (decisions below); test `selectionBarSmallWindow`. CI
+  green on 3540a5f (run 44321283196, figures below), its pictures compared and the changed one looked at.
+- In progress: CI on this commit (notes only), then the fast-forward of main.
 - Next: S2 (the Shapes, Pattern and Random drawers, Turn into nodes, the lane-button menus, hover ghosts), from the
   hand-off below.
 
@@ -104,10 +105,10 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
 - The inspector's group value for several picked nodes (sl-ui-panels.js commitNodeValue with a group) is left for a
   later part (S2 or the fix pass); the Nodes switch works without it.
 - **A drawer on a small window.** At 900 x 560 with the tabs folded and the Tools drawer open, the drawer keeps 62 px
-  (it scrolls) and the roll's canvas about 75 px. The prototype keeps its roll at 150 px there by taking up to 16 px
-  from the waveform (WAVE_MIN 40) and then scrolling the page (sl-ui.js fitLayout); the plugin's page cannot scroll,
-  and its strip is 104 px at that height (M0's layout). Folding or shrinking something on a short window is decision
-  6's question (S3).
+  (it scrolls) and the roll's canvas 75 px (run 44321283196). The prototype keeps its roll at 150 px there by taking
+  up to 16 px from the waveform (WAVE_MIN 40) and then scrolling the page (sl-ui.js fitLayout); the plugin's page
+  cannot scroll, and its strip is 104 px at that height (M0's layout). Folding or shrinking something on a short
+  window is decision 6's question (S3).
 
 ### Hand-off for S2 and S3
 
@@ -123,6 +124,10 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
 - **Menus.** `RollView::openMenuAt (from, at, items, actions)` opens a menu of the caller's own in the panel; the
   lane-button menus (S2) can use it.
 - **Copy / Paste and Slides tabs (S3).** Not touched. `RollGestures::copyMask` is still every lane.
+- **Small windows.** An open drawer gets at least `SelectionBar::drawerMinHeight` (62 px) and scrolls inside it;
+  `selectionBarSmallWindow` checks that its scroll bar shows. A new drawer needs nothing more for that.
+- **The hint bar on hover.** The prototype shows a drawer button's title in the hint bar while the mouse is on it
+  (sl-ui-panels.js hintOn); S1's buttons use tooltips. S2's hover hooks (for the ghosts) are the place to add it.
 
 ### CI results
 
@@ -167,3 +172,11 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
   greyed. The box: dashed, over the notes it selects. The picked nodes: large, with the node-sel ring, and the Nodes
   switch lit. M4's pictures with a selection now show the bar's line, 30 px from the roll; nothing cut there. One
   fault: the 900 x 560 Walk picture, whose drawer was cut through the Walk row with no scroll bar (fixed above).
+- Run 44321283196 on 3540a5f (the 62 px drawer floor and its test), green on every job and step: Windows Release
+  1714 checks in 286 tests, Linux Release 1706 in 286, the sanitizers' groups 808 in 139 and 142 in 20, the Debug-CRT
+  allocation run 38 in 7 (0 JUCE assertions), the Debug snapshots 0 JUCE assertions, pluginval strictness 10
+  SUCCESS, the fixture check passed (26 files, 4.87 MB). The `ui` group: 75 tests, 374 checks on both platforms (S1
+  added 11 tests and 44 checks to main's 64 and 330). `selectionBarSmallWindow`: at 900 x 560 with the tabs folded
+  and Walk's panel open, the drawer's box is 62 px, its 88 px of contents scroll in a 48 px view, the scroll bar is
+  shown and 48 px long, and the roll's canvas keeps 75 px. Its pictures against run 44306677829's: 68 of 69 the same
+  pixel for pixel; the 900 x 560 Walk picture now shows the drawer's scroll bar thumb at its right edge.
