@@ -272,13 +272,13 @@ namespace sl::ui::roll
         area.consolidate();
 
         // Each rectangle is cleared and drawn again through one clip: the clear goes through the same clip as the
-        // notes, so the pixels cleared are exactly the pixels drawn again, however the renderer places a clip's edge.
-        // (Direct2D snaps its clip's edge rows differently from a separate clear: run 44195077235 found 111 pixels
-        // along the edges.) The notes are drawn with the full redraw's own transform (a patch drawn at an offset
-        // rounds the coordinates differently: run 44198028167), and every note within 2 px of the rectangle is drawn,
-        // so a clip one pixel larger still gets every note that reaches it. The rectangles' edges hold only notes that
-        // did not change (the changed notes' bounds carry 14 px of room), so a row the clip leaves out keeps the
-        // right pixels.
+        // notes, so the pixels cleared are exactly the pixels drawn again. The notes are drawn with the full
+        // redraw's own transform (a patch drawn at an offset rounds the coordinates differently: run 44198028167),
+        // and every note within 2 px of the rectangle is drawn, so a clip one pixel larger still gets every note
+        // that reaches it. The rectangles' edges hold only notes that did not change (the changed notes' bounds
+        // carry 14 px of room), so a row the clip leaves out keeps the right pixels. (Runs 44195077235 and
+        // 44200621878 found 111 pixels along the edges with Direct2D: its drawEllipse skipped the rings of notes
+        // whose dots lay just outside the clip. RollPainter draws rings as paths now.)
         for (const auto& r : area)
         {
             const auto inRoll = juce::Rectangle<double> ((double) r.getX() / s + sx, (double) r.getY() / s + sy,

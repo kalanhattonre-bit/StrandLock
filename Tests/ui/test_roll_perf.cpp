@@ -5,8 +5,9 @@
 // partial update must give the very picture a full repaint gives: the test paints only the area the roll asked
 // for over the picture before the move, as a window would, and compares it pixel for pixel with a full repaint.
 //
-// The pictures are drawn with JUCE's software renderer (the same on Windows and Linux); the Windows renderer
-// (Direct2D) is timed too, and its partial update compared, as figures.
+// The pictures are drawn with JUCE's software renderer (the same on Windows and Linux). The Windows window's own
+// renderer (Direct2D) is timed too, as a figure, and its partial update must give its full repaint's picture as
+// well (gated: Direct2D's drawEllipse once left slivers of rings out at the edges, runs 44195077235 and 44200621878).
 
 #include <juce_audio_processors/juce_audio_processors.h>
 

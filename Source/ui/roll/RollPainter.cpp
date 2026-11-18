@@ -53,6 +53,20 @@ namespace sl::ui::roll
             g.strokePath (p, juce::PathStrokeType (2.0f));
         }
 
+        /** The outline of a circle, thickness pixels wide, in the current colour: the path JUCE's software renderer
+            fills for Graphics::drawEllipse on a circle, so its pictures are unchanged. Direct2D's own drawEllipse
+            skips an ellipse whose area misses the clip even when its outline reaches into it (it tests the area
+            alone), so a partial repaint lost the slivers of rings along its edges (run 44200621878: 111 pixels);
+            a path is never skipped. */
+        void ring (juce::Graphics& g, juce::Rectangle<float> circle, float thickness)
+        {
+            juce::Path p;
+            p.addEllipse (circle.expanded (thickness * 0.5f));
+            p.addEllipse (circle.reduced (thickness * 0.5f));
+            p.setUsingNonZeroWinding (false);
+            g.fillPath (p);
+        }
+
         /** A path stroked in dashes of on and off pixels (canvas setLineDash), in the current colour. */
         void dashed (juce::Graphics& g, const juce::Path& path, float width, float on, float off)
         {
@@ -327,12 +341,12 @@ namespace sl::ui::roll
         g.setColour (T[Tok::dotFill]);
         g.fillEllipse (start);
         g.setColour (T[Tok::startRing]);
-        g.drawEllipse (start, 2.2f);
+        ring (g, start, 2.2f);
         const auto end = around (x1 - 3.0, ye, isSel ? 6.0 : 4.0).toFloat();
         g.setColour (lineColour);
         g.fillEllipse (end);
         g.setColour (T[Tok::dotFill]);
-        g.drawEllipse (end, 2.0f);
+        ring (g, end, 2.0f);
     }
 
     juce::Rectangle<double> RollPainter::noteBoundsIn (const RollGeometry& geo, const model::Note& n)
@@ -441,7 +455,7 @@ namespace sl::ui::roll
                 g.setColour (col);
                 g.fillEllipse (dot);
                 g.setColour (T[Tok::handleRing]);
-                g.drawEllipse (dot, small && ! isAct ? 1.0f : 2.0f);
+                ring (g, dot, small && ! isAct ? 1.0f : 2.0f);
             }
         }
 

@@ -8,15 +8,16 @@
 // note is a new pointer), whether it is selected or the primary note, and its slide (the note before a moved
 // note slides somewhere else now). noteChanges compares the new state with that, note by note, and marks the old
 // and the new bounds of each note that changed; the next paint clears each marked rectangle and draws every note
-// that reaches it again, in the drawing order, the clear and the notes through one clip. Everything else the notes depend on (the view's size,
-// scroll and zoom, the theme, the mode, the tempo, the vibrato rate, the slide settings, the device scale) is the
-// Key: when it changes, the whole layer is drawn again. So is a change of more than maxChangedNotes notes, or of
-// the order of notes that did not change.
+// that reaches it again, in the drawing order, the clear and the notes through one clip. Everything else the notes
+// depend on (the view's size, scroll and zoom, the theme, the mode, the tempo, the vibrato rate, the slide
+// settings, the device scale) is the Key: when it changes, the whole layer is drawn again. So is a change of more
+// than maxChangedNotes notes, or of the order of notes that did not change.
 //
 // A partial update draws exactly what a full one draws inside the marked rectangles (the same notes, the same
-// order, the same transform; the clear goes through the notes' clip, so a renderer that places a clip's edge its
-// own way, as Direct2D does, clears exactly what it draws again), so the image after it is the image a full redraw
-// would give, with JUCE's renderer and with Direct2D (test_roll_perf).
+// order, the same transform; the clear goes through the notes' clip, so it clears exactly the pixels it draws
+// again), so the image after it is the image a full redraw would give, with JUCE's renderer and with Direct2D
+// (test_roll_perf). For Direct2D, RollPainter draws its rings as paths: Direct2D's drawEllipse skips a ring whose
+// area misses the clip even when its outline reaches into it.
 //
 // The image is made with the type the paint's renderer prefers (Direct2D in a Windows window, software in the
 // tests on Linux), and drawn without resampling. Message thread only.
