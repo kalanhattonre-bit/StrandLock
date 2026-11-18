@@ -27,6 +27,7 @@
 #include "model/Normalize.h"
 #include "model/NoteSettings.h"
 #include "model/Presets.h"
+#include "sounds/StarterSounds.h"
 #include "support/Check.h"
 #include "support/FixtureJson.h"
 #include "support/TestRegistry.h"
@@ -906,3 +907,51 @@ SL_TEST ("ui", rollAddNodeOnFullLane)
     }
 }
 
+SL_TEST ("ui", rollSoundLoadDuringDrag)
+{
+    section ("Roll gestures in the plugin: a sound that finishes loading while a drag is held is its own undo step and keeps the "
+             "clip from before the drag (fix pass R4T-2)");
+
+    // The loader hands a finished load over on the message thread at any time (a long file decodes for seconds). Here
+    // it lands between two moves of a drag: its step must hold the last finished clip, so Undo of the drag goes back to
+    // where the note was before it, never to where the mouse was in the middle of it.
+    StrandLockProcessor proc;
+    proc.waitForSounds();
+    proc.editClip ("Spread notes", spreadClip());
+    ui::roll::RollGestures g ({ proc.getDocument(), [&proc] (const std::string& l) { return proc.pushUndoStep (l, {}); }, {}, {} });
+    g.settings().inst.glideMode = core::GlideMode::off;
+    proc.getDocument().setSelection ({ "d3" }, std::string ("d3"));
+    g.sync();
+    const auto start = proc.getDocument().current();
+    const auto soundBefore = proc.getSampleRef();
+    const model::Note& n = *modelfx::findNote (*start, "d3");
+    const auto& geo = g.geometry();
+    const double x = (n.s + n.l * 0.5) * geo.beatWidth(), y = geo.baseYAt (n, 0.5);
+
+    g.pointerDown (x, y, {}, 1e6);
+    g.pointerMove (x, y - 2.0 * geo.rowHeight(), {});
+    const auto mid = proc.getDocument().current();
+    const bool midMoved = fixture::same (modelfx::findNote (*mid, "d3")->p, n.p + 2.0);
+
+    const std::string soundLabel = std::string ("Sound: ") + sounds::starterInfo (sounds::StarterId::pad).name;
+    proc.loadStarterSound (sounds::StarterId::pad, 1);
+    const bool loaded = proc.waitForSounds() && proc.undoLabel() == std::optional<std::string> (soundLabel);
+
+    g.pointerMove (x, y - 3.0 * geo.rowHeight(), {});
+    g.pointerUp();
+    const bool dragStep = proc.undoLabel() == std::optional<std::string> ("Move notes")
+                          && fixture::same (modelfx::findNote (*proc.getDocument().current(), "d3")->p, n.p + 3.0);
+
+    proc.undo();
+    const auto afterUndo = modelfx::findNote (*proc.getDocument().current(), "d3");
+    const bool backToStart = model::sameClip (*proc.getDocument().current(), *start) && proc.undoLabel() == std::optional<std::string> (soundLabel)
+                             && proc.getSampleRef().starterId == std::string ("pad");
+    proc.undo();
+    const bool soundUndone = model::sameClip (*proc.getDocument().current(), *start) && proc.getSampleRef().starterId == soundBefore.starterId
+                             && proc.undoLabel() == std::optional<std::string> ("Spread notes");
+    check (midMoved && loaded, fmt ("mid-drag the note is 2 rows up and the sound load is a step of its own (\"%s\")", soundLabel.c_str()));
+    check (dragStep && backToStart,
+           fmt ("the release is one step \"Move notes\" (3 rows up); its Undo puts the note back where it was before the drag (pitch %.0f, "
+                "%.0f expected; the middle of the drag was %.0f) and keeps the new sound", afterUndo != nullptr ? afterUndo->p : -1.0, n.p, n.p + 2.0));
+    check (soundUndone, "Undo of the load then brings the old sound back, with the clip still as before the drag");
+}

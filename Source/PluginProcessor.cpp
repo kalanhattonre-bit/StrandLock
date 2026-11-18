@@ -470,7 +470,11 @@ int StrandLockProcessor::deliverSoundLoads()
         {
             ++published;
             const std::lock_guard<std::mutex> hold (historyLock);
-            history.push (label, clipDoc.current(), np, changed);
+            // The step keeps the clip of the last finished edit, not the document's: a load can finish while a roll
+            // drag is held, and the document then shows the drag's unfinished clip, which no undo step may keep. The
+            // drag's own step comes on its release (fix pass R4T-2).
+            const auto last = history.current();
+            history.push (label, last.has_value() ? last->clip : clipDoc.current(), np, changed);
         }
     }
     return published;
