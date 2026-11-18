@@ -358,10 +358,177 @@ d3424c6 (main).
 
 ### Progress
 
-- Done (code, first CI round pending): `RollView::Canvas` mouse handlers (press, drag, release, right press) and the
+- Done: `RollView::Canvas` mouse handlers (press, drag, release, right press) and the
   commands; the right-click menu as a JUCE menu; `ui/roll/Inspector`; `ui/HintBar` with `modeHint`; `ui/Toast`;
   `MainView`'s top bar (Undo, Redo, Grid), selection row (wired buttons, Freehand, Slide into, Multi) and the
   inspector's line; the editor's keys through `KeyRouter`; `InspectorText::parseVelocity`; the test file
   `Tests/ui/test_roll_live.cpp` (gestures through the canvas, Slide into, the menu, the selection row, the keys, the
   inspector, the hints, and 8 pictures).
-- Next: CI green, look at the pictures, the R3 notes and the M4 summary, the Cubase checklist's M4 section, merge.
+- Done: CI green on dd4da74 (run 44245520234, figures below), every picture of its artifact looked at; the
+  inspector's boxes now give way on a short line (900 px cut the value box); the Cubase checklist's M4 section; the
+  M4 summary.
+- In progress: CI on this commit, then the notes with its figures, then the fast-forward of main.
+
+### Files
+
+- `Source/ui/roll/RollView`: the canvas's mouseDown, mouseDrag and mouseUp call `press`, `dragTo`, `release` and
+  `rightPress`, which turn the canvas's pixels into roll pixels (`toRoll`) and call R1's `pointerDown`,
+  `pointerMove`, `pointerUp` and `contextMenu`, then `refresh` and `onEdit`. The commands the buttons, the keys and
+  the menu call: `undo`, `redo`, `selectAll`, `duplicate`, `deleteSelection`, `clearSelection`, `clearAll`,
+  `copyLanes`, `pasteLanes`, `toggleFreehand`, `armLink`, `setMulti`, `setGrid`. The right-click menu
+  (`showMenu`, `chooseMenuItem`, `getMenu`, `setMenusShown`) with two custom menu items, `MenuHeader` and `MenuRow`.
+- `Source/ui/roll/Inspector`: `InspectorField` (a caption, a box that becomes a text box on a click, a unit) and
+  `Inspector` (sl-ui-panels.js buildInspector, syncInspector, activeNodeCtx, fitVal and the six commit functions).
+- `Source/ui/roll/InspectorText`: `parseVelocity` (commitVel's parseFloat (clean (text)), rounded, 1 to 127).
+- `Source/ui/HintBar`: `modeHint` (sl-ui.js modeHint and SUB_HINT) and the bar: the hint on the left, "Try this:" on
+  the right, and the whole hint over the bar while the mouse is on a hint that is cut (shell.html #hintHover).
+- `Source/ui/Toast`: the toast, moved out of `MainView` (its `ToastView`); `MainView` still places it.
+- `Source/ui/roll/PianoStrip`: the pointing hand over the keys (shell.html #pianoWrap).
+- `Source/ui/MainView`: the top bar's Undo and Redo (`HistoryButton`, the prototype's two arrows drawn as paths) and
+  the Grid menu; the selection row's buttons wired, the roll's Freehand, Slide into and Multi switches at its right
+  end, the inspector's line under it; the hint bar; `syncRollControls`; `handleKey` (the KeyRouter's actions).
+- `Source/PluginEditor.cpp`: `keyPressed` hands every key to `MainView::handleKey` after recording it.
+- `Tests/ui/test_roll_live.cpp`: 8 tests and 8 pictures (below).
+- `docs/CUBASE-CHECKLIST.md`: the section "M4: the piano roll".
+
+### Decisions and deviations
+
+- **The mouse reaches the gestures with the event's own time.** `MouseEvent::eventTime` (milliseconds since 1970,
+  as the prototype's `Date.now ()`) is the time R1's double-click rule (320 ms, 22 px, the same kind of thing) and
+  the menu's Random seed read. The tests set it, so a double-click and two separate clicks are exact. The middle
+  button does nothing and a right press opens the menu without a gesture, as in sl-ui.js rollDown and its
+  contextmenu handler. A press while a gesture is still held ends that gesture first.
+- **A lost capture ends the gesture.** JUCE turns a lost mouse capture (Windows' WM_CAPTURECHANGED) into mouseUp, so
+  the gesture ends there with its undo step. The roll also ends a held gesture when it is hidden (the Diagnostics
+  tab takes its room) and when the window closes, as a release would.
+- **Cursors.** The prototype's roll has no cursor of its own, so the canvas keeps the arrow; the piano keys show
+  the pointing hand (shell.html #pianoWrap) and the inspector's boxes the text cursor (input[type=text]). The ruler
+  keeps the arrow: the prototype's ruler sets where its own Play starts, which in the plugin is Cubase's.
+  Buttons keep M0's arrow.
+- **The right-click menu is a JUCE menu built from R1's items.** Headers are small capitals (a lane mode's header in
+  its lane's colour), drawn by a custom item. The Each note / Across row is a custom item: a click changes the
+  scope and the menu stays open with the other button lit (the prototype's keep); the scope goes to UIST. Paste
+  lanes is greyed until something is copied. A press anywhere else closes the menu, as JUCE does.
+- **Where the new controls sit (a layout change).** The top bar has room for Undo, Redo and the Grid at 900 px, not
+  for Freehand, Slide into and Multi too (the prototype's top bar wraps onto two rows at 1100 px). So Undo and Redo
+  come right after the wordmark (decision 3) and the Grid after the host's tempo, as in the prototype (Tempo, Bars,
+  Grid); "Test build" at the right end shows only when it fits. Freehand, Slide into and Multi act on the selected
+  notes, so they sit at the right end of the selection row, which keeps them still when Clear all asks for its
+  second click.
+- **The inspector has a line of its own, always there.** At 1100 px the inspector with a node (about 850 px) does
+  not fit beside the selection row's buttons. The prototype hides the inspector while nothing is selected and lets
+  its rows wrap, so selecting a note moves the roll down under the mouse (the prototype then scrolls the roll back);
+  here the line is always there, so a press never moves the roll. With nothing selected it says how to use it. The
+  32 px come from the pane and the roll: at 1100 x 680 with the Sample tab open M0's pane rule now cuts the pane a
+  row earlier (it scrolls), and the roll gets 204 px (it had 158).
+- **Typing needs the keyboard, with Keys off too.** A click on an inspector box opens a text box that takes the
+  keyboard (JUCE's editable label); Enter keeps the value, Escape puts the old one back, a click anywhere else keeps
+  it (that first click only ends the typing). The boxes do not want the keyboard at rest, so M0's focus rules and
+  their tests hold. With Keys off, keys that reach the window after typing still go on to Cubase: the editor keeps
+  none of them.
+- **The hint bar's texts are sl-ui.js modeHint, less what M5 builds.** Build's "drag on empty space = box select
+  (Shift adds, Ctrl toggles)" is left out (box selection is M5's), and the lane modes' "▾ on the lane button =
+  shapes for every selected note" says "right-click = shapes for every selected note" (the lane buttons' menus are
+  M5's; the right-click menu holds the shapes now). The Nodes and Scroll lines are M5's and not built. The test
+  compares every mode's line with the prototype's, run in node with those two changes. A hint cut short shows whole
+  over the bar on hover, as the prototype does on short windows (no shadow).
+- **Undo and Redo** toast "Undo: Move notes" or "Nothing to undo" (sl-ui.js undo, redo); their tooltips name the
+  step. Undo, Redo, Duplicate, Delete, Paste lanes and Clear all do nothing while a drag is held.
+- **The Keys button toasts what the keys do** (sl-ui.js), without the prototype's A to K and Z / X (the live
+  keyboard, M8).
+- **The selection text keeps the room of "4096 notes selected"**, so the buttons after it never move.
+- **Notes snap to the grid; to the scale only with Scale lock**, which has no control until M7 (Key and Scale): the
+  gestures already snap to the scale when the instrument's scale lock is on.
+- **The pictures, looked at** (run 44245520234: all 55 pictures of the artifact, the 8 new ones and every M0, M2
+  and R2 picture the new rows changed, against fresh1100.png, ns.png and tools.png). The top bar shows Undo and
+  Redo as the prototype's two arrows (greyed while there is nothing to undo or redo), the Grid after the tempo, and
+  "Test build" only where it fits (not at 900 px). The selection row shows the count, its four buttons (Duplicate
+  and Delete greyed with nothing selected), and Freehand, Slide into… and Multi at its right end after a line,
+  Freehand in the accent while on. The inspector's line shows START, LENGTH beats, PITCH and VELOCITY, and in Pitch
+  NODE (PITCH) AT beats in VALUE, as ns.png's inspector row; with nothing selected its sentence. The hint bar's
+  line is cut with an ellipsis, and the hover shows all of it over the bar with an accent outline; the hint's
+  signs (the dot, the filled and hollow diamonds, the node dot) draw through JUCE's font fallback. Found and fixed:
+  at 900 px the inspector's value box was cut ("0 semit..."); the small boxes now give way first. Left as it is:
+  at 900 x 560 with the Sample tab open, M0's pane rule now gives the pane 64 px (its first row and the top of the
+  knob row, scrolling) and the roll 137 px (it had 116 and 117); folding the tabs on a small window, as the
+  prototype does, would be the architect's call (R2's note).
+
+### CI results
+
+- Run 44245520234 on dd4da74, green on every job and step: Windows Release 1646 checks in 265 tests (main had 1610
+  in 257), Linux Release 1638 in 265, the sanitizers' contract, model and engine groups 808 in 139 and the state
+  group 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug snapshots 0 JUCE
+  assertions, pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4.87 MB of the 5 MB budget; R3
+  adds no fixtures). The `ui` group: 54 tests, 306 checks on both platforms (R3 added 8 tests and 36 checks).
+- The gestures through the canvas's own mouse handlers: a double-click on empty space at beat 1.05, C3 made one
+  note at beat 1, a beat long, "Add note" (the first click alone made nothing); a drag 2 beats later and 3 rows up
+  moved it to beat 3, D#3, "Move notes" (mid-drag it was at beat 2 with no new undo step, and a readout showed);
+  the end dot dragged a beat right made it 2 beats long; in Pitch a double-click on the line added a node at t 0.25
+  (the inspector: Node (Pitch) at 0.5 beats in); the node dragged up 2.1 rows landed on +2 semitones (the readout
+  and the inspector both said "+2 semitones"); the segment's diamond dragged 30 px bent it to 50 %; a double-click
+  on the node deleted it; Freehand on Volume turned a painted ramp into 2 smooth nodes, 0.200 to 0.900. 8 gestures,
+  8 undo steps: Undo landed on the clip before each one (8 of 8) and Redo on the clip after it (8 of 8), each with
+  its toast; a click that moved nothing added no step (the Redo was still there).
+- The menu: a right press on a note selected it and listed Build's three items, Copy lanes, Paste lanes (greyed),
+  Duplicate and Delete; Delete was one step; New note here on empty space made a beat-long note at beat 6.25, F3;
+  in Volume the header "Volume shape" was in the lane's colour, Across kept the menu open and lit (UIST scope 1),
+  and Ramp up changed Volume ("Ramp up (Volume)").
+- The selection row: "No notes selected" with Duplicate and Delete greyed, "3 notes selected" after Select all,
+  Duplicate and Delete one step each, Clear all on its second click, Freehand refused in Build and lit in Vibrato,
+  Multi selecting two notes with two clicks, the Grid at 1/8 moving a 0.3-beat drag half a beat (UIST 0.5).
+- The keys through the editor: with Keys off Ctrl+A, 3 and Delete changed nothing and went on to Cubase; with Keys
+  on 3 picked Volume, Ctrl+A selected both notes, Delete removed them, Ctrl+Z and Ctrl+Shift+Z undid and redid with
+  their toasts, Ctrl+Y said "Nothing to redo", B armed Slide into, Escape cleared the selection; Space went on to
+  Cubase.
+- Slide into: Shift+click linked C3 into D3 ("C3 now slides into D3"); the button lit, the hint said SLIDE INTO,
+  and the next click linked D3 into E3.
+- The inspector: typed 1.2.3, 1/8, D3 and 64 gave start 1.5, length 0.5, pitch 62 and velocity 64/127, one step
+  each; "soon" toasted how to type a position and changed nothing; the value shown typed again changed nothing;
+  with two notes E3 moved both up 2 and 127 set both; a node's VALUE +3 gave +3 semitones and AT 0.375 moved it to
+  t 0.75; "loud" toasted "Type semitones, for example +3 or -2.5"; the first node showed "start", greyed.
+- Velocity reading: 20 of 20 texts read as the prototype's parseFloat (clean (text)) reads them. Hints: 15 of 15
+  lines equal sl-ui.js modeHint's (run in node, with the two M5 changes); the bar showed each mode's line (8 of 8)
+  and Build's showed whole on hover.
+- The roll view at 1100 x 680 with the Sample tab open: 1076 x 204 (canvas 1026 x 174; R2 had 1076 x 158), the
+  first view centres C4 with 13 of the 26 notes in view; at 900 x 560 with the tabs folded the canvas is 826 x 171
+  (R2 had 826 x 203).
+- Drawing cost (R2's tests, unchanged code): a full repaint of the 512-note clip 31.3 ms on Windows and 20.2 ms on
+  Linux (software, target 50 ms), Direct2D 28.1 ms; moving one note marks 3 notes' bounds and its partial repaint
+  equals a full one with both renderers (0 pixels differ).
+
+## M4 summary
+
+M4 (the roll UI: Build mode and lane modes) is built in three parts on `m4-roll`, each fast-forwarded to main when
+green: R1 the headless half, R2 the drawing, R3 the live roll. What Kalan gets: the piano roll with the ruler, the
+piano keys (click to hear), the grid and the playhead (#FF7A00, from the engine's display frames); the notes as
+strands with their lanes' ribbons; Build mode (double-click to make a note, drag to move it with grid and scale
+snap, the end dots with the 0.4-row dead zone, the slide diamonds, Shift+click = slide into, the right-click menu);
+the lane modes 2 to 7 (and 8's four lanes) with the lock rule; node editing (drag, double-click to add or delete,
+the segments' bend diamonds, the live readout in real units, pitch nodes on semitones unless Shift); Freehand (RDP
+0.012); the Keys switch with the shortcuts only while it is on; Undo and Redo buttons; the inspector (T6); the
+hint bar; the note layer's image cache.
+
+- **The plan's M4 table, where each row is checked.** Gestures (model level): R1's `test_roll_gestures` (160
+  double-clicks, 160 drags, 124 end-dot drags, 715 gestures: 329 changed the clip and pushed 1 step each, 386 did
+  not and pushed 0), and R3's `rollLiveGestures` through the real editor's mouse handlers. Lane-mode lock: R1's
+  `test_mode_lock_ui` (500 seeded gestures in each of modes 2 to 8, 0 lock breaks). Keys: R1's `test_keys` (Keys
+  off: 0 of 1016 kept; Keys on: Space never kept) and R3's `rollLiveKeys` through the editor. Inspector parsing:
+  R1's `test_inspector` (378 of 378 fixture cases bit for bit). Snapshots: R2's 20 pictures of the table plus 6,
+  and R3's 8 of the live rows. Drawing cost: R2's `test_roll_perf` (31.3 ms on Windows against 50 ms; moving one
+  note marks 3 notes' bounds, gated).
+- **Deviations from the plan, all in the parts' notes:** the zoom buttons at the right end of the ruler (R2); the
+  inspector on a line of its own and the roll's switches on the selection row (R3); the hint bar without M5's box
+  select and lane menus (R3); the playhead only while Cubase plays (R2); the menu's slide item without the link
+  emoji (R1); the readouts counting the clip's beats per bar (R1).
+- **For the architect:** UIST cannot tell "never saved" from "saved at zoom 1, scroll 0", nor a new instance from a
+  project saved unfolded (R1, R2); a small window (900 x 560) with a tab open leaves the roll 137 px, and the
+  prototype folds its tabs on a first open on a laptop (R2, R3).
+- **Handed to M5:** box selection (`RollGestures::box ()` already tracks the rectangle and R2 draws it; `applyBox`
+  is to be wired where the gestures' box ends), the Nodes switch (`nodeSel`; the mode bar's Nodes button is greyed),
+  the lane buttons' menus (their arrows toast "arrive in M5"), hover ghosts (`RollView::setGhost` draws them), the
+  selection bar's tools, the Copy / Paste tab (`RollGestures::copyMask`) and the Slides tab. When M5 adds box
+  selection and the lane menus, the hint bar's two lines go back to the prototype's words (`modeHint`, and the
+  test's expected strings). The inspector's group of picked nodes (sl-ui-panels.js `activeNodeCtx` with two or
+  more picks) comes with the Nodes switch.
+- **Handed to M6:** Sample mode's chevrons and per-note thumbnails, the Note settings tab, "Try this" (the hint
+  bar's right-hand text is still M0's).

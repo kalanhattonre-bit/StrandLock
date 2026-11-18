@@ -4,7 +4,8 @@ The first test build (M0) was the "probe": the StrandLock window with its final 
 plain saw sound you can play. It was there to find out how Cubase treats StrandLock on your computer, and its
 steps below (The checklist) still apply. The M2 build plays the real sound engine: its own steps are in
 **M2: the first real sound**. The M3 build adds the grain engines (Voice, Cloud and Lock): its steps are in
-**M3: the grain engines** at the end. Please go through them and send back your answers and the text from the
+**M3: the grain engines**. The M4 build adds the piano roll, where you see, draw and change the notes: its steps
+are in **M4: the piano roll** at the end. Please go through them and send back your answers and the text from the
 **Copy report** button.
 
 ## Getting the test build
@@ -273,3 +274,92 @@ A few things to know first:
    as notes start? Afterwards go back to your usual sample rate.
 
 10. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.
+
+## M4: the piano roll
+
+From this build on you can see the notes StrandLock plays and change them with the mouse. The steps above still
+apply; this part is about the piano roll. Please go through it and send back your answers and the text from
+**Copy report**. A screenshot helps whenever something looks wrong.
+
+Where the new things are:
+- **The roll** is in the middle of the window: the bar numbers along the top, the piano keys down the left, the
+  notes in between. The four small buttons **H−**, **H+**, **V−** and **V+** at the right end of the bar numbers
+  zoom in time and in height. The mouse wheel scrolls up and down; hold Shift to scroll sideways, or Ctrl to zoom
+  in time.
+- **Top bar**: right after STRANDLOCK are the **Undo** button (an arrow curving left) and the **Redo** button (an
+  arrow curving right). Hover over them to see what they will undo or redo. Further right is **GRID** with
+  1/4, 1/8, 1/16, 1/32 and Free: where notes land when you add, move or stretch them.
+- **The row under the mode buttons**: on the left it says how many notes are selected ("No notes selected",
+  "1 note selected"), then **Select all**, **Duplicate**, **Delete** and **Clear all**. At its right end are
+  **Freehand**, **Slide into…** and **Multi**. They turn purple while they are on.
+- **The line under that row** is the inspector: **START**, **LENGTH** (beats), **PITCH** and **VELOCITY** of the
+  selected note. In the modes 2 to 8 it also shows **NODE**, with **AT** (beats in) and **VALUE**, for the node you
+  last clicked. With no note selected it says "Select a note: its start, length, pitch and velocity show here, and
+  you can type new ones."
+- **The hint bar** at the bottom says what the mouse does in the mode you are in. When the line is cut short, hold
+  the mouse over it to read all of it.
+
+1. **Install the new build** the same way as before (Getting the test build, at the top).
+
+2. **The demo clip as notes.** Add StrandLock to a new Instrument track. The roll shows the demo clip: green lines
+   are the notes, with coloured bands above them for each note's lanes. Press Play in Cubase: does an orange line
+   move across the roll in time with the music? Do the notes you see match what you hear? Scroll and zoom around
+   with the wheel and **H−**, **H+**, **V−**, **V+**. Click a piano key on the left: do you hear that note?
+
+3. **Make, move and stretch notes.** Make sure **1 Build** is lit. Double-click an empty part of the roll: a new
+   note of one beat appears there and you hear it. Drag the note to another place: it moves in steps of the
+   **GRID** (1/16 at first) and plays each new pitch as you pass it. A small box next to the mouse shows the note
+   name and the bar and beat. (Notes will also snap to a scale once the Key and Scale controls arrive in M7.) Drag
+   the small dot at the note's right end sideways: the note gets longer or shorter. Drag that dot up or down
+   instead: the end of the note bends up or down in semitones. Try **GRID** set to 1/4 and to Free. Does all of
+   this feel right? Is anything hard to grab?
+
+4. **Draw the lanes.** Click **2 Pitch**, then click a note to select it. The note's pitch line now has round
+   nodes on it. Drag a node up or down: it moves in whole semitones (hold Shift for in between), and the small box
+   says by how much. Double-click the line between two nodes to add a node there. Double-click a node to delete
+   it (the first and last ones stay). Between two nodes there is a small diamond: drag it up or down to bend that
+   part of the line into a curve (the diamond fills in); double-click a filled diamond to make it straight again.
+   Now do the same in **3 Volume**, **4 Vibrato**, **5 Tone**, **6 Formant** and **7 Hollow**. Each mode only
+   changes its own lane: the notes themselves stay where they are. Press Play: do you hear what you drew?
+
+5. **Freehand.** In **3 Volume**, select a note and click **Freehand** so it turns purple. Drag across the note,
+   up and down: you paint its Volume line. When you let go it turns into nodes. Click **Freehand** again to turn
+   it off. (In **1 Build** Freehand says to pick a lane mode first.)
+
+6. **Slide into another note.** In **1 Build**, click a note, then hold Shift and click a later note. A message
+   says the first note now slides into the second, and a dashed line joins them. Press Play: does the first note
+   glide into the second? With the second note selected, Shift+click the first one again: the slide goes.
+   **Slide into…** does the same without Shift: select a note, click **Slide into…**, then click the note it should
+   slide into.
+
+7. **The right-click menu.** Right-click a note in **1 Build**: the menu has **Slide into the next note I click**,
+   **Remove slide links**, **Jump, no slide**, **Copy lanes**, **Paste lanes**, **Duplicate** and **Delete**.
+   Right-click an empty part of the roll for **New note here**. In a lane mode (for example **3 Volume**) the menu
+   offers shapes for the selected notes: **Ramp up**, **Ramp down**, **Swell**, **Dip**, **Squiggle**, **Random**,
+   **Decay** and **Reset**, with **Each note** or **Across** at the top. Try a few. Does each one do what its name
+   says?
+
+8. **Undo and Redo.** After a few changes, click the **Undo** button a few times, then **Redo**. Each click
+   should undo or redo exactly one change (one drag, one new note, one typed value), and a short message says
+   which. Do they?
+
+9. **Keys on and off.** With **Keys** off (not purple), click on the roll and press 2, Delete and Ctrl+Z: nothing
+   in StrandLock should change, and Cubase gets the keys. Click **Keys** so it turns purple and click on the roll
+   again. Now 1 to 8 change the mode, Ctrl+Z undoes, Ctrl+Shift+Z (or Ctrl+Y) redoes, Delete deletes the selected
+   notes, Ctrl+A selects all, Ctrl+D duplicates, Escape clears the selection and B starts Slide into. Space must
+   still start and stop Cubase, with Keys on or off. Does it? Turn Keys off again afterwards.
+
+10. **The inspector.** Select a note and click the **START** box. Type a new position, for example 2.1.1 (bar 2,
+    beat 1), and press Enter: the note moves there. Try **LENGTH** (0.5, or a note value like 1/8), **PITCH** (a
+    name like D3, or a number like 62) and **VELOCITY** (1 to 127). Escape puts the old value back. In **2 Pitch**,
+    click a node, then type a **VALUE** such as +3 (semitones) or **AT** such as 0.5 (beats into the note). Typing
+    in these boxes works with Keys off too; after Enter the keys go to Cubase again. Does it? (While you type in a
+    box, Space types a space; after Enter it starts and stops Cubase again.)
+
+11. **Play it all back.** Make a short phrase of your own: a few notes, a slide, a drawn Pitch line and a Volume
+    line. Press Play in Cubase. Does it play what you see, in time?
+
+12. **Save and reopen.** Save the project, close it and open it again. Are your notes, lanes and slides back? Are
+    the mode, the **GRID** and the zoom as you left them?
+
+13. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.

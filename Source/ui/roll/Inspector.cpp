@@ -26,6 +26,7 @@ namespace sl::ui::roll
         constexpr int kInnerGap = 4;          // caption, box and unit (sl-ui-panels.css .slp-field gap)
         constexpr int kMinValueBox = 66;      // input.slp-in width
         constexpr int kMaxValueBox = 190;     // fitVal's widest
+        constexpr int kMinSmallBox = 52;      // how far the other boxes give way on a short line
         constexpr float kDisabledAlpha = 0.55f;   // input.slp-in:disabled
 
         double clampD (double v, double a, double b) noexcept { return v < a ? a : v > b ? b : v; }
@@ -400,6 +401,19 @@ namespace sl::ui::roll
         nodeLineX = -1;
         if (! hasNote)
             return;
+        // On a short line (a narrow window) the small boxes give way first, down to 52 px, then the value box.
+        InspectorField* const small[] = { &start, &length, &pitch, &velocity, &nodeTime };
+        const int count = hasNode ? 5 : 4;
+        for (int i = 0; i < count; ++i)
+            small[i]->setBoxWidth (kMinValueBox);
+        if (hasNode)
+            fitValueBox();
+        if (const int over = preferredWidth() - getWidth(); over > 0)
+        {
+            const int each = std::min (kMinValueBox - kMinSmallBox, (over + count - 1) / count);
+            for (int i = 0; i < count; ++i)
+                small[i]->setBoxWidth (kMinValueBox - each);
+        }
         for (auto* f : { &start, &length, &pitch, &velocity })
             place (*f);
         if (! hasNode)
