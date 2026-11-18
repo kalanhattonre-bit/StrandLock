@@ -182,8 +182,11 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
   the roll in `MainView` (decision 5) and the display frames to it from `PluginEditor`; the tests
   `test_roll_snapshots` (20 pictures of the table, 6 for review), `test_roll_perf` and `test_roll_view`, all in
   group `ui`. First CI round: run 44191205369 on 2c8ae57.
-- In progress: CI, then the snapshots looked at and compared with the v4 screenshots.
-- Next: this section's CI figures, then the fast-forward of main; then R3 from the hand-off below.
+- Done (second session): the Direct2D partial update made exact (the rings drawn as paths; see the decisions), and
+  every picture of the snapshot artifact looked at and compared with the v4 screenshots (below). CI green on
+  ffe53f9 (run 44235098470, figures below).
+- In progress: CI on this commit (notes only), then the fast-forward of main.
+- Next: R3, from the hand-off below.
 
 ### Files
 
@@ -197,10 +200,9 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
   `noteChanges` compares the new state with what the image shows, note by note (its version pointer, whether it
   is selected or primary, its slide), and marks the old and new bounds of each note that changed; the next paint
   clears each marked rectangle and draws every note that reaches it again, in drawing order, the clear and the
-  notes through one clip. The view's
-  size, scroll and zoom, the theme, the mode, the tempo, the vibrato rate, the slide settings and the device scale
-  are its Key: a change draws every note again, and so does a change of more than 48 notes or of the order of the
-  notes that did not change.
+  notes through one clip. The view's size, scroll and zoom, the theme, the mode, the tempo, the vibrato rate, the
+  slide settings and the device scale are its Key: a change draws every note again, and so does a change of more
+  than 48 notes or of the order of the notes that did not change.
 - `Source/ui/roll/RollView`: the ruler with the zoom buttons at its right end, the keys, the canvas (rows, the
   cache's image, the overlay, the readout, the playhead) and two scroll bars. It owns R1's `RollGestures` and
   draws with its geometry. `refresh ()` is the only place it reads the document: it takes the clip, the
@@ -239,18 +241,26 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
   window, software in the tests) and drawn with no resampling, so it stays sharp at every UI Scale; the rows, the
   overlay and the playhead are drawn directly on every paint. A Direct2D image whose device went away is drawn
   again in full (JUCE's cached component images do the same).
-- **A changed rectangle is cleared through the clip its notes are drawn through.** The first version cleared the
-  rectangle with Image::clear and then drew the notes through a clip. JUCE's software renderer gave exactly a full
-  redraw's pixels, but Direct2D (the renderer of a Windows window, and of the Windows test runner's images) did
-  not: run 44195077235 found 111 pixels along the rectangles' edge rows that differed from a full redraw (the layer
-  itself, up to 255 levels), while two full Direct2D redraws agreed and the software renderer differed in none:
-  Direct2D places its clip's edge rows apart from a separate clear's. Drawing each rectangle as a patch at an
-  offset (run 44198028167) fixed the edges but rounded the coordinates differently inside (30 pixels, up to 6
-  levels, with both renderers). Now the clear goes through the same clip as the notes (whatever pixels the clip
-  holds are the ones cleared and drawn again), the notes keep the full redraw's transform, and every note within
-  2 px of the rectangle is drawn, so a clip a pixel larger still gets every note that reaches it. A row the clip
-  leaves out keeps its pixels, which are right: a rectangle's edges hold only notes that did not change (the changed
-  notes' bounds carry 14 px of room). The perf test gates the picture with both renderers.
+- **The roll draws its rings as paths, because Direct2D's drawEllipse skips a ring whose circle misses the
+  clip.** A partial update of the note layer must give a full redraw's picture with every renderer. JUCE's software
+  renderer did from the start. Direct2D (the renderer of a Windows window, and of the Windows test runner's images)
+  did not: runs 44195077235 and 44200621878 found 111 pixels along the edges of the redrawn rectangles (the layer
+  itself, up to 255 levels), while two full Direct2D redraws agreed. The cause is in JUCE 8.0.15:
+  `Direct2DGraphicsContext::drawEllipse` tests only the ellipse's own area against the clip, so a start ring or end
+  dot whose circle lay just outside a rectangle was skipped, although its 2 px outline reached in (those pixels
+  were the start ring's colour in the full redraw and the ribbons' under it in the update). The rings (start rings,
+  end dots, node handles) are now filled paths, the very path JUCE's software renderer fills for drawEllipse, so
+  the software pictures are unchanged. Two earlier guesses did not fix it: clearing through the notes' clip (kept:
+  the pixels cleared are exactly the pixels drawn again), and drawing each rectangle as a patch at an offset
+  (dropped: it rounded the coordinates differently inside, 30 pixels up to 6 levels with both renderers). The notes
+  keep the full redraw's transform, and every note within 2 px of a rectangle is drawn again. A row the clip leaves
+  out keeps its pixels, which are right: a rectangle's edges hold only notes that did not change (the changed notes'
+  bounds carry 14 px of room). The perf test gates the picture with both renderers.
+- **The same Direct2D trap, for later parts.** JUCE's Direct2D context also skips `drawLine` with a thickness by the
+  line's own box plus 1 px, and `drawRoundedRectangle` and `drawEllipse` outlines by their area. In the roll (cached
+  or repainted in parts) every ellipse or rounded outline, and every line thicker than 2 px, goes through a path
+  (`strokePath` or `fillPath`); fills and `drawRect` are safe. The slide link's 1.5 px dashes are inside the 1 px
+  margin.
 - **A note's bounds** are its line, ribbons and dots plus 14 px: JUCE mitres a stroke's joints up to 3 widths (the
   selected line is 3.2 px), and the dots reach 7 px past the line.
 - **"Moving one note repaints at most 3 notes' bounds"** is measured on the note layer: a moved note marks its old
@@ -262,6 +272,17 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
 - **The roll's snapshots fold the tool tabs,** as the prototype does when it first opens on a laptop, so the roll
   has the room; the editor's own snapshots (test_editor) keep the tab open and show the roll smaller. The Build
   pictures keep the first view; Pitch, Tone and Sample scroll to their selected notes.
+- **The pictures, looked at against the v4 screenshots** (fresh1100.png, glide.png, roll-play.png; every picture of
+  the artifact, the 26 roll pictures and the editor's 21, at 75, 100, 150 and 200 % and 900 x 560). The roll draws
+  what the prototype draws in M4's part: the rows in the key's colours, the grid, the ribbons in the lane colours
+  over every note (the active lane's in front, with its line), the vibrato squiggle, the start rings and end dots,
+  the active lane's nodes on a dashed line, the segment diamonds, the slide diamonds (filled at the slide's start,
+  hollow at its middle), the dashed slide link with its chain mark, the playhead with its ruler triangle, a key lit
+  on the piano, the readout, the dashed box and the ghost. Nothing clipped, overlapping, blurred or off-palette was
+  found. What the v4 screenshots show besides, on purpose not here: the chevrons under each note (H4) and the faint
+  waveform above it (U7), the dot on notes with their own settings (S7) and the warning for a slide whose target
+  starts inside its source. They are sl-ui-panels.js `decorate`, which the plan gives to M6 (chevrons and per-note
+  thumbnails) and to the Note settings and Slides work.
 - **A note for the architect: the roll is small in a new instance.** At 1100 x 680 with the Sample tab open (a new
   instance's UIST), M0's layout leaves the roll 158 px tall (a 128 px canvas, 9 rows). The prototype folds its tabs
   on a first open when the window is under 900 px high (sl-ui.js init), which gives the roll about 360 px. UIST's
@@ -295,3 +316,36 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
 - **Tests.** `RollView` runs headless (a processor, a Theme, `setBounds`); `takeRepaintLog ()` says what a refresh
   asked to repaint, and `getCache ().lastRender ()` what the next paint drew again. `test_roll_perf`'s
   `moveOneNote` shows how to check a gesture's repaint against a full repaint pixel for pixel.
+- **Drawing in the roll:** draw every ellipse or rounded outline, and every line thicker than 2 px, as a path
+  (`RollPainter`'s `ring` and `dashed` helpers). Direct2D's own `drawEllipse`, `drawRoundedRectangle` and thick
+  `drawLine` are skipped when their shape misses the clip, which tears outlines at the edges of a partial repaint.
+
+### CI results
+
+- Run 44235098470 on ffe53f9, green on every job and step: Windows Release 1610 checks in 257 tests (main had 1540
+  in 246), Linux Release 1602 in 257, the sanitizers' contract, model and engine groups 808 in 139 and the state
+  group 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug snapshots 0 JUCE
+  assertions, pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4.87 MB of the 5 MB budget; R2
+  adds no fixtures). The `ui` group: 46 tests, 270 checks on both platforms (R2 added 11 tests and 70 checks).
+- Drawing cost, a full repaint of the 512-note clip at 1100 x 680 with JUCE's software renderer: median 33.3 ms of
+  5 on Windows (min 32.0) and 19.1 ms on Linux, against the 50 ms target (gate 250 ms); the first paint, lines made
+  too, 40.8 ms and 20.5 ms. Direct2D (the Windows window's renderer): median 27.6 ms (min 26.9). A repaint with
+  nothing changed draws 0 notes (4.2 ms and 1.8 ms: the rows, one image, the handles).
+- Moving one note (a drag 2 beats later and 3 rows up, 1 undo step): the note layer marks 3 notes' bounds (gate: at
+  most 3), 2 notes' drawings changed; the update draws 89 clipped note drawings in 3 rectangles (17232 device
+  pixels) in 1.48 ms (Windows, software), 1.49 ms (Linux) and 6.63 ms (Direct2D); the roll asks to repaint 18448
+  pixels, 2.7 % of the canvas. Painted over the picture before, the area gives the full repaint's picture: 0
+  pixels differ with the software renderer and 0 with Direct2D (the note layer itself: 0 and 0; it was 111 with
+  Direct2D before the rings became paths). Painting that area one rectangle at a time, which a window does not do:
+  0 pixels with Direct2D, 2 pixels by 1 level with the software renderer (printed only).
+- Snapshots: the table's 20 pictures (dark and light x Build, Pitch, Tone x 75 / 100 / 200 %, and 900 x 560) and 6
+  for review, from the Release and the Debug runner. Mean luminance 0.177 to 0.213 dark, 0.888 to 0.917 light; the
+  900 x 560 roll's canvas is 826 x 203 with 17 notes in view; the Tone colour at full strength 1143 (dark) and
+  1100 (light) pixels in Tone mode, 0 in Build; the slide diamonds 131 and 146 link-colour pixels; while Cubase
+  plays, the playhead is at x 404 with 708 pixels of #FF7A00 (dark) and #D86700 (light), none while stopped; the
+  box outline 147 pixels.
+- The view: in a new instance (the Sample tab open) the roll fills the placeholder's 1076 x 158 (a 1026 x 128
+  canvas) and the first view centres C4 (scroll 279), 11 of the 26 notes in view; a piano key sends 1 auditionOn at
+  0.8 and 1 auditionOff; H+ makes beats 83.20 px and V+ rows 18 px; a wheel notch scrolls 100 px; Ctrl + a notch
+  zooms 1.15 times with the beat under the pointer kept; a playhead move repaints a 5 px strip; selecting a note
+  repaints 2.9 % of the roll and draws 6 notes again in 1 rectangle.
