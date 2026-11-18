@@ -45,6 +45,10 @@ namespace sl::ui::roll
         (d))); "" for a value that is not finite. */
     std::string fmtNum (double x, int digits = -1);
 
+    /** The inspector's Velocity box (sl-ui-panels.js commitVel): parseFloat (clean (text)), rounded and kept to 1 ..
+        127; nothing when the text does not start with a finite number ("102", "90.6" = 91, "300" = 127, "-5" = 1). */
+    std::optional<int> parseVelocity (std::string_view text);
+
     /** The prototype's plainUnits: "st" becomes "semitones" ("1 semitone"), "semitones vibrato" becomes
         "semitones of vibrato", and "1 cycles" / "1 wavelengths" become singular. */
     std::string plainUnits (std::string text);

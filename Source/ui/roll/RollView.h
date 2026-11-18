@@ -15,7 +15,12 @@
 //
 // The first view centres on the notes (the prototype's first open) unless the project saved another one (UIST's
 // zoom and scroll); every zoom or scroll is written back to UIST. Nothing here runs on the audio thread: the
-// piano's auditions go through the CommandQueue, and edits (R3) through the document. Message thread only.
+// piano's auditions go through the CommandQueue, and edits through the document. Message thread only.
+//
+// The live roll (R3): the canvas's mouse handlers turn JUCE's events into the gestures' presses, moves and releases
+// in roll pixels (a right press opens the right-click menu), with the event's own time so double-clicks are the
+// prototype's 320 ms. The buttons and the keys call the commands below. After every event the view refreshes and
+// calls onEdit, so MainView shows the new selection, the inspector, the hint and the Undo buttons.
 
 #include "NoteLayerCache.h"
 #include "PianoStrip.h"
@@ -69,6 +74,63 @@ namespace sl::ui::roll
         /** Where the roll's short messages go (MainView's toast). */
         std::function<void (const juce::String&)> onToast;
 
+        /** Called after the mouse, a menu item or a command changed something (the clip, the selection, the
+            switches): MainView updates the selection row, the inspector, the hint and the Undo buttons. */
+        std::function<void()> onEdit;
+
+        /** Called when a press reaches the roll, before the gestures see it (MainView ends any typing). */
+        std::function<void()> onPress;
+
+        //==========================================================================================
+        // The mouse on the roll (the canvas's handlers call these with the canvas's pixels).
+
+        /** A left press: mods Shift and Ctrl, timeMs the event's time in milliseconds (two presses within 320 ms
+            and 22 px are a double-click, as the prototype has it). */
+        void press (juce::Point<float> at, juce::ModifierKeys mods, double timeMs);
+
+        /** The mouse moved while pressed. */
+        void dragTo (juce::Point<float> at, juce::ModifierKeys mods);
+
+        /** The mouse let go (or the roll lost it): the gesture ends, one undo step when it changed the clip. */
+        void release();
+
+        /** A right press: the note there is selected, and the right-click menu opens. */
+        void rightPress (juce::Point<float> at, double timeMs);
+
+        //==========================================================================================
+        // Commands: the buttons, the keys and the menu. Each one refreshes and calls onEdit.
+
+        /** Undo and Redo of the processor, with the prototype's toasts ("Undo: Move notes", "Nothing to undo"). */
+        void undo();
+        void redo();
+
+        void selectAll();
+        void duplicate();
+        void deleteSelection();
+        void clearSelection();     // Escape
+        void clearAll();           // every note goes, one undo step
+        void copyLanes();
+        void pasteLanes();
+        void toggleFreehand();
+        void armLink();            // Slide into...
+        void setMulti (bool on);
+
+        /** The Grid in beats (1, 0.5, 0.25, 0.125; 0 = Free), kept in UIST. */
+        void setGrid (double beats);
+        double getGrid() const noexcept;
+
+        //==========================================================================================
+        // The right-click menu.
+
+        /** The menu the last right press opened (its items), or empty. */
+        const std::vector<MenuItem>& getMenu() const noexcept { return menuItems; }
+
+        /** Runs an item of the open menu, as a click on it does. */
+        void chooseMenuItem (const MenuItem& item);
+
+        /** False: a right press keeps the menu's items (getMenu) but opens no window (the tests). */
+        void setMenusShown (bool shouldShow) noexcept { menusShown = shouldShow; }
+
         //==========================================================================================
         // Zoom and scroll.
 
@@ -116,6 +178,7 @@ namespace sl::ui::roll
 
         void paint (juce::Graphics&) override;
         void resized() override;
+        void visibilityChanged() override;
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
 
         static constexpr int pianoWidth = 40, rulerHeight = 20, scrollBarThickness = 10;
@@ -127,6 +190,8 @@ namespace sl::ui::roll
 
     private:
         class Canvas;
+        class MenuHeader;
+        class MenuRow;
 
         /** Everything that makes refresh repaint the whole roll (and the ruler and the keys) when it changes. The
             notes, the selection, the handles, the ghost, the box and the readout repaint only where they changed. */
@@ -160,6 +225,12 @@ namespace sl::ui::roll
         void scrollBarMoved (juce::ScrollBar*, double newRangeStart) override;
         void timerCallback() override;
 
+        void changed();
+        void toast (const juce::String& text);
+        void showMenu (juce::Point<float> at);
+        void menuClosed (int result);
+        void saveScope();
+
         const Theme& theme;
         StrandLockProcessor& processor;
         std::unique_ptr<RollGestures> gestures;
@@ -181,6 +252,9 @@ namespace sl::ui::roll
         std::optional<double> playhead;
         bool firstView = true;
         juce::RectangleList<int> repaintLog;
+
+        std::vector<MenuItem> menuItems;   // the right-click menu open now
+        bool menusShown = true;
 
         // auditions in flight: a note played by a gesture stops 220 ms later (sl-ui.js audition)
         struct PendingOff

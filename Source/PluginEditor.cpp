@@ -166,10 +166,10 @@ bool StrandLockEditor::keyPressed (const juce::KeyPress& key)
 {
     proc.getDiag().keyReceived (key.getTextDescription(), keysOn);
 
-    // Space always goes on to Cubase (play and stop), whatever the Keys switch says.
-    if (key.getKeyCode() == juce::KeyPress::spaceKey)
-        return false;
-    return keysOn;
+    // The KeyRouter (M4): with Keys off every key goes on to Cubase and nothing runs; with Keys on StrandLock keeps
+    // the keys it receives and runs its shortcuts on the roll (Ctrl+Z, Delete, 1 to 8 ...), except Space, which
+    // always goes on to Cubase (play and stop).
+    return view.handleKey (key, keysOn);
 }
 
 //==================================================================================================

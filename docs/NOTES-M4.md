@@ -349,3 +349,19 @@ keys, the playhead, zoom and scroll, the snapshots and the drawing cost. Branch 
   0.8 and 1 auditionOff; H+ makes beats 83.20 px and V+ rows 18 px; a wheel notch scrolls 100 px; Ctrl + a notch
   zooms 1.15 times with the beat under the pointer kept; a playhead move repaints a 5 px strip; selecting a note
   repaints 2.9 % of the roll and draws 6 notes again in 1 rectangle.
+
+## R3
+
+The live roll (plan 7.6 R3): the mouse and the keys wired to R1's gestures, the inspector panel (T6), Undo and Redo
+in the top bar, the hint bar's texts, the toast in its own file, and the selection row. Branch `m4-roll`, from R2's
+d3424c6 (main).
+
+### Progress
+
+- Done (code, first CI round pending): `RollView::Canvas` mouse handlers (press, drag, release, right press) and the
+  commands; the right-click menu as a JUCE menu; `ui/roll/Inspector`; `ui/HintBar` with `modeHint`; `ui/Toast`;
+  `MainView`'s top bar (Undo, Redo, Grid), selection row (wired buttons, Freehand, Slide into, Multi) and the
+  inspector's line; the editor's keys through `KeyRouter`; `InspectorText::parseVelocity`; the test file
+  `Tests/ui/test_roll_live.cpp` (gestures through the canvas, Slide into, the menu, the selection row, the keys, the
+  inspector, the hints, and 8 pictures).
+- Next: CI green, look at the pictures, the R3 notes and the M4 summary, the Cubase checklist's M4 section, merge.

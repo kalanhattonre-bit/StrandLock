@@ -1,19 +1,26 @@
 #pragma once
 
 // The editor's whole layout in logical pixels (PLUGIN-PLAN 4 M0): the v4 prototype's page (shell.html) with
-// what M0 has behind it. From the top: the top bar (logo, wordmark, theme toggle, Keys, the host's tempo, UI
-// Scale), the state banner when there is one, the mode bar (1 Build .. 8 Sample with the four Sample chips),
-// the selection row, the tool tabs and their pane, the piano roll (ui/roll/RollView, M4), the waveform strip with
-// the loaded sound (ui/strip/WaveStrip), and the hint bar. The Diagnostics tab takes the pane and the roll's room.
+// what is built behind it. From the top: the top bar (logo, wordmark, Undo and Redo, theme toggle, Keys, the
+// host's tempo, the Grid, UI Scale), the state banner when there is one, the mode bar (1 Build .. 8 Sample with
+// the four Sample chips), the selection row (what is selected, Select all, Duplicate, Delete, Clear all, and the
+// roll's Freehand, Slide into and Multi switches) with the inspector under it, the tool tabs and their pane, the
+// piano roll (ui/roll/RollView, M4), the waveform strip with the loaded sound (ui/strip/WaveStrip), and the hint
+// bar (ui/HintBar). The Diagnostics tab takes the pane and the roll's room.
 //
 // The editor scales this component as one piece (the UI Scale) and owns the theme, the Keys switch and the
-// drops; this view only shows them and reports clicks through its callbacks.
+// drops; this view only shows them and reports clicks through its callbacks. With Keys on, the editor hands
+// every key to handleKey: the KeyRouter's shortcuts (M4, 7.6 decision 3) act on the roll.
 
 #include "diag/DiagModel.h"
 #include "doc/SampleManager.h"
 #include "sounds/StarterSounds.h"
 #include "ui/Controls.h"
 #include "ui/DiagnosticsPage.h"
+#include "ui/HintBar.h"
+#include "ui/KeyRouter.h"
+#include "ui/Toast.h"
+#include "ui/roll/Inspector.h"
 #include "ui/roll/RollView.h"
 #include "ui/strip/WaveStrip.h"
 
@@ -28,6 +35,17 @@ class StrandLockProcessor;
 namespace sl::ui
 {
     class TabPanel;
+
+    /** The top bar's Undo and Redo buttons: a curved arrow (shell.html's undo and redo signs), drawn as a path. */
+    class HistoryButton final : public FlatButton
+    {
+    public:
+        HistoryButton (const Theme&, bool isRedo);
+        void paintButton (juce::Graphics&, bool isMouseOver, bool isButtonDown) override;
+
+    private:
+        bool redo;
+    };
 
     class MainView final : public juce::Component
     {
@@ -45,9 +63,17 @@ namespace sl::ui
         void setKeysOn (bool on);
         void setUiScalePercent (int percent);
 
+        /** A key the editor received: the KeyRouter runs its shortcut on the roll (with Keys on). True when
+            StrandLock keeps the key; false sends it on to Cubase (every key with Keys off, Space always). */
+        bool handleKey (const juce::KeyPress& key, bool keysOn);
+
         /** The editor's timer: the host's tempo, the roll (what the document holds now), the Diagnostics page, the
             loaded sound, the Region and the banner. */
         void tick (const diag::DiagModel::Snapshot&, bool keysOn);
+
+        /** Shows what the roll holds now: the selection row's text and buttons, the switches, the inspector, the
+            hint and the Undo and Redo buttons (after every roll event, and on the editor's timer). */
+        void syncRollControls();
 
         void showDropOverlay (bool show, const juce::String& what = {});
 
@@ -76,17 +102,31 @@ namespace sl::ui
         // For the tests.
         FlatButton& getThemeButton() noexcept { return themeButton; }
         FlatButton& getKeysButton() noexcept { return keysButton; }
+        FlatButton& getUndoButton() noexcept { return undoButton; }
+        FlatButton& getRedoButton() noexcept { return redoButton; }
+        FlatButton& getSelectAllButton() noexcept { return selectAll; }
+        FlatButton& getDuplicateButton() noexcept { return duplicate; }
+        FlatButton& getDeleteButton() noexcept { return deleteNotes; }
+        FlatButton& getClearAllButton() noexcept { return clearAll; }
+        FlatButton& getFreehandButton() noexcept { return freehandButton; }
+        FlatButton& getSlideIntoButton() noexcept { return linkButton; }
+        FlatButton& getMultiButton() noexcept { return multiButton; }
+        juce::ComboBox& getGridBox() noexcept { return gridBox; }
         juce::ComboBox& getUiScaleBox() noexcept { return uiScaleBox; }
         TabStrip& getTabStrip() noexcept { return tabStrip; }
         DiagnosticsPage& getDiagnosticsPage() noexcept { return *diagPage; }
         WaveStrip& getStrip() noexcept { return strip; }
         roll::RollView& getRoll() noexcept { return roll; }
+        roll::Inspector& getInspector() noexcept { return inspector; }
+        HintBar& getHintBar() noexcept { return hintBar; }
         FlatButton& getModeButton (int modeNumber) noexcept;
         TabPanel* getTabPanel (int tab) const noexcept;
         const juce::String& getTempoText() const noexcept { return tempoText; }
-        const juce::String& getHintText() const noexcept { return hintText; }
+        const juce::String& getHintText() const noexcept { return hintBar.getHint(); }
+        const juce::String& getSelectionText() const noexcept { return selInfo.getText(); }
         const juce::String& getBannerText() const noexcept { return bannerText; }
         juce::Rectangle<int> getTopBarArea() const noexcept { return topBarArea; }
+        juce::Rectangle<int> getSelectionRowArea() const noexcept { return selRowArea; }
         juce::Rectangle<int> getRollArea() const noexcept { return roll.getBounds(); }
         juce::Rectangle<int> getStripArea() const noexcept { return strip.getBounds(); }
         juce::Rectangle<int> getPaneArea() const noexcept { return paneArea; }
@@ -98,25 +138,30 @@ namespace sl::ui
         void paintOverChildren (juce::Graphics&) override;
         void resized() override;
 
+        /** The grid steps the Grid menu offers, in beats (1/4, 1/8, 1/16, 1/32, Free). */
+        static constexpr std::array<double, 5> gridSteps { 1.0, 0.5, 0.25, 0.125, 0.0 };
+
     private:
         class LaneWrap;
         class FoldButton;
-        class ToastView;
 
         void buildModeBar();
         void paintModes();
         void updateHint();
         void saveUiState();
         void layoutPane();
+        void layoutSelectionRow();
+        void disarmClear();
         int toastTop() const noexcept;   // where the toast sits
 
         const Theme& theme;
         StrandLockProcessor& processor;
 
         // Top bar.
+        HistoryButton undoButton, redoButton;
         FlatButton themeButton, keysButton;
-        Caption tempoLabel, scaleLabel, status;
-        juce::ComboBox uiScaleBox;
+        Caption tempoLabel, gridLabel, scaleLabel, status;
+        juce::ComboBox gridBox, uiScaleBox;
         juce::String tempoText { "-" };
 
         // Mode bar and selection row.
@@ -125,6 +170,7 @@ namespace sl::ui
         std::vector<std::unique_ptr<FlatButton>> subChips;  // Travel, Heads, Grain, Refresh
         Caption selInfo;
         FlatButton selectAll, duplicate, deleteNotes, clearAll;
+        FlatButton freehandButton, linkButton, multiButton;
 
         // Tabs.
         TabStrip tabStrip;
@@ -135,23 +181,28 @@ namespace sl::ui
         std::unique_ptr<DiagnosticsPage> diagPage;
 
         roll::RollView roll;
+        roll::Inspector inspector;
         WaveStrip strip;
+        HintBar hintBar;
         std::vector<ParamSynced*> synced;   // every control bound to a parameter (the panels and the strip)
-        std::unique_ptr<ToastView> toast;
+        std::unique_ptr<Toast> toast;
+        KeyRouter keyRouter;
 
         int openTabIndex = sampleTab;
         bool folded = false;
         int mode = 1, subLane = 0;
         bool keysOn = false;
-        juce::String hintText, bannerText;
+        juce::String bannerText;
         bool dropShown = false;
         juce::String dropText;
         int ticks = 0;
+        double clearArmedAt = -1.0;   // when Clear all was clicked once (milliseconds), or -1
 
         // Areas from resized(), for paint().
         juce::Rectangle<int> card, topBarArea, bannerArea, modeBarArea, selRowArea, tabsArea, paneArea, hintArea;
         juce::Rectangle<int> logoArea, wordmarkArea;
         std::vector<int> topBarSeparators;
+        int selRowSeparator = -1;   // the line between the selection's buttons and the roll's switches
         std::vector<FlowItem> modeItems;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainView)

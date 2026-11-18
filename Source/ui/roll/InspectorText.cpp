@@ -459,6 +459,58 @@ namespace sl::ui::roll
         return numberText (parseNumber (fixed));
     }
 
+    std::optional<int> parseVelocity (std::string_view text)
+    {
+        // JavaScript's parseFloat on the cleaned text: an optional sign, then the longest decimal number at the
+        // start (digits, a point, more digits, an exponent); "infinity" reads as not finite
+        const std::string s = clean (text);
+        std::size_t i = 0;
+        const bool negative = i < s.size() && s[i] == '-';
+        if (i < s.size() && (s[i] == '+' || s[i] == '-'))
+            ++i;
+        const std::size_t digits0 = i;
+        while (i < s.size() && isDigit (s[i]))
+            ++i;
+        const bool intDigits = i > digits0;
+        bool fracDigits = false;
+        if (i < s.size() && s[i] == '.')
+        {
+            std::size_t j = i + 1;
+            while (j < s.size() && isDigit (s[j]))
+                ++j;
+            fracDigits = j > i + 1;
+            if (intDigits || fracDigits)
+                i = j;
+        }
+        if (! intDigits && ! fracDigits)
+            return std::nullopt;
+        if (i < s.size() && s[i] == 'e')
+        {
+            std::size_t j = i + 1;
+            if (j < s.size() && (s[j] == '+' || s[j] == '-'))
+                ++j;
+            std::size_t k = j;
+            while (k < s.size() && isDigit (s[k]))
+                ++k;
+            if (k > j)
+                i = k;
+        }
+        std::string number = s.substr (digits0, i - digits0);
+        if (! number.empty() && number.front() == '.')
+            number.insert (number.begin(), '0');
+        if (! number.empty() && number.back() == '.')
+            number.pop_back();
+        const std::size_t ePos = number.find ('e');
+        if (ePos != std::string::npos && ePos + 1 < number.size() && number[ePos + 1] == '+')
+            number.erase (ePos + 1, 1);
+        double x = parseNumber (number);
+        if (negative)
+            x = -x;
+        if (! fin (x))
+            return std::nullopt;
+        return (int) clampD (core::jsRound (x), 1.0, 127.0);
+    }
+
     //==============================================================================================
     namespace
     {

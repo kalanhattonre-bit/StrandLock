@@ -63,19 +63,131 @@ namespace sl::ui::roll
     }
 
     //==============================================================================================
-    /** The roll between the ruler, the keys and the scroll bars: RollView paints it. R3 wires its mouse. */
+    /** The roll between the ruler, the keys and the scroll bars: RollView paints it, and its mouse goes to the
+        view's press, dragTo, release and rightPress (sl-ui.js rollDown, rollMove, rollUp and the contextmenu
+        handler). The middle button does nothing, as in the prototype. JUCE ends a drag with mouseUp also when the
+        window loses the mouse (a lost capture), so that ends the gesture too. The cursor is the arrow: the
+        prototype's roll has no cursor of its own. */
     class RollView::Canvas final : public juce::Component
     {
     public:
         explicit Canvas (RollView& v) : view (v)
         {
             setOpaque (true);
+            setMouseCursor (juce::MouseCursor::NormalCursor);
         }
 
         void paint (juce::Graphics& g) override { view.paintCanvas (g); }
 
+        void mouseDown (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isPopupMenu())
+                view.rightPress (e.position, timeOf (e));
+            else if (e.mods.isLeftButtonDown())
+                view.press (e.position, e.mods, timeOf (e));
+        }
+
+        void mouseDrag (const juce::MouseEvent& e) override
+        {
+            if (e.mods.isLeftButtonDown())
+                view.dragTo (e.position, e.mods);
+        }
+
+        void mouseUp (const juce::MouseEvent&) override { view.release(); }
+
     private:
+        /** The event's own time (milliseconds since 1970, as the prototype's Date.now ()). */
+        static double timeOf (const juce::MouseEvent& e) { return (double) e.eventTime.toMilliseconds(); }
+
         RollView& view;
+    };
+
+    //==============================================================================================
+    /** A header of the right-click menu: small capitals, dim, or in a lane's colour (sl-ui.js openMenu's .h). */
+    class RollView::MenuHeader final : public juce::PopupMenu::CustomComponent
+    {
+    public:
+        MenuHeader (const juce::String& t, juce::Colour c) : juce::PopupMenu::CustomComponent (false), text (t.toUpperCase()), colour (c) {}
+
+        void getIdealSize (int& w, int& h) override
+        {
+            w = (int) std::ceil (Theme::textWidth (font(), text)) + 20;
+            h = 22;
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            g.setColour (colour);
+            g.setFont (font());
+            g.drawText (text, getLocalBounds().reduced (8, 0), juce::Justification::centredLeft, true);
+        }
+
+    private:
+        static juce::Font font() { return Theme::px (10.5f, false, 0.06f); }
+
+        juce::String text;
+        juce::Colour colour;
+    };
+
+    /** The menu's row of two buttons (Each note / Across): a click picks one and the menu stays open, the other
+        one lit (sl-ui.js openMenu's .row, its items' keep). */
+    class RollView::MenuRow final : public juce::PopupMenu::CustomComponent
+    {
+    public:
+        MenuRow (RollView& v, std::size_t index) : juce::PopupMenu::CustomComponent (false), view (&v), itemIndex (index) {}
+
+        void getIdealSize (int& w, int& h) override
+        {
+            w = 200;
+            h = 32;
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            if (view == nullptr)
+                return;
+            const Theme& t = view->theme;
+            const auto buttons = items();
+            const auto area = getLocalBounds().reduced (4, 3).toFloat();
+            const float w = (area.getWidth() - 4.0f) / 2.0f;
+            for (std::size_t i = 0; i < buttons.size() && i < 2; ++i)
+            {
+                const auto r = juce::Rectangle<float> (area.getX() + (float) i * (w + 4.0f), area.getY(), w, area.getHeight()).reduced (0.5f);
+                const bool on = buttons[i].on;
+                juce::Path box;
+                box.addRoundedRectangle (r, Theme::corner);
+                g.setColour (on ? t (Tok::acc) : t (Tok::btn));
+                g.fillPath (box);
+                g.setColour (on ? t (Tok::acc) : t (Tok::btnb));
+                g.strokePath (box, juce::PathStrokeType (1.0f));
+                g.setColour (on ? t (Tok::onacc) : t (Tok::txt));
+                g.setFont (Theme::px (12.0f, true));
+                g.drawText (juce::String::fromUTF8 (buttons[i].label.c_str()), r, juce::Justification::centred, true);
+            }
+        }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            if (view == nullptr)
+                return;
+            const auto buttons = items();
+            const std::size_t i = e.position.x < (float) getWidth() * 0.5f ? 0 : 1;
+            if (i < buttons.size())
+                view->chooseMenuItem (buttons[i]);
+            repaint();
+        }
+
+    private:
+        std::vector<MenuItem> items() const
+        {
+            if (view == nullptr)
+                return {};
+            const auto& menu = view->getMenu();
+            return itemIndex < menu.size() ? menu[itemIndex].row : std::vector<MenuItem>();
+        }
+
+        juce::Component::SafePointer<RollView> view;
+        std::size_t itemIndex;
     };
 
     //==============================================================================================
@@ -144,6 +256,13 @@ namespace sl::ui::roll
 
     RollView::~RollView()
     {
+        // the window closed in the middle of a drag: the gesture ends as a release would (its undo step), with
+        // nobody left to tell
+        onToast = nullptr;
+        onEdit = nullptr;
+        onPress = nullptr;
+        if (gestures->isDragging())
+            gestures->pointerUp();
         stopTimer();
         hbar.removeListener (this);
         vbar.removeListener (this);
@@ -487,6 +606,279 @@ namespace sl::ui::roll
         hbar.setCurrentRange (geo.scrollX(), geo.viewWidth(), juce::dontSendNotification);
         vbar.setRangeLimits (0.0, std::max (geo.contentHeight(), geo.viewHeight()), juce::dontSendNotification);
         vbar.setCurrentRange (geo.scrollY(), geo.viewHeight(), juce::dontSendNotification);
+    }
+
+    //==============================================================================================
+    // The mouse (R3): JUCE's events in, the gestures' calls out, then a refresh.
+
+    namespace
+    {
+        Mods modsOf (juce::ModifierKeys m) noexcept
+        {
+            // the prototype's e.shiftKey and e.ctrlKey || e.metaKey
+            return Mods { m.isShiftDown(), m.isCtrlDown() || m.isCommandDown() };
+        }
+    }
+
+    void RollView::changed()
+    {
+        refresh();
+        if (onEdit)
+            onEdit();
+    }
+
+    void RollView::toast (const juce::String& text)
+    {
+        if (onToast)
+            onToast (text);
+    }
+
+    void RollView::press (juce::Point<float> at, juce::ModifierKeys mods, double timeMs)
+    {
+        if (onPress)
+            onPress();
+        // a press while a gesture is still held (a second button) ends that one first
+        if (gestures->isDragging())
+            gestures->pointerUp();
+        menuItems.clear();
+        const auto p = getGeometry().toRoll ((double) at.x, (double) at.y);
+        gestures->pointerDown (p.x, p.y, modsOf (mods), timeMs);
+        changed();
+    }
+
+    void RollView::dragTo (juce::Point<float> at, juce::ModifierKeys mods)
+    {
+        if (! gestures->isDragging())
+            return;
+        const auto p = getGeometry().toRoll ((double) at.x, (double) at.y);
+        gestures->pointerMove (p.x, p.y, modsOf (mods));
+        changed();
+    }
+
+    void RollView::release()
+    {
+        if (! gestures->isDragging())
+            return;
+        gestures->pointerUp();
+        changed();
+    }
+
+    void RollView::rightPress (juce::Point<float> at, double timeMs)
+    {
+        if (onPress)
+            onPress();
+        if (gestures->isDragging())
+            return;
+        // sl-ui.js contextmenu: the note there is selected (or made the primary one), then the menu lists what applies
+        const auto p = getGeometry().toRoll ((double) at.x, (double) at.y);
+        menuItems = gestures->contextMenu (p.x, p.y, timeMs);
+        changed();
+        if (menusShown)
+            showMenu (at);
+    }
+
+    void RollView::visibilityChanged()
+    {
+        // hidden in the middle of a drag (the Diagnostics tab took the roll's room): the gesture ends there
+        if (! isVisible())
+            release();
+    }
+
+    //==============================================================================================
+    // The right-click menu: the gestures' items as a JUCE menu (sl-ui.js openMenu).
+
+    void RollView::showMenu (juce::Point<float> at)
+    {
+        juce::PopupMenu menu;
+        menu.setLookAndFeel (&getLookAndFeel());
+        for (std::size_t i = 0; i < menuItems.size(); ++i)
+        {
+            const auto& m = menuItems[i];
+            const auto label = juce::String::fromUTF8 (m.label.c_str());
+            switch (m.kind)
+            {
+                case MenuItem::Kind::header:
+                {
+                    juce::PopupMenu::Item it;
+                    it.customComponent = new MenuHeader (label, m.colour ? RollPainter::laneColour (theme.colours(), *m.colour) : theme (Tok::dim));
+                    it.isEnabled = false;
+                    menu.addItem (std::move (it));
+                    break;
+                }
+                case MenuItem::Kind::separator:
+                    menu.addSeparator();
+                    break;
+                case MenuItem::Kind::item:
+                    menu.addItem ((int) i + 1, label, ! m.disabled);
+                    break;
+                case MenuItem::Kind::row:
+                {
+                    juce::PopupMenu::Item it;
+                    it.customComponent = new MenuRow (*this, i);
+                    it.isEnabled = true;
+                    menu.addItem (std::move (it));
+                    break;
+                }
+            }
+        }
+        const auto screenArea = canvas->localAreaToGlobal (juce::Rectangle<int> (juce::roundToInt (at.x), juce::roundToInt (at.y), 1, 1));
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (canvas.get())
+                                                      .withTargetScreenArea (screenArea)
+                                                      .withMinimumWidth (190)
+                                                      .withMaximumNumColumns (1),
+                            [safe = juce::Component::SafePointer<RollView> (this)] (int result)
+                            {
+                                if (safe != nullptr)
+                                    safe->menuClosed (result);
+                            });
+    }
+
+    void RollView::menuClosed (int result)
+    {
+        if (result > 0 && result <= (int) menuItems.size())
+        {
+            const auto item = menuItems[(std::size_t) result - 1];
+            chooseMenuItem (item);
+        }
+        menuItems.clear();
+    }
+
+    void RollView::chooseMenuItem (const MenuItem& item)
+    {
+        const auto scope = gestures->settings().scope;
+        // a keepOpen item (Each note / Across) gives the menu back with the other one lit
+        if (auto again = gestures->runMenuItem (item))
+            menuItems = std::move (*again);
+        else if (! item.keepOpen)
+            menuItems.clear();
+        if (gestures->settings().scope != scope)
+            saveScope();
+        changed();
+    }
+
+    void RollView::saveScope()
+    {
+        auto ui = processor.getUiState();
+        ui.scope = (std::uint8_t) (gestures->settings().scope == model::ShapeScope::across ? 1 : 0);
+        processor.setUiState (ui);
+    }
+
+    //==============================================================================================
+    // Commands.
+
+    void RollView::undo()
+    {
+        if (gestures->isDragging())
+            return;
+        // sl-ui.js undo: "Nothing to undo", or the step's name
+        const auto label = processor.undoLabel();
+        if (! processor.canUndo() || ! processor.undo())
+            toast ("Nothing to undo");
+        else
+            toast ("Undo: " + juce::String::fromUTF8 (label.value_or ("Edit").c_str()));
+        changed();
+    }
+
+    void RollView::redo()
+    {
+        if (gestures->isDragging())
+            return;
+        const auto label = processor.redoLabel();
+        if (! processor.canRedo() || ! processor.redo())
+            toast ("Nothing to redo");
+        else
+            toast ("Redo: " + juce::String::fromUTF8 (label.value_or ("Edit").c_str()));
+        changed();
+    }
+
+    void RollView::selectAll()
+    {
+        gestures->selectAll();
+        changed();
+    }
+
+    void RollView::duplicate()
+    {
+        if (gestures->isDragging())
+            return;
+        gestures->duplicateSelection();
+        changed();
+    }
+
+    void RollView::deleteSelection()
+    {
+        if (gestures->isDragging())
+            return;
+        gestures->deleteSelection();
+        changed();
+    }
+
+    void RollView::clearSelection()
+    {
+        menuItems.clear();
+        gestures->clearSelection();
+        changed();
+    }
+
+    void RollView::clearAll()
+    {
+        if (gestures->isDragging())
+            return;
+        // sl-ui.js Clear all: the clip with no notes, one undo step, nothing selected
+        model::Clip empty = *processor.getDocument().current();
+        empty.notes.clear();
+        const auto out = processor.editClip ("Clear all", std::move (empty));
+        if (out.refused)
+            toast (juce::String::fromUTF8 (out.message.c_str()));
+        processor.getDocument().setSelection ({}, std::string());
+        changed();
+    }
+
+    void RollView::copyLanes()
+    {
+        gestures->copyLanes();
+        changed();
+    }
+
+    void RollView::pasteLanes()
+    {
+        if (gestures->isDragging())
+            return;
+        gestures->pasteLanes();
+        changed();
+    }
+
+    void RollView::toggleFreehand()
+    {
+        gestures->toggleFreehand();
+        changed();
+    }
+
+    void RollView::armLink()
+    {
+        gestures->armLink();
+        changed();
+    }
+
+    void RollView::setMulti (bool on)
+    {
+        gestures->settings().multi = on;
+        changed();
+    }
+
+    void RollView::setGrid (double beats)
+    {
+        // the prototype's Grid menu: 1/4, 1/8, 1/16, 1/32, Free; the project keeps it (UIST gridBeats)
+        gestures->settings().snap = isGrid (beats) ? beats : 0.25;
+        auto ui = processor.getUiState();
+        ui.gridBeats = (float) gestures->settings().snap;
+        processor.setUiState (ui);
+        changed();
+    }
+
+    double RollView::getGrid() const noexcept
+    {
+        return gestures->settings().snap;
     }
 
     //==============================================================================================

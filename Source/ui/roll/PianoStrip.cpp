@@ -21,6 +21,7 @@ namespace sl::ui::roll
         : theme (t), geo (g)
     {
         setOpaque (true);
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);   // shell.html #pianoWrap: cursor:pointer
     }
 
     void PianoStrip::setScale (int newKey, int newScale)
