@@ -402,17 +402,17 @@ namespace sl::ui::roll
         if (! hasNote)
             return;
         // On a short line (a narrow window) the small boxes give way first, down to 52 px, then the value box.
-        InspectorField* const small[] = { &start, &length, &pitch, &velocity, &nodeTime };
+        InspectorField* const boxes[] = { &start, &length, &pitch, &velocity, &nodeTime };
         const int count = hasNode ? 5 : 4;
         for (int i = 0; i < count; ++i)
-            small[i]->setBoxWidth (kMinValueBox);
+            boxes[i]->setBoxWidth (kMinValueBox);
         if (hasNode)
             fitValueBox();
         if (const int over = preferredWidth() - getWidth(); over > 0)
         {
             const int each = std::min (kMinValueBox - kMinSmallBox, (over + count - 1) / count);
             for (int i = 0; i < count; ++i)
-                small[i]->setBoxWidth (kMinValueBox - each);
+                boxes[i]->setBoxWidth (kMinValueBox - each);
         }
         for (auto* f : { &start, &length, &pitch, &velocity })
             place (*f);
