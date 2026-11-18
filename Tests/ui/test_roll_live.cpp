@@ -705,7 +705,8 @@ SL_TEST ("ui", rollLiveVelocityParse)
 
 SL_TEST ("ui", rollLiveHints)
 {
-    section ("Hint bar: sl-ui.js modeHint's text for every mode, Freehand and Slide into (less M5's box select and lane menus)");
+    section ("Hint bar: sl-ui.js modeHint's text for every mode, Freehand and Slide into (with box select since M5 S1; the lane menus' "
+             "words arrive with M5 S2)");
 
     struct Case
     {
@@ -716,7 +717,7 @@ SL_TEST ("ui", rollLiveHints)
     };
     const Case cases[] = {
         { 1, std::nullopt, false, false,
-          "BUILD (1): double-click empty space = new note \xc2\xb7 drag a note to move it \xc2\xb7 drag its end dots sideways (length) or up/down (bend) \xc2\xb7 \xe2\x97\x86 slide handles \xc2\xb7 Shift+click a 2nd note = slide into it \xc2\xb7 right-click = menu" },
+          "BUILD (1): double-click empty space = new note \xc2\xb7 drag a note to move it \xc2\xb7 drag its end dots sideways (length) or up/down (bend) \xc2\xb7 \xe2\x97\x86 slide handles \xc2\xb7 Shift+click a 2nd note = slide into it \xc2\xb7 drag on empty space = box select (Shift adds, Ctrl toggles) \xc2\xb7 right-click = menu" },
         { 2, core::LaneId::pitch, false, false,
           "PITCH (2): notes are locked, only Pitch changes \xc2\xb7 click a note to select it \xc2\xb7 drag \xe2\x97\x8f nodes \xc2\xb7 double-click the line = add a node \xc2\xb7 double-click a node = delete \xc2\xb7 drag the small \xe2\x97\x87 in a segment = curve it (it fills in), double-click a filled \xe2\x97\x86 = straighten \xc2\xb7 right-click = shapes for every selected note \xc2\xb7 nodes snap to semitones (hold Shift for free) \xc2\xb7 \xe2\x97\x86 slide handles" },
         { 3, core::LaneId::amp, false, false,

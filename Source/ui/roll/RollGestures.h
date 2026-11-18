@@ -16,10 +16,14 @@
 // zones (a note moves after 5 px or a row; a node after 3 px; an end dot bends after 0.4 row; a box after 4 px) and
 // the readouts in real units (model::formatLane through InspectorText). Message thread only.
 //
-// Not here (later milestones): box selection of notes and nodes, the Nodes switch, hover ghosts and the lane-button
-// menus (M5); Sample mode's thumbnails (M6). A drag on empty space is tracked as a box (its rectangle is there for the
-// view) but selects nothing until M5; a click there clears the selection, as in the prototype.
+// Box select (M5 S1, BoxSelect.h): a drag on empty space draws a box that selects the notes it meets (Shift adds,
+// Ctrl toggles); with the Nodes switch on it picks the nodes of the selected notes inside it, and a drag on one picked
+// node moves every picked node together ("Move nodes"). A click on empty space clears the selection, as in the
+// prototype.
+//
+// Not here (later parts and milestones): hover ghosts and the lane-button menus (M5 S2); Sample mode's thumbnails (M6).
 
+#include "BoxSelect.h"
 #include "RollGeometry.h"
 
 #include "core/Inst.h"
@@ -74,6 +78,7 @@ namespace sl::ui::roll
         double bpm = 120.0;          // the readouts and the vibrato's squiggle
         double sampleSeconds = 6.0;  // the sound's length, for the Fit shape
         model::ShapeScope scope = model::ShapeScope::each;   // the menu's shapes: Each note or Across
+        bool nodes = false;          // the Nodes switch (M5): in a lane mode a box picks the selected notes' nodes
     };
 
     /** The live readout beside the pointer while a drag changes something (sl-ui.js showReadout). */
@@ -130,12 +135,13 @@ namespace sl::ui::roll
         /** True while a press is held (a drag in progress, or a click not yet let go). */
         bool isDragging() const noexcept { return drag.has_value(); }
 
-        /** A box being dragged on empty space (after 4 px): its corners, for the view to draw. */
-        struct Box
-        {
-            double x0 = 0.0, y0 = 0.0, x1 = 0.0, y1 = 0.0;
-        };
+        /** A box being dragged (after 4 px): its corners in order, for the view to draw. Every move selects what it
+            meets (BoxSelect.h), or with the Nodes switch picks the nodes inside it. */
+        using Box = SelectBox;
         std::optional<Box> box() const;
+
+        /** True while the box being dragged picks nodes (the Nodes switch) rather than notes. */
+        bool isNodeBox() const noexcept;
 
         /** The readout to show, or nothing (hidden). */
         const std::optional<Readout>& readout() const noexcept { return shown; }
@@ -163,10 +169,14 @@ namespace sl::ui::roll
         void armLink();
         bool isLinkArmed() const noexcept { return linkArm; }
 
+        /** The Nodes switch (sl-ui.js toggleNodes): refused in Build with a toast; each switch lets go of the picked
+            nodes, and switched on with nothing selected it says to select notes first. */
+        void toggleNodes();
+
         void duplicateSelection();
         void deleteSelection();
         void selectAll();
-        void clearSelection();   // Escape
+        void clearSelection();   // Escape: the selection and the picked nodes go
 
         void copyLanes();
         void pasteLanes();
@@ -175,12 +185,14 @@ namespace sl::ui::roll
         /** The lanes Copy lanes copies (every lane by default; the Copy / Paste tab, M5, changes it). */
         std::array<bool, core::kNumLanes> copyMask;
 
+        /** The selected notes' ids in time order (sl-ui.js getSelection): what every selection tool acts on. */
+        std::vector<std::string> selectionInTimeOrder() const;
+
     private:
         model::ClipPtr clip() const { return host.doc.current(); }
         doc::RollState roll() const { return host.doc.rollState(); }
         model::NotePtr noteById (const std::string& id) const;
         model::NotePtr primaryNote() const;
-        std::vector<std::string> selectionInTimeOrder() const;
 
         double total() const;
         double minLen() const noexcept { return set.snap > 0.0 ? set.snap : 0.125; }
@@ -200,6 +212,8 @@ namespace sl::ui::roll
         void linkNotes (const model::Note& P, const model::Note& h);
         void bandClick (const std::string& id, bool link, bool add);
         void addNodeAt (const model::Note& n, core::LaneId lane, double x, double y, bool onLine);
+        void applyBox();
+        void moveNodes (double x, double y, bool shift);
         void paint (double x, double y);
         std::optional<model::NodeList> bendEndNodes (const model::Note& n, bool start, double y, double y0, double v0, bool shift) const;
 
@@ -213,7 +227,7 @@ namespace sl::ui::roll
         // The gesture in progress (sl-ui.js drag).
         struct Drag
         {
-            enum class Type { gstart, gmid, node, seg, end, start, free, move, box };
+            enum class Type { gstart, gmid, node, seg, end, start, free, move, box, nodes };
             Type t = Type::box;
             std::string id;
             core::LaneId lane = core::LaneId::pitch;
@@ -229,6 +243,10 @@ namespace sl::ui::roll
             bool shift = false, ctrl = false;
             std::optional<std::string> clickId;   // a Shift or Ctrl press on a note's band: the click it was
             bool clickLink = false, clickAdd = false;
+            bool nodeBox = false;                 // box: it picks nodes (the Nodes switch), not notes
+            std::optional<std::string> clickNote; // a node box started on a selected note: a click makes it the primary
+            std::vector<std::string> base;        // box: the selection when it started
+            std::vector<doc::NodePick> baseNodes; // box: the picked nodes when it started; nodes: the nodes moved
             std::vector<std::string> ids;         // move: the notes moved, and where each started
             std::vector<std::pair<double, double>> orig;   // (s, p) per id
             int p0 = 0;

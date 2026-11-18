@@ -201,6 +201,7 @@ namespace sl::ui
           multiButton (t, "Multi"),
           tabStrip (t, juce::StringArray (kTabNames, numTabs)),
           roll (t, p),
+          selectionBar (t, roll),
           inspector (t, p),
           strip (t, p),
           hintBar (t)
@@ -274,6 +275,14 @@ namespace sl::ui
         multiButton.onClick = [this] { roll.setMulti (! multiButton.getToggleState()); };
         for (auto* b : { &selectAll, &duplicate, &deleteNotes, &clearAll, &freehandButton, &linkButton, &multiButton })
             addAndMakeVisible (*b);
+        // the selection bar (M5) under the selection row: a drawer that opens or closes moves what is below it
+        addAndMakeVisible (selectionBar);
+        selectionBar.onHeightChange = [this]
+        {
+            resized();
+            repaint();
+        };
+        roll.getTools().onShowLane = [this] (core::LaneId lane) { showLane (lane); };
         addAndMakeVisible (inspector);
 
         // Tabs and panes.
@@ -317,6 +326,7 @@ namespace sl::ui
         addAndMakeVisible (roll);
         roll.setMenuParent (this);   // the right-click menu opens over the whole page, as the prototype's #menu
         roll.onToast = [this] (const juce::String& text) { showToast (text); };
+        roll.onToastFor = [this] (const juce::String& text, int ms) { showToast (text, ms); };
         roll.onEdit = [this] { syncRollControls(); };
         roll.onPress = [this] { inspector.finishEditing(); };
         inspector.onToast = [this] (const juce::String& text, int ms) { showToast (text, ms); };
@@ -344,6 +354,7 @@ namespace sl::ui
         keys.pasteLanes = [this] { roll.pasteLanes(); };
         keys.clearSelection = [this] { roll.clearSelection(); };
         keys.armLink = [this] { roll.armLink(); };
+        keys.toggleNodes = [this] { roll.toggleNodes(); };
         keys.setMode = [this] (int m) { setMode (m); };
         keyRouter.actions = std::move (keys);
 
@@ -378,8 +389,11 @@ namespace sl::ui
     MainView::~MainView()
     {
         roll.onToast = nullptr;
+        roll.onToastFor = nullptr;
         roll.onEdit = nullptr;
         roll.onPress = nullptr;
+        roll.getTools().onShowLane = nullptr;
+        selectionBar.onHeightChange = nullptr;
         inspector.onToast = nullptr;
         inspector.onEdit = nullptr;
         paneViewport.setViewedComponent (nullptr, false);
@@ -420,8 +434,10 @@ namespace sl::ui
         }
 
         modeItems.push_back ({ nullptr, 1, kItemHeight, false });
-        nodesButton.setEnabled (false);
-        nodesButton.setTooltip ("Nodes: pick and drag the nodes of the selected notes (M5)");
+        // the Nodes switch (M5, sl-ui.js toggleNodes): greyed in Build, lit while on
+        nodesButton.setTooltip ("Nodes: a box on empty space picks nodes of the selected notes; then drag one to move them together "
+                                "(N while Keys is on)");
+        nodesButton.onClick = [this] { roll.toggleNodes(); };
         addAndMakeVisible (nodesButton);
         modeItems.push_back ({ &nodesButton, nodesButton.preferredWidth(), kItemHeight, false });
     }
@@ -451,6 +467,9 @@ namespace sl::ui
         }
         for (int i = 0; i < (int) subChips.size(); ++i)
             subChips[(std::size_t) i]->setToggleState (mode == 8 && subLane == i, juce::dontSendNotification);
+        // sl-ui.js paintModes: the Nodes switch lit while on, greyed in Build (it stays on there, doing nothing)
+        nodesButton.setToggleState (roll.getGestures().settings().nodes, juce::dontSendNotification);
+        nodesButton.setEnabled (mode != 1);
     }
 
     void MainView::setMode (int newMode, int newSubLane)
@@ -464,12 +483,28 @@ namespace sl::ui
         syncRollControls();
     }
 
+    void MainView::showLane (core::LaneId lane)
+    {
+        // sl-ui-panels.js showLane: a Sample lane shows mode 8 with that sub-lane, any other lane its own mode
+        const auto& info = core::laneInfo (lane);
+        if (info.sub)
+        {
+            for (int i = 0; i < 4; ++i)
+                if (core::kSampleLanes[i] == lane && (mode != 8 || subLane != i))
+                    setMode (8, i);
+            return;
+        }
+        if (mode != info.mode)
+            setMode (info.mode);
+    }
+
     void MainView::updateHint()
     {
-        // sl-ui.js modeHint: the mode's line, or Freehand's, or Slide into's while it waits for a click
+        // sl-ui.js modeHint: the mode's line, or Freehand's, or Slide into's while it waits for a click, or the
+        // Nodes switch's
         const auto st = processor.getDocument().rollState();
         const auto& g = roll.getGestures();
-        hintBar.setHint (modeHint (st.mode, st.activeLane(), g.settings().free, g.isLinkArmed()));
+        hintBar.setHint (modeHint (st.mode, st.activeLane(), g.settings().free, g.isLinkArmed(), g.settings().nodes));
     }
 
     void MainView::syncRollControls()
@@ -486,6 +521,10 @@ namespace sl::ui
         freehandButton.setToggleState (g.settings().free, juce::dontSendNotification);
         linkButton.setToggleState (g.isLinkArmed(), juce::dontSendNotification);
         multiButton.setToggleState (g.settings().multi, juce::dontSendNotification);
+        nodesButton.setToggleState (g.settings().nodes, juce::dontSendNotification);
+
+        // the selection bar (M5): its Lane, its drawer and what the drawer says about the selection now
+        selectionBar.sync();
 
         // Undo and Redo (sl-ui.js historyChanged): enabled when there is a step, the step's name in the tooltip
         const auto undoLabel = processor.undoLabel(), redoLabel = processor.redoLabel();
@@ -720,11 +759,20 @@ namespace sl::ui
         paneContent.setSize (inner, h);
     }
 
+    int MainView::selectionAreaHeight() const
+    {
+        // the selection row, the selection bar's line (always there, so selecting never moves the roll) and its open
+        // drawer, and the inspector's line
+        const int barWidth = juce::jmax (100, card.getWidth() - 2 * kBarPadX);
+        return kSelRowHeight + selectionBar.heightFor (barWidth) + kInspectorRowHeight;
+    }
+
     void MainView::layoutSelectionRow()
     {
         // Row 1: what is selected and the buttons for it; at the right end, after a line, the roll's switches. The
         // text keeps the room of its longest form, so the buttons never move when the selection changes, and the
-        // switches stay put when Clear all asks for its second click. Row 2: the inspector.
+        // switches stay put when Clear all asks for its second click. Row 2: the selection bar (M5) and its drawer.
+        // Row 3: the inspector.
         if (selRowArea.isEmpty())
             return;
         const auto row1 = selRowArea.withHeight (kSelRowHeight).reduced (kBarPadX, 0);
@@ -749,8 +797,12 @@ namespace sl::ui
         }
         selRowSeparator = right - 1;
 
-        const auto row2 = selRowArea.withTrimmedTop (kSelRowHeight).withTrimmedBottom (1).reduced (kBarPadX, 0);
-        inspector.setBounds (row2.getX(), row2.getY(), row2.getWidth(), row2.getHeight() - 3);
+        const int barWidth = selRowArea.getWidth() - 2 * kBarPadX;
+        const int barHeight = selectionBar.heightFor (barWidth);
+        selectionBar.setBounds (selRowArea.getX() + kBarPadX, selRowArea.getY() + kSelRowHeight, barWidth, barHeight);
+
+        const auto row3 = selRowArea.withTrimmedTop (kSelRowHeight + barHeight).withTrimmedBottom (1).reduced (kBarPadX, 0);
+        inspector.setBounds (row3.getX(), row3.getY(), row3.getWidth(), row3.getHeight() - 3);
     }
 
     void MainView::resized()
@@ -812,8 +864,9 @@ namespace sl::ui
             flowLayout (modeItems, modeBarArea.reduced (kBarPadX, 7), kModeGap, kGap, true);
         }
 
-        // The selection row and the inspector's line under it (always there, so selecting never moves the roll).
-        selRowArea = area.removeFromTop (kSelRowHeight + kInspectorRowHeight);
+        // The selection row, the selection bar and the inspector's line under it (always there, so selecting never
+        // moves the roll; an open drawer of the bar does, as its button is clicked).
+        selRowArea = area.removeFromTop (selectionAreaHeight());
         layoutSelectionRow();
 
         tabsArea = area.removeFromTop (kTabsHeight);

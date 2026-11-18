@@ -14,11 +14,11 @@
 
 namespace sl::ui
 {
-    /** sl-ui.js modeHint: the line for mode 1..8 (lane: the mode's lane, mode 8's sub-lane), with Freehand on or
-        Slide into armed. Box selection, the Nodes switch and the lane buttons' menus are M5's, so their parts of
-        the prototype's lines are left out until then; a lane mode's line says the right-click menu holds the
-        shapes, which it does in M4. */
-    juce::String modeHint (int mode, std::optional<core::LaneId> lane, bool freehand, bool linkArmed);
+    /** sl-ui.js modeHint: the line for mode 1..8 (lane: the mode's lane, mode 8's sub-lane), with Freehand on, Slide
+        into armed or the Nodes switch on (M5 S1: box select and the Nodes line are the prototype's words). The lane
+        buttons' menus arrive in M5 S2, so until then a lane mode's line says the right-click menu holds the shapes,
+        which it does. */
+    juce::String modeHint (int mode, std::optional<core::LaneId> lane, bool freehand, bool linkArmed, bool nodes = false);
 
     class HintBar final : public juce::Component
     {

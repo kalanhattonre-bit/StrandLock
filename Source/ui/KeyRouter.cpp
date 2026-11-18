@@ -57,6 +57,8 @@ namespace sl::ui
                 return { Shortcut::mode, m };
         if (k == 'b')
             return { Shortcut::armLink, 0 };
+        if (k == 'n')
+            return { Shortcut::toggleNodes, 0 };
         return {};
     }
 
@@ -77,17 +79,17 @@ namespace sl::ui
                 fn();
         };
         const Hit hit = shortcutFor (key);
-        // A held key repeats its press, and JUCE does not say which presses are repeats. Only B changes something
-        // when it repeats (it toggles), so a B that is still held does nothing (fix pass F4). Another key's press ends
-        // B's repeats, as Windows stops repeating a key when another one goes down.
-        if (hit.what == Shortcut::armLink)
+        // A held key repeats its press, and JUCE does not say which presses are repeats. Only B and N change
+        // something when they repeat (they toggle), so a B or N that is still held does nothing (fix pass F4). Another
+        // key's press ends the repeats, as Windows stops repeating a key when another one goes down.
+        if (hit.what == Shortcut::armLink || hit.what == Shortcut::toggleNodes)
         {
-            if (! linkKeyHeld)
-                run (actions.armLink);
-            linkKeyHeld = true;
+            if (toggleKeyHeld != hit.what)
+                run (hit.what == Shortcut::armLink ? actions.armLink : actions.toggleNodes);
+            toggleKeyHeld = hit.what;
             return true;
         }
-        linkKeyHeld = false;
+        toggleKeyHeld = Shortcut::none;
         switch (hit.what)
         {
             case Shortcut::undo:            run (actions.undo); break;
@@ -99,6 +101,7 @@ namespace sl::ui
             case Shortcut::pasteLanes:      run (actions.pasteLanes); break;
             case Shortcut::clearSelection:  run (actions.clearSelection); break;
             case Shortcut::armLink:         break;   // above
+            case Shortcut::toggleNodes:     break;   // above
             case Shortcut::mode:
                 if (actions.setMode)
                     actions.setMode (hit.mode);

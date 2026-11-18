@@ -42,6 +42,7 @@ namespace
             a.pasteLanes = count ("paste lanes");
             a.clearSelection = count ("clear");
             a.armLink = count ("slide into");
+            a.toggleNodes = count ("nodes");
             a.setMode = [this] (int m) { modes.push_back (m); ++runs["mode"]; };
             return a;
         }
@@ -156,6 +157,8 @@ SL_TEST ("ui", keysShortcutsOnlyWithKeysOn)
         { 'V', M::commandModifier, "paste lanes", "Ctrl+V" },
         { juce::KeyPress::escapeKey, 0, "clear", "Escape" },
         { 'B', 0, "slide into", "B" },
+        { 'N', 0, "nodes", "N (the Nodes switch, M5)" }, { 'n', 0, "nodes", "n (lower-case key code)" },
+        { 'N', M::commandModifier, "", "Ctrl+N" },
         { '1', 0, "mode 1", "1" }, { '2', 0, "mode 2", "2" }, { '3', 0, "mode 3", "3" }, { '4', 0, "mode 4", "4" },
         { '5', 0, "mode 5", "5" }, { '6', 0, "mode 6", "6" }, { '7', 0, "mode 7", "7" }, { '8', 0, "mode 8", "8" },
         { juce::KeyPress::numberPad1, 0, "mode 1", "number pad 1" }, { juce::KeyPress::numberPad8, 0, "mode 8", "number pad 8" },
@@ -187,8 +190,8 @@ SL_TEST ("ui", keysShortcutsOnlyWithKeysOn)
     }
     const int rowCount = (int) (sizeof (rows) / sizeof (rows[0]));
     note (fmt ("%d of %d keys as listed%s%s", right, rowCount, firstBad.empty() ? "" : "; first other: ", firstBad.c_str()));
-    check (right == rowCount, "Undo, Redo, Delete, Select all, Duplicate, Copy and Paste lanes, Escape, Slide into and the modes 1 to 8 each run once "
-                              "with Keys on and never with Keys off; other keys run nothing");
+    check (right == rowCount, "Undo, Redo, Delete, Select all, Duplicate, Copy and Paste lanes, Escape, Slide into, Nodes and the modes 1 to 8 each "
+                              "run once with Keys on and never with Keys off; other keys run nothing");
 }
 
 SL_TEST ("ui", keysDriveTheRoll)

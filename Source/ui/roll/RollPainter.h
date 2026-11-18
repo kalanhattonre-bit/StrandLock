@@ -36,14 +36,16 @@ namespace sl::ui::roll
         const Palette* colours = nullptr;        // the theme's tokens (set again at every paint)
         const RollGeometry* geo = nullptr;       // the zoom, the rows, each note's line and lane tables, the glides
         model::ClipPtr clip;                     // the clip shown (the geometry's)
-        doc::RollState roll;                     // the selection, the primary note, the mode, the inspector's node
+        doc::RollState roll;                     // the selection, the primary note, the mode, the inspector's node,
+                                                 // the picked nodes (M5)
         core::Inst inst = core::defaultInst();   // the key and scale (rows), Refresh's mode (dims its ribbon)
         bool free = false;                       // Freehand: no slide diamonds, no segment diamonds
+        bool nodes = false;                      // the Nodes switch: with nodes picked, no segment diamonds (M5)
         double snap = 0.25;                      // the Grid in beats (0 = Free: the grid shows sixteenths)
         model::ClipPtr ghost;                    // a preview of another clip (M5's hover ghosts); null = none
         const RollGeometry* ghostGeo = nullptr;  // the ghost's own geometry (its glides), with the same zoom
         std::optional<Readout> readout;          // the live readout beside the pointer (roll pixels)
-        std::optional<RollGestures::Box> box;    // a box being dragged on empty space (roll pixels)
+        std::optional<RollGestures::Box> box;    // a box being dragged (roll pixels): it selects notes or picks nodes
 
         /** Indexes the clip's notes by id and the selection (call it after setting clip and roll). */
         void prepare();

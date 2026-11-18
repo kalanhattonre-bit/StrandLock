@@ -191,9 +191,10 @@ namespace sl::doc
             bytes = size;
             v = ++ver;
             pruneLocked (*newClip);
-            // a state load, Undo and Redo let go of the inspector's node: it may name another node in this clip
-            // (sl-ui.js applyState)
+            // a state load, Undo and Redo let go of the inspector's node and the picked nodes: they may name other
+            // nodes in this clip (sl-ui.js applyState)
             roll.activeNode.reset();
+            roll.picks.clear();
         }
         if (onClipChanged)
             onClipChanged (newClip, v);
@@ -264,6 +265,22 @@ namespace sl::doc
         roll.primary = std::move (p);
         if (roll.activeNode && seen.count (roll.activeNode->id) == 0)
             roll.activeNode.reset();
+        // the picked nodes of notes that are no longer selected go (sl-ui.js setSel)
+        roll.picks.erase (std::remove_if (roll.picks.begin(), roll.picks.end(),
+                                          [&seen] (const NodePick& pk) { return seen.count (pk.id) == 0; }),
+                          roll.picks.end());
+    }
+
+    int ClipDocument::laneCountLocked (const model::Clip& c, const std::string& id) const
+    {
+        // sl-ui.js: n && AL && n.c[AL] ? n.c[AL].length : -1
+        const auto lane = roll.activeLane();
+        if (! lane)
+            return -1;
+        for (const auto& q : c.notes)
+            if (q->id == id)
+                return (int) model::noteLane (*q, *lane).size();
+        return -1;
     }
 
     void ClipDocument::pruneLocked (const model::Clip& c)
@@ -290,6 +307,14 @@ namespace sl::doc
             if (n == nullptr || len != a.len || a.k >= len)
                 roll.activeNode.reset();
         }
+        // sl-ui.js validateNodes: a note's picks go when it is gone or its count on the shown lane changed
+        roll.picks.erase (std::remove_if (roll.picks.begin(), roll.picks.end(),
+                                          [this, &c] (const NodePick& pk)
+                                          {
+                                              const int len = laneCountLocked (c, pk.id);
+                                              return len < 0 || len != pk.len;
+                                          }),
+                          roll.picks.end());
     }
 
     void ClipDocument::setSelection (std::vector<std::string> ids, std::optional<std::string> primary)
@@ -317,9 +342,13 @@ namespace sl::doc
     {
         const std::lock_guard<std::mutex> hold (readLock);
         const double r = std::isfinite (m) ? core::jsRound (m) : 1.0;
+        const int before = roll.mode;
         roll.mode = (int) std::clamp (r, 1.0, 8.0);
         if (roll.activeNode && roll.activeNode->lane != roll.activeLane())
             roll.activeNode.reset();
+        // node picks belong to the lane shown: they go when the mode changes (sl-ui.js setMode)
+        if (roll.mode != before)
+            roll.picks.clear();
     }
 
     void ClipDocument::setSubLane (core::LaneId lane)
@@ -327,10 +356,13 @@ namespace sl::doc
         if (std::find (std::begin (core::kSampleLanes), std::end (core::kSampleLanes), lane) == std::end (core::kSampleLanes))
             return;
         const std::lock_guard<std::mutex> hold (readLock);
+        const bool changed = lane != roll.subLane || roll.mode != 8;
         roll.subLane = lane;
         roll.mode = 8;
         if (roll.activeNode && roll.activeNode->lane != roll.activeLane())
             roll.activeNode.reset();
+        if (changed)
+            roll.picks.clear();
     }
 
     void ClipDocument::setActiveNode (std::optional<ActiveNode> node)
@@ -344,6 +376,40 @@ namespace sl::doc
                     break;
                 }
         roll.activeNode = std::move (node);
+    }
+
+    void ClipDocument::setNodePicks (std::vector<NodePick> picks)
+    {
+        const std::lock_guard<std::mutex> hold (readLock);
+        std::vector<NodePick> out;
+        out.reserve (picks.size());
+        for (auto& pk : picks)
+        {
+            if (pk.ks.empty())
+                continue;
+            bool repeat = false;
+            for (const auto& o : out)
+                repeat = repeat || o.id == pk.id;
+            if (repeat)
+                continue;
+            pk.len = laneCountLocked (*clip, pk.id);
+            out.push_back (std::move (pk));
+        }
+        roll.picks = std::move (out);
+    }
+
+    void ClipDocument::setNotePicks (const std::string& id, std::vector<int> ks, int len)
+    {
+        const std::lock_guard<std::mutex> hold (readLock);
+        roll.picks.erase (std::remove_if (roll.picks.begin(), roll.picks.end(), [&id] (const NodePick& pk) { return pk.id == id; }),
+                          roll.picks.end());
+        if (ks.empty())
+            return;
+        NodePick pk;
+        pk.id = id;
+        pk.ks = std::move (ks);
+        pk.len = len;
+        roll.picks.push_back (std::move (pk));
     }
 
     //==============================================================================================

@@ -11,6 +11,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <map>
 #include <utility>
 
 namespace sl::ui::roll
@@ -146,10 +148,10 @@ namespace sl::ui::roll
 
         const char* dragLabel (int type) noexcept
         {
-            // sl-ui.js DRAG_LABELS, by Drag::Type
+            // sl-ui.js DRAG_LABELS, by Drag::Type (a box has none: "Edit")
             static constexpr const char* labels[] = { "Slide length", "Slide curve", "Move node", "Bend segment", "Change length",
-                                                      "Move note start", "Draw lane by hand", "Move notes", "Edit" };
-            return type >= 0 && type < 9 ? labels[type] : "Edit";
+                                                      "Move note start", "Draw lane by hand", "Move notes", "Edit", "Move nodes" };
+            return type >= 0 && type < 10 ? labels[type] : "Edit";
         }
     }
 
@@ -261,7 +263,12 @@ namespace sl::ui::roll
     {
         if (! drag || drag->t != Drag::Type::box || ! drag->moved)
             return std::nullopt;
-        return Box { std::min (drag->x0, drag->x1), std::min (drag->y0, drag->y1), std::max (drag->x0, drag->x1), std::max (drag->y0, drag->y1) };
+        return SelectBox::between (drag->x0, drag->y0, drag->x1, drag->y1);
+    }
+
+    bool RollGestures::isNodeBox() const noexcept
+    {
+        return drag.has_value() && drag->t == Drag::Type::box && drag->nodeBox;
     }
 
     //==============================================================================================
@@ -321,15 +328,38 @@ namespace sl::ui::roll
                 {
                     if (h->k > 0 && h->k < (int) nd.size() - 1)
                     {
+                        // the picks after the deleted node move down one place, so they stay on the same nodes
+                        std::vector<int> moved;
+                        if (const auto* pk = st.picksOf (n.id))
+                            for (const int q : pk->ks)
+                                if (q != h->k)
+                                    moved.push_back (q > h->k ? q - 1 : q);
                         model::NodeList cut = nd;
                         cut.erase (cut.begin() + h->k);
                         host.doc.setActiveNode (std::nullopt);
                         setClipLabelled (model::setLaneNodes (*c, n.id, *AL, cut), "Delete node");
+                        if (! moved.empty())
+                            host.doc.setNotePicks (n.id, std::move (moved), (int) nd.size() - 1);
                     }
                     else
                     {
                         toast ("The first and last nodes stay: drag them up or down");
                     }
+                    return;
+                }
+                // the Nodes switch: a press on one of several picked nodes drags them all together
+                const auto* ks = st.picksOf (n.id);
+                if (set.nodes && ks != nullptr && ks->has (h->k) && st.pickCount() > 1)
+                {
+                    Drag d;
+                    d.t = Drag::Type::nodes;
+                    d.x0 = x;
+                    d.y0 = y;
+                    d.clip0 = c;
+                    d.lane = *AL;
+                    d.baseNodes = st.picks;
+                    d.label = "Move nodes";
+                    drag = std::move (d);
                     return;
                 }
                 if (st.primary != n.id)
@@ -354,7 +384,8 @@ namespace sl::ui::roll
                 showReadout (x, y, laneReadout (*AL, nd[(std::size_t) h->k].v, formatCtx (&n)));
                 return;
             }
-            if (P != nullptr)
+            // with nodes picked under the Nodes switch the segment diamonds are hidden, and take no press
+            if (P != nullptr && ! (set.nodes && ! st.picks.empty()))
             {
                 const int k = geo.hitSeg (*P, x, y, *AL);
                 if (k >= 0)
@@ -455,7 +486,30 @@ namespace sl::ui::roll
         }
 
         // 6. a note
-        if (const auto h = geo.hitNote (*c, st, x, y))
+        const auto h = geo.hitNote (*c, st, x, y);
+        // the Nodes switch: a drag that starts on a selected note (off its nodes) draws the node box, except a
+        // double-click on the primary note's line, which adds a node there (as with the switch off)
+        if (h != nullptr && set.nodes && AL && st.isSelected (h->id) && ! set.multi)
+        {
+            if (! set.free && isDouble (x, y, kWhatNote, now) && P != nullptr && h->id == P->id)
+            {
+                addNodeAt (*h, *AL, x, y, false);
+                return;
+            }
+            Drag d;
+            d.t = Drag::Type::box;
+            d.x0 = d.x1 = x;
+            d.y0 = d.y1 = y;
+            d.shift = mods.shift;
+            d.ctrl = mods.ctrl;
+            d.base = st.selected;
+            d.nodeBox = true;
+            d.clickNote = h->id;
+            d.baseNodes = st.picks;
+            drag = std::move (d);
+            return;
+        }
+        if (h != nullptr)
         {
             // with Shift or Ctrl held, a press on the faint band above a note's line waits: a drag draws a box, a
             // click does what a click on the line does
@@ -467,6 +521,8 @@ namespace sl::ui::roll
                 d.y0 = d.y1 = y;
                 d.shift = mods.shift;
                 d.ctrl = mods.ctrl;
+                d.base = st.selected;
+                d.baseNodes = st.picks;
                 d.clickId = h->id;
                 d.clickLink = linkMode;
                 d.clickAdd = addMode;
@@ -544,12 +600,16 @@ namespace sl::ui::roll
             drag = std::move (d);
             return;
         }
+        // a box on empty space: it selects notes, or with the Nodes switch (a lane mode, notes selected) picks nodes
         Drag d;
         d.t = Drag::Type::box;
         d.x0 = d.x1 = x;
         d.y0 = d.y1 = y;
         d.shift = mods.shift;
         d.ctrl = mods.ctrl;
+        d.base = st.selected;
+        d.nodeBox = set.nodes && AL.has_value() && ! st.selected.empty();
+        d.baseNodes = st.picks;
         drag = std::move (d);
     }
 
@@ -714,10 +774,91 @@ namespace sl::ui::roll
                 d.y1 = y;
                 if (! d.moved && jsHypot (x - d.x0, y - d.y0) > 4.0)
                     d.moved = true;
-                // what the box selects is M5's (BoxSelect)
+                // once it has moved, every move selects what the box meets (or picks the nodes inside it)
+                if (d.moved)
+                    applyBox();
                 break;
             }
+            case Drag::Type::nodes:
+                moveNodes (x, y, mods.shift);
+                break;
         }
+    }
+
+    void RollGestures::applyBox()
+    {
+        // sl-ui.js applyBox: the notes whose box meets the box (with the lane band outside Build), or the nodes of the
+        // selected notes inside it; Shift adds to what the box started with, Ctrl toggles it
+        const Drag& d = *drag;
+        const auto b = SelectBox::between (d.x0, d.y0, d.x1, d.y1);
+        const model::ClipPtr c = clip();
+        const doc::RollState st = roll();
+        if (d.nodeBox)
+        {
+            if (const auto AL = st.activeLane())
+                host.doc.setNodePicks (combineNodes (d.baseNodes, nodesInBox (geo, *c, st, *AL, b), d.shift, d.ctrl));
+            return;
+        }
+        auto out = combineNotes (d.base, notesInBox (geo, *c, st.mode != 1, b), d.shift, d.ctrl);
+        const bool keepPrimary = ! st.primary.empty() && std::find (out.begin(), out.end(), st.primary) != out.end();
+        host.doc.setSelection (std::move (out), keepPrimary ? st.primary : std::string());
+    }
+
+    void RollGestures::moveNodes (double x, double y, bool shift)
+    {
+        // sl-ui.js rollMove 'nodes': every picked node moves by the same amount, up and down in the lane's units and
+        // sideways in time; a node never passes one that stays put, and a note's first and last nodes keep their time
+        Drag& d = *drag;
+        const double bw = geo.beatWidth();
+        const double dB = (x - d.x0) / bw, dyPx = d.y0 - y;
+        double dv = d.lane == core::LaneId::pitch ? dyPx / geo.rowHeight() / 24.0 : dyPx / geo.laneHeight();
+        if (d.lane == core::LaneId::pitch && ! shift)
+            dv = core::jsRound (dv * 24.0) / 24.0;
+        std::map<std::string, model::NodeList> moved;
+        const model::Note* shownNote = nullptr;
+        double shownV = 0.0;
+        for (const auto& pk : d.baseNodes)
+        {
+            const model::Note* n = noteIn (*d.clip0, pk.id);
+            if (n == nullptr)
+                continue;
+            const model::NodeList& src = model::noteLane (*n, d.lane);
+            const int last = (int) src.size() - 1;
+            model::NodeList nd = src;
+            std::vector<int> moving;
+            for (const int k : pk.ks)
+                if (k > 0 && k < last)
+                    moving.push_back (k);
+            const auto isMoving = [&moving] (int k) { return std::find (moving.begin(), moving.end(), k) != moving.end(); };
+            double lo = -std::numeric_limits<double>::infinity(), hi = std::numeric_limits<double>::infinity();
+            for (const int k : moving)
+            {
+                if (! isMoving (k - 1))
+                    lo = std::max (lo, src[(std::size_t) k - 1].t - src[(std::size_t) k].t + 0.003);
+                if (! isMoving (k + 1))
+                    hi = std::min (hi, src[(std::size_t) k + 1].t - src[(std::size_t) k].t - 0.003);
+            }
+            const double dt = clampD (dB / std::max (1e-3, n->l), lo, hi);
+            for (const int k : pk.ks)
+            {
+                if (k < 0 || k > last)
+                    continue;
+                auto& q = nd[(std::size_t) k];
+                q.v = clampD (src[(std::size_t) k].v + dv, 0.0, 1.0);
+                if (isMoving (k))
+                    q.t = src[(std::size_t) k].t + (std::isfinite (dt) ? dt : 0.0);
+                if (shownNote == nullptr)
+                {
+                    shownNote = n;
+                    shownV = q.v;
+                }
+            }
+            moved[pk.id] = std::move (nd);
+        }
+        show (model::setLaneNodesMany (*d.clip0, d.lane, moved));
+        d.moved = true;
+        if (shownNote != nullptr)
+            showReadout (x, y, laneReadout (d.lane, shownV, formatCtx (shownNote)));
     }
 
     //==============================================================================================
@@ -734,15 +875,32 @@ namespace sl::ui::roll
 
         if (d.t == Drag::Type::box)
         {
+            // a box that never moved 4 px was a click: on a note's band, the click on the note; on a selected note
+            // with the Nodes switch, that note becomes the primary one (a plain click lets go of the picks); on empty
+            // space a plain click lets go of the picks, or with none of the selection (sl-ui.js rollUp)
             if (! d.moved && d.clickId)
             {
                 bandClick (*d.clickId, d.clickLink, d.clickAdd);
                 return;
             }
+            if (! d.moved && d.clickNote)
+            {
+                if (! d.shift && ! d.ctrl)
+                    host.doc.setNodePicks ({});
+                host.doc.setPrimary (*d.clickNote);
+                return;
+            }
             if (! d.moved && ! d.shift && ! d.ctrl)
             {
-                host.doc.setSelection ({}, std::string());
-                host.doc.setActiveNode (std::nullopt);
+                if (set.nodes && ! roll().picks.empty())
+                {
+                    host.doc.setNodePicks ({});
+                }
+                else
+                {
+                    host.doc.setSelection ({}, std::string());
+                    host.doc.setActiveNode (std::nullopt);
+                }
             }
             return;
         }
@@ -858,12 +1016,26 @@ namespace sl::ui::roll
         const model::Node added = model::mkNode (t, clampD (v, 0.0, 1.0), shape, 0.0);
         nd.insert (nd.begin() + k, added);
         const std::string id = n.id;
+        // the picks from the new node's place on move up one place, so they stay on the same nodes
+        std::vector<int> movedPicks;
+        const doc::RollState before = roll();
+        if (const auto* pk = before.picksOf (id))
+            for (const int q : pk->ks)
+                movedPicks.push_back (q >= k ? q + 1 : q);
         const auto out = host.doc.apply (model::setLaneNodes (*clip(), id, lane, nd));
         geo.setClip (clip());
         if (out.refused)
         {
             toast (out.message);
             return;
+        }
+        if (! movedPicks.empty())
+        {
+            // on a full lane the cap may have simplified the list: the picks would name other nodes, so they go then
+            // (the prototype keeps them until its next clip change drops them)
+            const model::Note* m = noteIn (*clip(), id);
+            const bool kept = m != nullptr && model::noteLane (*m, lane).size() == nd.size();
+            host.doc.setNotePicks (id, kept ? std::move (movedPicks) : std::vector<int>(), (int) nd.size());
         }
 
         // A lane holds at most 128 nodes: on a full lane setLaneNodes simplifies the list (capNodes), which can move
@@ -1002,6 +1174,21 @@ namespace sl::ui::roll
             toast ("Now click the note it should slide into");
     }
 
+    void RollGestures::toggleNodes()
+    {
+        // sl-ui.js toggleNodes: a lane mode's switch; every switch lets go of the picks
+        const auto st = roll();
+        if (st.mode == 1)
+        {
+            toast ("Nodes works in a lane mode (2 to 8)");
+            return;
+        }
+        set.nodes = ! set.nodes;
+        host.doc.setNodePicks ({});
+        if (set.nodes && st.selected.empty())
+            toast ("Select notes first, then drag a box around their nodes");
+    }
+
     void RollGestures::duplicateSelection()
     {
         sync();
@@ -1052,7 +1239,9 @@ namespace sl::ui::roll
 
     void RollGestures::clearSelection()
     {
+        // sl-ui.js Escape: setSel ([], null) and setNodePicks (new Map ())
         host.doc.setSelection ({}, std::string());
+        host.doc.setNodePicks ({});
     }
 
     void RollGestures::copyLanes()

@@ -44,11 +44,22 @@ namespace sl::ui::roll
                             && juce::exactlyEqual (a->x1, b->x1) && juce::exactlyEqual (a->y1, b->y1)));
         }
 
+        bool samePicks (const std::vector<doc::NodePick>& a, const std::vector<doc::NodePick>& b)
+        {
+            if (a.size() != b.size())
+                return false;
+            for (std::size_t i = 0; i < a.size(); ++i)
+                if (a[i].id != b[i].id || a[i].ks != b[i].ks)
+                    return false;
+            return true;
+        }
+
         /** The two states draw the same links, handles, ghost, box and readout (at the same zoom and scroll). */
         bool sameOverlay (const PaintState& a, const PaintState& b)
         {
             return a.clip == b.clip && a.roll.selected == b.roll.selected && a.roll.primary == b.roll.primary
                 && a.roll.mode == b.roll.mode && a.roll.subLane == b.roll.subLane && sameNode (a.roll.activeNode, b.roll.activeNode)
+                && samePicks (a.roll.picks, b.roll.picks) && a.nodes == b.nodes
                 && a.free == b.free && a.ghost == b.ghost && sameReadout (a.readout, b.readout) && sameBox (a.box, b.box);
         }
 
@@ -488,10 +499,25 @@ namespace sl::ui::roll
                           } };
     }
 
+    ToolHost RollView::makeToolHost()
+    {
+        return ToolHost { processor.getDocument(),
+                          [this] (const std::string& label) { return processor.pushUndoStep (label, {}); },
+                          [this] (const std::string& text, int ms)
+                          {
+                              const auto t = juce::String::fromUTF8 (text.c_str());
+                              if (onToastFor)
+                                  onToastFor (t, ms);
+                              else if (onToast)
+                                  onToast (t);
+                          } };
+    }
+
     RollView::RollView (const Theme& t, StrandLockProcessor& p)
         : theme (t),
           processor (p),
           gestures (std::make_unique<RollGestures> (makeHost())),
+          tools (std::make_unique<SelectionTools> (makeToolHost(), *gestures)),
           canvas (std::make_unique<Canvas> (*this)),
           ruler (t, gestures->geometry()),
           piano (t, gestures->geometry())
@@ -533,12 +559,14 @@ namespace sl::ui::roll
         // the menu goes first: it sits on MainView and listens to the desktop's mouse
         menuPanel.reset();
         // the window closed in the middle of a drag: the gesture ends as a release would (its undo step), with
-        // nobody left to tell
+        // nobody left to tell; a live slider session of the selection bar ends the same way
         onToast = nullptr;
+        onToastFor = nullptr;
         onEdit = nullptr;
         onPress = nullptr;
         if (gestures->isDragging())
             gestures->pointerUp();
+        tools->endLive();
         stopTimer();
         hbar.removeListener (this);
         vbar.removeListener (this);
@@ -579,6 +607,7 @@ namespace sl::ui::roll
         next.roll = processor.getDocument().rollState();
         next.inst = set.inst;
         next.free = set.free;
+        next.nodes = set.nodes;
         next.snap = set.snap;
         next.readout = gestures->readout();
         next.box = gestures->box();
@@ -947,6 +976,8 @@ namespace sl::ui::roll
             return;
         // sl-ui.js contextmenu: the note there is selected (or made the primary one), then the menu lists what applies
         const auto p = getGeometry().toRoll ((double) at.x, (double) at.y);
+        ownMenu = false;
+        ownMenuActions.clear();
         menuItems = gestures->contextMenu (p.x, p.y, timeMs);
         changed();
         if (menusShown)
@@ -986,8 +1017,28 @@ namespace sl::ui::roll
     void RollView::closeMenu()
     {
         menuItems.clear();
+        ownMenu = false;
+        ownMenuActions.clear();
         if (menuPanel != nullptr)
             menuPanel->close();
+    }
+
+    void RollView::openMenuAt (const juce::Component& from, juce::Point<int> at, std::vector<MenuItem> items,
+                               std::vector<std::function<void()>> actions)
+    {
+        closeMenu();
+        menuItems = std::move (items);
+        ownMenuActions = std::move (actions);
+        ownMenu = true;
+        if (! menusShown)
+            return;
+        juce::Component* parent = menuParent != nullptr ? menuParent.getComponent() : static_cast<juce::Component*> (this);
+        if (menuPanel == nullptr)
+            menuPanel = std::make_unique<MenuPanel> (*this);
+        if (menuPanel->getParentComponent() != parent)
+            parent->addChildComponent (*menuPanel);
+        // the press on the button that opened it came before now: the next press anywhere else closes it
+        menuPanel->open (parent->getLocalPoint (&from, at), (double) juce::Time::currentTimeMillis());
     }
 
     void RollView::setMenuParent (juce::Component* parent) noexcept
@@ -1013,6 +1064,18 @@ namespace sl::ui::roll
 
     void RollView::chooseMenuItem (const MenuItem& item)
     {
+        if (ownMenu)
+        {
+            // a caller's menu (Select similar): it closes, then the item's action runs (sl-ui.js mkMenuItem)
+            std::function<void()> run;
+            if (! item.disabled && item.action >= 0 && item.action < (int) ownMenuActions.size())
+                run = ownMenuActions[(std::size_t) item.action];
+            closeMenu();   // item may be one of the menu's own items: it is not read after this
+            if (run)
+                run();
+            changed();
+            return;
+        }
         const auto scope = gestures->settings().scope;
         // a keepOpen item (Each note / Across) gives the menu back with the other one lit
         if (auto again = gestures->runMenuItem (item))
@@ -1141,6 +1204,19 @@ namespace sl::ui::roll
     void RollView::setMulti (bool on)
     {
         gestures->settings().multi = on;
+        changed();
+    }
+
+    void RollView::toggleNodes()
+    {
+        if (gestures->isDragging())
+            return;
+        gestures->toggleNodes();
+        changed();
+    }
+
+    void RollView::edited()
+    {
         changed();
     }
 

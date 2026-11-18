@@ -1,8 +1,9 @@
 #pragma once
 
-// The roll's state beside the clip (PLUGIN-PLAN 7.6, M4): the selected notes and the primary one, the mode and the
-// Sample sub-lane, and the node the inspector shows. ClipDocument holds it (its selection rules are there); this
-// header is plain C++ so the roll's pure parts (RollGeometry, RollGestures) can read it.
+// The roll's state beside the clip (PLUGIN-PLAN 7.6, M4; 7.7, M5): the selected notes and the primary one, the mode
+// and the Sample sub-lane, the node the inspector shows, and the nodes picked with the Nodes switch (M5). ClipDocument
+// holds it (its selection rules are there); this header is plain C++ so the roll's pure parts (RollGeometry,
+// RollGestures, BoxSelect) can read it.
 
 #include "core/Lanes.h"
 
@@ -22,6 +23,18 @@ namespace sl::doc
         int len = 0;    // the lane's node count when it was picked: when that count changes the node is let go
     };
 
+    /** The nodes picked on one note with the Nodes switch (sl-ui.js app.nodeSel and app.nodeLen): their indexes on the
+        lane the mode shows, in the order they were picked, and that lane's node count when they were picked. The
+        picks are indexes, so when the count changes they would name other nodes, and they are let go. */
+    struct NodePick
+    {
+        std::string id;
+        std::vector<int> ks;   // no repeats
+        int len = -1;          // -1: the note or the lane was missing (let go at the next clip version)
+
+        bool has (int k) const noexcept { return std::find (ks.begin(), ks.end(), k) != ks.end(); }
+    };
+
     struct RollState
     {
         std::vector<std::string> selected;   // in the order they were added (the prototype's Set), no repeats
@@ -29,6 +42,7 @@ namespace sl::doc
         int mode = 1;                        // 1 Build, 2..7 one lane each, 8 Sample
         core::LaneId subLane = core::LaneId::travel;   // mode 8's lane: Travel, Heads, Grain or Refresh
         std::optional<ActiveNode> activeNode;
+        std::vector<NodePick> picks;         // the picked nodes per note, in the order the notes were picked (a Map)
 
         bool isSelected (const std::string& id) const noexcept
         {
@@ -43,6 +57,24 @@ namespace sl::doc
             if (mode >= 8)
                 return subLane;
             return core::kModes[mode - 1].lanes[0];
+        }
+
+        /** The picks on one note, or null. */
+        const NodePick* picksOf (const std::string& id) const noexcept
+        {
+            for (const auto& p : picks)
+                if (p.id == id)
+                    return &p;
+            return nullptr;
+        }
+
+        /** Every picked node, on every note. */
+        int pickCount() const noexcept
+        {
+            int n = 0;
+            for (const auto& p : picks)
+                n += (int) p.ks.size();
+            return n;
         }
     };
 }

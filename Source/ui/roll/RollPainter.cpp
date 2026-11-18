@@ -438,29 +438,33 @@ namespace sl::ui::roll
             }
             g.setColour (col.withAlpha (0.9f));
             dashed (g, line, 1.0f, 3.0f, 3.0f);
-            if (count > 64)
+            const auto* ks = s.roll.picksOf (n->id);   // the nodes picked with the Nodes switch (M5)
+            if (count > 64 && ks == nullptr)
                 continue;
 
-            // crowded nodes (a Squiggle on a short note): small dots, and below 6 px apart only the ends
+            // crowded nodes (a Squiggle on a short note): small dots, and below 6 px apart only the ends; a picked
+            // node is drawn large with a ring in node-sel
             const double gap = count > 1 ? (n->l * geo.beatWidth()) / (double) (count - 1) : 99.0;
             const bool small = gap < 14.0, tiny = gap < 6.0;
             const auto& act = s.roll.activeNode;
             for (int k = 0; k < count; ++k)
             {
+                const bool picked = ks != nullptr && ks->has (k);
                 const bool isAct = act.has_value() && act->id == n->id && act->k == k && act->lane == lane;
-                if (tiny && ! isAct && k != 0 && k != count - 1)
+                if (tiny && ! picked && ! isAct && k != 0 && k != count - 1)
                     continue;
                 const auto q = geo.nodeXY (*n, lane, k);
-                const auto dot = around (q.x, q.y, isAct ? 6.5 : small ? 3.0 : 5.5).toFloat();
+                const auto dot = around (q.x, q.y, picked || isAct ? 6.5 : small ? 3.0 : 5.5).toFloat();
                 g.setColour (col);
                 g.fillEllipse (dot);
-                g.setColour (T[Tok::handleRing]);
-                ring (g, dot, small && ! isAct ? 1.0f : 2.0f);
+                g.setColour (picked ? T[Tok::nodeSel] : T[Tok::handleRing]);
+                ring (g, dot, small && ! picked && ! isAct ? 1.0f : 2.0f);
             }
         }
 
-        // the primary note's segment diamonds (filled when the segment is bent)
-        if (P != nullptr && ! s.free)
+        // the primary note's segment diamonds (filled when the segment is bent); none while the Nodes switch has
+        // nodes picked (a press there drags the picked nodes)
+        if (P != nullptr && ! s.free && ! (s.nodes && ! s.roll.picks.empty()))
         {
             const auto& nd = model::noteLane (*P, lane);
             for (int k = 0; k + 1 < (int) nd.size(); ++k)

@@ -21,6 +21,10 @@
 // in roll pixels (a right press opens the right-click menu), with the event's own time so double-clicks are the
 // prototype's 320 ms. The buttons and the keys call the commands below. After every event the view refreshes and
 // calls onEdit, so MainView shows the new selection, the inspector, the hint and the Undo buttons.
+//
+// The selection tools (M5): the view also owns the selection bar's SelectionTools, writing through the same document
+// and undo history as the gestures; the bar's controls call them, then edited (). The bar's Select similar list opens
+// in the same menu panel as the right-click menu (openMenuAt).
 
 #include "NoteLayerCache.h"
 #include "PianoStrip.h"
@@ -28,6 +32,7 @@
 #include "RollGestures.h"
 #include "RollPainter.h"
 #include "Ruler.h"
+#include "SelectionBar.h"
 
 #include "engine/DisplayFrame.h"
 #include "ui/Controls.h"
@@ -74,6 +79,10 @@ namespace sl::ui::roll
         /** Where the roll's short messages go (MainView's toast). */
         std::function<void (const juce::String&)> onToast;
 
+        /** The same for a message that asks for its own time on screen (the selection tools'), in milliseconds; when
+            unset those go to onToast. */
+        std::function<void (const juce::String&, int ms)> onToastFor;
+
         /** Called after the mouse, a menu item or a command changed something (the clip, the selection, the
             switches): MainView updates the selection row, the inspector, the hint and the Undo buttons. */
         std::function<void()> onEdit;
@@ -114,6 +123,13 @@ namespace sl::ui::roll
         void toggleFreehand();
         void armLink();            // Slide into...
         void setMulti (bool on);
+        void toggleNodes();        // the Nodes switch (M5): a box picks the selected notes' nodes
+
+        /** The selection bar's tools (M5), on the same document and undo history as the gestures. */
+        SelectionTools& getTools() noexcept { return *tools; }
+
+        /** After the selection bar changed something: the roll refreshes, then onEdit (as after a gesture). */
+        void edited();
 
         /** The Grid in beats (1, 0.5, 0.25, 0.125; 0 = Free), kept in UIST. */
         void setGrid (double beats);
@@ -128,6 +144,12 @@ namespace sl::ui::roll
 
         /** Runs an item of the open menu, as a click on it does. */
         void chooseMenuItem (const MenuItem& item);
+
+        /** Opens a menu of the caller's own in the same panel (the selection bar's Select similar, sl-ui-panels.js
+            A.openMenu): its top left at `at` in from's pixels; a click on an item runs actions[item.action] after the
+            menu closes. */
+        void openMenuAt (const juce::Component& from, juce::Point<int> at, std::vector<MenuItem> items,
+                         std::vector<std::function<void()>> actions);
 
         /** False: a right press keeps the menu's items (getMenu) but shows no panel (the tests). */
         void setMenusShown (bool shouldShow) noexcept { menusShown = shouldShow; }
@@ -229,6 +251,7 @@ namespace sl::ui::roll
         };
 
         RollHost makeHost();
+        ToolHost makeToolHost();
         ViewKey viewKey() const;
         juce::Rectangle<double> visible() const;
         void paintCanvas (juce::Graphics&);
@@ -253,6 +276,7 @@ namespace sl::ui::roll
         const Theme& theme;
         StrandLockProcessor& processor;
         std::unique_ptr<RollGestures> gestures;
+        std::unique_ptr<SelectionTools> tools;
         std::unique_ptr<Canvas> canvas;
         Ruler ruler;
         PianoStrip piano;
@@ -275,6 +299,8 @@ namespace sl::ui::roll
         std::vector<MenuItem> menuItems;   // the right-click menu open now
         bool menusShown = true;
         juce::Component::SafePointer<juce::Component> menuParent;
+        bool ownMenu = false;                                // the open menu is a caller's (openMenuAt), not the gestures'
+        std::vector<std::function<void()>> ownMenuActions;   // its items' actions
 
         // auditions in flight: a note played by a gesture stops 220 ms later (sl-ui.js audition)
         struct PendingOff

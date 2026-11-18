@@ -132,6 +132,18 @@ namespace sl::doc
         /** The inspector's node (nothing = none). Its node count is taken from the clip when len is 0. */
         void setActiveNode (std::optional<ActiveNode> node);
 
+        /** sl-ui.js setNodePicks: the nodes picked with the Nodes switch (M5), per note in this order. Each note's
+            count on the lane the mode shows is taken from the clip now (-1 when the note is missing or no lane mode is
+            on: those picks go at the next clip version). A note with no picks is left out. Every new clip version lets
+            go of a note's picks when its count on that lane changed (sl-ui.js validateNodes); a selection without the
+            note, another mode or lane, a state load, Undo and Redo let go of them too. */
+        void setNodePicks (std::vector<NodePick> picks);
+
+        /** One note's picks after a gesture moved them itself (a node added or deleted on that note: the picks after
+            it move one place, sl-ui.js addNodeAt and the double-click that deletes): len is the count they belong to.
+            The note goes to the end of the order, as a JavaScript Map's set does after a delete. Empty ks: none. */
+        void setNotePicks (const std::string& id, std::vector<int> ks, int len);
+
         //==========================================================================================
         /** The toast for a refused result: the note cap ("That would make 4100 notes; the limit is 4096."), the
             encoded size, or the snapshot budget. */
@@ -144,6 +156,7 @@ namespace sl::doc
         // With readLock held: the selection rules on clip c.
         void selectLocked (const model::Clip& c, std::vector<std::string> ids, std::optional<std::string> primary);
         void pruneLocked (const model::Clip& c);
+        int laneCountLocked (const model::Clip& c, const std::string& id) const;   // the shown lane's node count, or -1
 
         params::NonParamAtomics& atomics;
 

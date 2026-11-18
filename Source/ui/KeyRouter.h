@@ -7,8 +7,9 @@
 //
 // The shortcuts with Keys on: Ctrl+Z Undo, Ctrl+Shift+Z and Ctrl+Y Redo, Delete and Backspace delete the selected
 // notes, Ctrl+A selects every note, Ctrl+D duplicates, Ctrl+C / Ctrl+V copy and paste lanes, 1 to 8 pick the mode (the
-// number pad too), Escape clears the selection, B arms Slide into. (On a Mac, Cmd stands for Ctrl.) Alt with a key
-// runs nothing. The prototype's A to K note keys and Z / X octave keys are the live keyboard (M8), not here.
+// number pad too), Escape clears the selection, B arms Slide into, N switches Nodes (M5). (On a Mac, Cmd stands for
+// Ctrl.) Alt with a key runs nothing. The prototype's A to K note keys and Z / X octave keys are the live keyboard
+// (M8), not here.
 //
 // Message thread only. The editor's keyPressed hands every key to route ().
 
@@ -22,7 +23,7 @@ namespace sl::ui
     /** What the shortcuts call. An empty function is a shortcut that does nothing yet (the key is still kept). */
     struct KeyActions
     {
-        std::function<void()> undo, redo, deleteSelection, selectAll, duplicate, copyLanes, pasteLanes, clearSelection, armLink;
+        std::function<void()> undo, redo, deleteSelection, selectAll, duplicate, copyLanes, pasteLanes, clearSelection, armLink, toggleNodes;
         std::function<void (int mode)> setMode;
     };
 
@@ -40,11 +41,13 @@ namespace sl::ui
         /** Whether route keeps the key, without running anything: with Keys on every key but Space (M0's rule). */
         static bool keeps (const juce::KeyPress& key, bool keysOn) noexcept;
 
-        /** A key went up (the editor's keyStateChanged). A held B repeats its key press until it is let go, and only
-            its first press toggles Slide into (sl-ui.js ignores repeated keys); after this the next B toggles again. */
-        void keyReleased() const noexcept { linkKeyHeld = false; }
+        /** A key went up (the editor's keyStateChanged). A held B or N repeats its key press until it is let go, and
+            only its first press toggles Slide into or Nodes (sl-ui.js ignores repeated keys); after this the next one
+            toggles again. */
+        void keyReleased() const noexcept { toggleKeyHeld = Shortcut::none; }
 
-        enum class Shortcut { none, undo, redo, deleteSelection, selectAll, duplicate, copyLanes, pasteLanes, clearSelection, armLink, mode };
+        enum class Shortcut { none, undo, redo, deleteSelection, selectAll, duplicate, copyLanes, pasteLanes, clearSelection, armLink, mode,
+                              toggleNodes };
 
         struct Hit
         {
@@ -56,6 +59,6 @@ namespace sl::ui
         static Hit shortcutFor (const juce::KeyPress& key);
 
     private:
-        mutable bool linkKeyHeld = false;   // B toggled Slide into and is not known to be let go yet
+        mutable Shortcut toggleKeyHeld = Shortcut::none;   // B or N toggled and is not known to be let go yet
     };
 }

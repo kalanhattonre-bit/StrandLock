@@ -45,7 +45,7 @@ namespace sl::ui
         constexpr const char* kTryLabel = "Try this: ";
     }
 
-    juce::String modeHint (int mode, std::optional<core::LaneId> lane, bool freehand, bool linkArmed)
+    juce::String modeHint (int mode, std::optional<core::LaneId> lane, bool freehand, bool linkArmed, bool nodes)
     {
         std::string t;
         if (linkArmed)
@@ -56,19 +56,25 @@ namespace sl::ui
         {
             t = "BUILD (1): double-click empty space = new note" + kDot + "drag a note to move it" + kDot
               + "drag its end dots sideways (length) or up/down (bend)" + kDot + kFilledDiamond + " slide handles" + kDot
-              + "Shift+click a 2nd note = slide into it" + kDot + "right-click = menu";
+              + "Shift+click a 2nd note = slide into it" + kDot + "drag on empty space = box select (Shift adds, Ctrl toggles)" + kDot
+              + "right-click = menu";
         }
         else
         {
             const std::string name = core::laneInfo (*lane).name;
+            const std::string upper = juce::String (name).toUpperCase().toStdString();
+            const std::string title = mode >= 8 ? "SAMPLE (8)" + kDot + upper : upper + " (" + std::to_string (mode) + ")";
             if (freehand)
             {
                 t = "FREEHAND (" + name + "): paint across the selected note; it turns into nodes when you let go.";
             }
+            else if (nodes)
+            {
+                t = title + kDot + "NODES: drag a box around nodes of the selected notes, then drag one of them to move them together "
+                                   "(Shift adds, Ctrl toggles).";
+            }
             else
             {
-                const std::string upper = juce::String (name).toUpperCase().toStdString();
-                const std::string title = mode >= 8 ? "SAMPLE (8)" + kDot + upper : upper + " (" + std::to_string (mode) + ")";
                 std::string extra;
                 if (mode >= 8)
                     extra = kDot + subHint (*lane);

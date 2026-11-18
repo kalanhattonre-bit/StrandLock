@@ -3,10 +3,11 @@
 // The editor's whole layout in logical pixels (PLUGIN-PLAN 4 M0): the v4 prototype's page (shell.html) with
 // what is built behind it. From the top: the top bar (logo, wordmark, Undo and Redo, theme toggle, Keys, the
 // host's tempo, the Grid, UI Scale), the state banner when there is one, the mode bar (1 Build .. 8 Sample with
-// the four Sample chips), the selection row (what is selected, Select all, Duplicate, Delete, Clear all, and the
-// roll's Freehand, Slide into and Multi switches) with the inspector under it, the tool tabs and their pane, the
-// piano roll (ui/roll/RollView, M4), the waveform strip with the loaded sound (ui/strip/WaveStrip), and the hint
-// bar (ui/HintBar). The Diagnostics tab takes the pane and the roll's room.
+// the four Sample chips and the Nodes switch), the selection row (what is selected, Select all, Duplicate, Delete,
+// Clear all, and the roll's Freehand, Slide into and Multi switches) with the selection bar under it (M5: the Lane,
+// the drawer buttons, Connect and Tools, and an open drawer) and the inspector under that, the tool tabs and their
+// pane, the piano roll (ui/roll/RollView, M4), the waveform strip with the loaded sound (ui/strip/WaveStrip), and the
+// hint bar (ui/HintBar). The Diagnostics tab takes the pane and the roll's room.
 //
 // The editor scales this component as one piece (the UI Scale) and owns the theme, the Keys switch and the
 // drops; this view only shows them and reports clicks through its callbacks. With Keys on, the editor hands
@@ -122,6 +123,8 @@ namespace sl::ui
         DiagnosticsPage& getDiagnosticsPage() noexcept { return *diagPage; }
         WaveStrip& getStrip() noexcept { return strip; }
         roll::RollView& getRoll() noexcept { return roll; }
+        roll::SelectionBar& getSelectionBar() noexcept { return selectionBar; }
+        FlatButton& getNodesButton() noexcept { return nodesButton; }
         roll::Inspector& getInspector() noexcept { return inspector; }
         HintBar& getHintBar() noexcept { return hintBar; }
         FlatButton& getModeButton (int modeNumber) noexcept;
@@ -156,6 +159,8 @@ namespace sl::ui
         void saveUiState();
         void layoutPane();
         void layoutSelectionRow();
+        int selectionAreaHeight() const;   // the selection row, the selection bar (and its drawer) and the inspector
+        void showLane (core::LaneId lane); // the selection bar's Lane picks a mode
         void disarmClear();
         int toastTop() const noexcept;   // where the toast sits
 
@@ -186,6 +191,7 @@ namespace sl::ui
         std::unique_ptr<DiagnosticsPage> diagPage;
 
         roll::RollView roll;
+        roll::SelectionBar selectionBar;   // M5: the tools for the selected notes, under the selection row
         roll::Inspector inspector;
         WaveStrip strip;
         HintBar hintBar;
