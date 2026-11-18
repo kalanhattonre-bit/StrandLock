@@ -14,8 +14,13 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
   `ui/roll/SelectionBar` (`SelectionTools` and the bar), `ui/roll/Drawers` (Connect, Tools and the Walk, Chop,
   Humanize and Strum panels), the bar in `MainView`, Select similar's menu in the roll's menu panel, and the tests
   `test_box_select.cpp` and `test_selection_tools.cpp` with pictures for review.
-- In progress: the first CI run.
-- Next: CI green, the pictures looked at, the figures below, then the fast-forward of main.
+- Done: CI green on 8c6adfb (run 44306677829, figures below); every picture of its artifact looked at (the 10 new
+  ones against connect.png, walk.png, tools.png and ns.png, and the M4 pictures the bar now changes).
+- Done (second session): the one fault the pictures showed, fixed: on a 900 x 560 window an open drawer had 60 px
+  and scrolled, but JUCE drew no scroll bar on its 46 px view (decisions below); test `selectionBarSmallWindow`.
+- In progress: CI on this commit, then the fast-forward of main.
+- Next: S2 (the Shapes, Pattern and Random drawers, Turn into nodes, the lane-button menus, hover ghosts), from the
+  hand-off below.
 
 ### Files
 
@@ -83,6 +88,14 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
   is.
 - **Toasts keep the prototype's times:** 3.2 s for Connect's count, 4 s for a refusal, 3.5 s for Legato's reasons,
   2.4 s otherwise.
+- **An open drawer keeps at least 62 px, not the prototype's 60 (PART_MIN).** Found in the pictures of run
+  44306677829: on a 900 x 560 window the Tools drawer with Walk's panel had its 60 px floor and scrolled, but its
+  view was 46 px tall, and JUCE draws no scroll bar thumb on a bar shorter than 32 px plus its smallest thumb (twice
+  its 8 px thickness: juce_ScrollBar.cpp resized and paint). So the Walk row was cut in half with nothing to say it
+  scrolls. With 62 px the view is 48 px and the thumb shows; the roll gives up the 2 px.
+- **The bar's buttons explain themselves in a tooltip** (the editor's TooltipWindow, 700 ms), as M4's buttons do. The
+  prototype also shows the same text in the hint bar while the mouse is on a drawer's button (sl-ui-panels.js hintOn);
+  that hover belongs with S2's ghosts, which hook the same mouse enter and exit.
 
 ### For the architect
 
@@ -90,6 +103,11 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
   with a tab open the roll is small then. Decision 6 (S3) folds the tabs on a first open.
 - The inspector's group value for several picked nodes (sl-ui-panels.js commitNodeValue with a group) is left for a
   later part (S2 or the fix pass); the Nodes switch works without it.
+- **A drawer on a small window.** At 900 x 560 with the tabs folded and the Tools drawer open, the drawer keeps 62 px
+  (it scrolls) and the roll's canvas about 75 px. The prototype keeps its roll at 150 px there by taking up to 16 px
+  from the waveform (WAVE_MIN 40) and then scrolling the page (sl-ui.js fitLayout); the plugin's page cannot scroll,
+  and its strip is 104 px at that height (M0's layout). Folding or shrinking something on a short window is decision
+  6's question (S3).
 
 ### Hand-off for S2 and S3
 
@@ -108,4 +126,44 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
 
 ### CI results
 
-- (to come)
+- Run 44302433699 on aacdf4e (the first push): red, 5 of 1710 checks on Windows and 5 of 1702 on Linux. Two were
+  M4's 900 x 560 roll (826 x 141, the test wants 150: the bar's line was always there; now it shows with a
+  selection), and three were S1's own tests: the sweep's count of runs that change nothing, a Legato clip whose notes
+  already touched, and a Flip on Formant, a lane the fixture clip holds flat (both now use clips the tool changes).
+- Run 44306677829 on 8c6adfb, green on every job and step: Windows Release 1713 checks in 285 tests (main had 1670 in
+  275), Linux Release 1705 in 285, the sanitizers' contract, model and engine groups 808 in 139 and the state group
+  142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug snapshots 0 JUCE assertions,
+  pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4.87 MB of the 5 MB budget; S1 adds no
+  fixtures). The `ui` group: 74 tests, 373 checks on both platforms (S1 added 10 tests and 43 checks).
+- Tools through the UI layer: 71 cases of `model/tools.json` ran through the bar (chop 7, connect 14, disconnect 4,
+  flipLane 5, humanize 3, legato 4, reverseLane 6, scaleLane 10, selectSimilar 9, strum 5, walk 4; 28 cases hold
+  arguments the bar cannot, such as a More of 1.5 or a Chop with maxNotes 20); 71 of 71 encode to the bytes of the
+  direct model call, 55 changed the clip with 1 undo step and the bar's label each, the rest pushed none; Select
+  similar 9 of 9 the fixture's ids. The sweep: 27 actions on every fixture clip with every note and a seeded half
+  selected, 378 runs, 378 the bytes of the direct model call, 232 changed the clip with 1 step each and 146 pushed 0.
+- Chop past 1024: 64 four-beat notes at 1/32 (2048) refused, 0 undo steps, the bytes unchanged, the toast "That would
+  make 2048 notes; the limit is 1024. Pick a slower rate or fewer notes." for 4 s; at 1/16 exactly 1024 notes, one
+  step "Chop 1/16", every piece selected, "Chopped into 1024 notes".
+- Live sliders: Walk's slider before the first click changes nothing; the click is "Walk Start"; a move is live with
+  no step; each release is one step; another selection makes the last move a step; Undo lands on the release before.
+  Humanize: the click, a live move, its release and Re-roll make 3 steps; Re-roll is the model's Humanize with seed 2.
+- Box select: 160 seeded boxes over the 64-note clip in Build, Volume, Tone and Sample (Travel), 104 of them meeting
+  some notes but not all: 160 of 160 select exactly the notes whose rectangle meets the box (plain, Shift, Ctrl), with
+  the primary kept or the first one; 160 of 160 right half way through the drag; 0 notes changed and 0 undo steps.
+  The Nodes switch: 60 node boxes (46 caught nodes), 60 of 60 pick exactly the selected notes' nodes inside; a drag
+  on one of 3 picked nodes moves all 3 by 0.25 and no other, one step "Move nodes"; the picks go with Escape, another
+  mode and Undo, and move along when a node is added or deleted. Through the editor: a drag across the canvas
+  selected the 12 notes it met; the bar's line came in (the roll 30 px lower) and the roll scrolled 30 px, so the
+  notes stayed under the box; a click on empty space cleared the selection and the line went.
+- The pictures (run 44306677829's artifact, 69). Compared pixel for pixel with main's (run 44294087947): 37 of main's
+  59 are unchanged (nothing selected in them, so the bar takes no room); the other 22 have notes selected and now
+  show the bar's line, and were looked at with the 10 new ones (those against the v4 screenshots). The bar:
+  LANE with the list in the lane's colour, Shapes, Pattern and Random with their small triangles, Turn into nodes, a
+  line, Connect and Tools, the open one lit with its triangle up (connect.png, tools.png). The Connect drawer: its
+  five buttons and "16 slides among the selected notes. Each one can still be curved with its handles in Build or
+  Pitch." The Tools drawer: Walk... and Chop..., "TONE:" with Reverse, Flip, More and Less, Select similar, Humanize...,
+  Strum... and Legato; Walk's panel in its dashed box with the field, the two sliders with "0% (0:00.00)" and "90%
+  (0:05.40)", and the lit Walk button (walk.png). Chop refused: the warning in the warn colour and the Chop button
+  greyed. The box: dashed, over the notes it selects. The picked nodes: large, with the node-sel ring, and the Nodes
+  switch lit. M4's pictures with a selection now show the bar's line, 30 px from the roll; nothing cut there. One
+  fault: the 900 x 560 Walk picture, whose drawer was cut through the Walk row with no scroll bar (fixed above).
