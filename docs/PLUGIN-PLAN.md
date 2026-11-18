@@ -1595,6 +1595,40 @@ not M4's (a need there goes in NOTES-M4).
 5. **The roll replaces the placeholder line** ("The piano roll arrives in M4..."); the demo clip shows as notes, and
    the playhead is the display slot's.
 
+### 7.7 M5: who builds what, and the architect's decisions (2026-11-17)
+
+**Order.** M5 adds the selection tools on top of M4's roll, in files that share the selection and the history, so it
+runs as one chain on branch `m5-select`, each part fast-forwarding main when CI is green: S1 (box select and the
+selection bar's direct actions) -> S2 (the drawers: Shapes, Pattern, Random, Turn into nodes; the lane-button menus;
+hover ghosts) -> S3 (the Copy / Paste and Slides tabs, the M5 snapshots, and an M5 section in
+`docs/CUBASE-CHECKLIST.md`). Then review and a fix pass. Each part writes its section in `docs/NOTES-M5.md` (S1, S2, S3,
+Fix) with a Progress list.
+
+**Ownership.** All three parts own `ui/roll/SelectionBar`, `Drawers`, `LaneMenu`, `BoxSelect`, `GhostPreview`,
+`ui/tabs/SlidesTab`, `CopyPasteTab`, `Tests/ui/test_selection_tools.cpp`, `test_box_select.cpp`, `test_ghost.cpp`,
+`test_copy_paste.cpp`, and M4's `ui/roll/**`, `ui/KeyRouter`, `ui/HintBar` and `doc/ClipDocument` where a tool needs
+them. The model (M1) already has every tool: M5 calls it and never re-implements one; a model change goes in
+NOTES-M5. The engine and the state format are not M5's.
+
+**Decisions.**
+1. **Every tool is one model call and one undo step.** A selection-bar action, a drawer's Apply and a paste each make
+   exactly one `ClipDocument` edit through the M1 function the prototype calls, so "tools through the UI layer" can
+   compare codec bytes with the direct model call.
+2. **Ghosts are drawn, never applied.** A hover preview computes the would-be clip off to the side and draws it; it
+   pushes no undo step and publishes no snapshot (the ghosts row). A live slider (Pattern) publishes while dragging,
+   like an M4 drag, and pushes one undo step on release.
+3. **Random stays put until Re-roll** (Y7): every random tool uses the seeded model functions, so the same clip and
+   the same seed give the same result; only Re-roll changes the seed.
+4. **The Slides tab finally gets Auto slide and Slide time** (`glideMode`, `glideTime`), which M0 left without
+   controls; it binds them the M2 way (30 Hz polling, no attachments).
+5. **Caps.** A paste or duplicate that would pass 4096 notes is refused with a toast and changes nothing (section 3
+   limits, M1's `limitEdit`).
+6. **M4's layout leftovers go to S3.** On a first open the tabs start folded, as the prototype's do, so a new
+   instance shows a big roll (the user's fold is still kept in UIST); a window too short for a whole row of knobs
+   folds the tabs rather than cutting the row (M4 review UI4-7); bar numbers stay clear of the zoom buttons (UI4-6).
+   The rest of M4's architect list (computeGlides cost near 4096 notes, tempo-ramp redraws, the inspector's Windows
+   focus with Keys off, a "view saved" flag in UIST) waits for Kalan's checklist answers or M8's performance pass.
+
 ---
 
 ## 8. Deviations
