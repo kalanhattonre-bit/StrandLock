@@ -56,6 +56,12 @@ namespace sl::ui::roll
         /** Types text into the box as Kalan does: opens it, puts the text in and presses Enter. */
         void type (const juce::String& text);
 
+        /** Opens the box for typing, as a click on it does, and leaves it open (the tests press keys into it). */
+        void beginTyping();
+
+        /** The text box while the box is open, else null. */
+        juce::TextEditor* getTextEditor() const;
+
         void paint (juce::Graphics&) override;
         void resized() override;
         void enablementChanged() override;
@@ -130,6 +136,7 @@ namespace sl::ui::roll
         std::vector<std::string> selectedIds() const;
         std::optional<NodeCtx> nodeCtx() const;
         double total() const;
+        int beatsPerBar() const;
 
         void commitStart (const juce::String&);
         void commitLength (const juce::String&);

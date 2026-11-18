@@ -196,3 +196,50 @@ SL_TEST ("ui", inspectorLaneTextRoundTrips)
     // which types back as 1000 Hz. So the prototype's count is 1009 of 1010.
     check (same == 1009, fmt ("1009 of the 1010 readouts read back to themselves, as in the prototype (%d)", same));
 }
+
+SL_TEST ("ui", inspectorPositionsCountTheClipsBars)
+{
+    section ("Inspector: the Start box counts the clip's beats per bar, as the ruler and the drag's readout do (fix pass F5)");
+
+    // The prototype's bars always hold 4 beats (the fixture's cases); a clip of the plugin can hold other bars (its
+    // CLIP chunk's beatsPerBar). By hand: with 3 beats per bar beat 3 is bar 2's first beat, beat 4.25 is bar 2,
+    // beat 2, its second sixteenth.
+    struct Case
+    {
+        int bpb;
+        double beats;
+        const char* text;
+    };
+    const Case cases[] = { { 3, 0.0, "1.1.1" }, { 3, 3.0, "2.1.1" }, { 3, 4.25, "2.2.2" }, { 3, 11.75, "4.3.4" }, { 3, 2.0625, "1.3.1.30" },
+                           { 6, 7.5, "2.2.3" }, { 5, 5.0, "2.1.1" }, { 7, 13.0, "2.7.1" }, { 4, 4.0, "2.1.1" }, { 2, 7.0, "4.2.1" } };
+    int right = 0;
+    std::string firstBad;
+    for (const auto& c : cases)
+    {
+        const auto shown = ui::roll::fmtPos (c.beats, c.bpb);
+        const auto back = ui::roll::parsePos (c.text, c.bpb);
+        const bool ok = shown == c.text && back.has_value() && fixture::same (*back, c.beats);
+        right += ok ? 1 : 0;
+        if (! ok && firstBad.empty())
+            firstBad = fmt ("%d beats per bar, beat %g: \"%s\", \"%s\" reads as %s", c.bpb, c.beats, shown.c_str(), c.text,
+                            back ? core::jsNumberToString (*back).c_str() : "nothing");
+    }
+    const int count = (int) (sizeof (cases) / sizeof (cases[0]));
+    check (right == count, fmt ("%d of %d positions shown and read with the clip's beats per bar as worked out by hand%s%s", right, count,
+                                firstBad.empty() ? "" : "; first other: ", firstBad.c_str()));
+
+    // every sixteenth of 24 beats, 1 to 7 beats per bar: shown, then typed back, it is the same beat (sixteenths are
+    // exact in binary); and 4 beats per bar is the fixture's own rule
+    int roundTrips = 0, sameAsDefault = 0, tried = 0;
+    for (int bpb = 1; bpb <= 7; ++bpb)
+        for (int k = 0; k <= 24 * 4; ++k)
+        {
+            const double b = k / 4.0;
+            ++tried;
+            const auto back = ui::roll::parsePos (ui::roll::fmtPos (b, bpb), bpb);
+            roundTrips += back.has_value() && fixture::same (*back, b) ? 1 : 0;
+            sameAsDefault += bpb != 4 || ui::roll::fmtPos (b, 4) == ui::roll::fmtPos (b) ? 1 : 0;
+        }
+    check (roundTrips == tried && sameAsDefault == tried,
+           fmt ("%d of %d sixteenths with 1 to 7 beats per bar read back as themselves; with 4 the text is the prototype's", roundTrips, tried));
+}

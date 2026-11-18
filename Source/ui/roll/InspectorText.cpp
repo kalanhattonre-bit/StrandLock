@@ -273,11 +273,12 @@ namespace sl::ui::roll
     }
 
     //==============================================================================================
-    std::string fmtPos (double b)
+    std::string fmtPos (double b, int beatsPerBar)
     {
+        const double bpb = (double) std::max (1, beatsPerBar);
         const double tt = std::max (0.0, core::jsRound (fin (b) ? b * kTicksPerBeat : 0.0));
-        const double bar = std::floor (tt / (4.0 * kTicksPerBeat)) + 1.0;
-        const double r1 = tt - (bar - 1.0) * 4.0 * kTicksPerBeat;
+        const double bar = std::floor (tt / (bpb * kTicksPerBeat)) + 1.0;
+        const double r1 = tt - (bar - 1.0) * bpb * kTicksPerBeat;
         const double beat = std::floor (r1 / kTicksPerBeat) + 1.0;
         const double r2 = r1 - (beat - 1.0) * kTicksPerBeat;
         const double six = std::floor (r2 / kTicksPerSixteenth) + 1.0;
@@ -288,8 +289,9 @@ namespace sl::ui::roll
         return out;
     }
 
-    std::optional<double> parsePos (std::string_view text)
+    std::optional<double> parsePos (std::string_view text, int beatsPerBar)
     {
+        const double bpb = (double) std::max (1, beatsPerBar);
         const std::string s = clean (text);
         if (s.empty())
             return std::nullopt;
@@ -317,7 +319,7 @@ namespace sl::ui::roll
         const double tick = parts.size() > 3 ? parseNumber (parts[3]) : 0.0;
         if (bar < 1 || beat < 1 || six < 1)
             return std::nullopt;
-        return (bar - 1) * 4 + (beat - 1) + (six - 1) / 4 + tick / kTicksPerBeat;
+        return (bar - 1) * bpb + (beat - 1) + (six - 1) / 4 + tick / kTicksPerBeat;
     }
 
     std::optional<std::string> rateId (std::string_view text)

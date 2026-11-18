@@ -182,6 +182,17 @@ namespace sl::ui::roll
         box->hideEditor (false);
     }
 
+    void InspectorField::beginTyping()
+    {
+        if (isEnabled())
+            box->showEditor();
+    }
+
+    juce::TextEditor* InspectorField::getTextEditor() const
+    {
+        return box->getCurrentTextEditor();
+    }
+
     void InspectorField::edited()
     {
         // sl-ui-panels.js field (): a value typed back as it was shown changes nothing
@@ -292,6 +303,13 @@ namespace sl::ui::roll
         return c != nullptr ? RollGeometry::totalBeats (*c) : 16.0;
     }
 
+    int Inspector::beatsPerBar() const
+    {
+        // the clip's, as the ruler and the drag's readout count them (fix pass F5)
+        const auto c = clip();
+        return c != nullptr ? std::max (1, c->beatsPerBar) : model::kDefaultBeatsPerBar;
+    }
+
     std::optional<Inspector::NodeCtx> Inspector::nodeCtx() const
     {
         // sl-ui-panels.js activeNodeCtx: the inspector's node, on the lane the mode shows, of a selected note
@@ -335,7 +353,7 @@ namespace sl::ui::roll
         if (note)
         {
             // sl-ui-panels.js syncInspector
-            start.setValue (str (fmtPos (P->s)));
+            start.setValue (str (fmtPos (P->s, beatsPerBar())));
             length.setValue (str (fmtNum (P->l, 4)));
             pitch.setValue (str (core::noteName (P->p)));
             velocity.setValue (juce::String ((int) std::max (1.0, core::jsRound (P->vel * 127.0))));
@@ -492,7 +510,7 @@ namespace sl::ui::roll
 
     void Inspector::commitStart (const juce::String& text)
     {
-        const auto b = parsePos (text.toStdString());
+        const auto b = parsePos (text.toStdString(), beatsPerBar());
         const auto P = primary();
         if (! b || P == nullptr)
         {

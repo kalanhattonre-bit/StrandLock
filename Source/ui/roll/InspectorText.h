@@ -22,12 +22,14 @@ namespace sl::ui::roll
     inline constexpr int kTicksPerSixteenth = 120;
 
     /** SLPanels.fmtPos: beats from the clip start -> "bar.beat.sixteenth" (all from 1) plus ".tick" when the
-        ticks are not 0 ("1.1.1", "2.1.2", "1.1.1.60"). A negative or non-finite position reads as 0. */
-    std::string fmtPos (double beats);
+        ticks are not 0 ("1.1.1", "2.1.2", "1.1.1.60"). A negative or non-finite position reads as 0.
+        beatsPerBar: the clip's. The prototype's bars always hold 4 beats; the plugin's ruler and readouts count the
+        clip's beats per bar, so the inspector's Start box does too (fix pass F5). With 4 it is the prototype's. */
+    std::string fmtPos (double beats, int beatsPerBar = 4);
 
     /** SLPanels.parsePos: "2.3.1" -> beats from the clip start (bar 1 = 0). Missing parts count as 1 (ticks 0);
-        dots, colons and spaces separate. Nothing when it is not a position. */
-    std::optional<double> parsePos (std::string_view text);
+        dots, colons and spaces separate. Nothing when it is not a position. beatsPerBar as for fmtPos. */
+    std::optional<double> parsePos (std::string_view text, int beatsPerBar = 4);
 
     /** SLPanels.rateId: "1/16t", "1/8 dotted", "1 bar" -> a rate id ("1/16T", "1/8D", "1bar"), or nothing. */
     std::optional<std::string> rateId (std::string_view text);
