@@ -17,6 +17,8 @@
 #include "support/Check.h"
 #include "support/TestRegistry.h"
 #include "ui/HintBar.h"
+#include "ui/MainView.h"
+#include "ui/StrandLookAndFeel.h"
 #include "ui/Theme.h"
 #include "ui/roll/InspectorText.h"
 #include "ui/roll/RollView.h"
@@ -851,3 +853,342 @@ SL_SNAPSHOT (live_hint_hover_dark)      { return shootLive ({ ThemeId::dark, 110
 SL_SNAPSHOT (live_freehand_narrow_dark) { return shootLive ({ ThemeId::dark, 900, 560, 3, false, false, true }); }
 SL_SNAPSHOT (live_node_narrow_light)    { return shootLive ({ ThemeId::light, 900, 560, 2, true }); }
 SL_SNAPSHOT (live_tab_open_dark)        { return shootLive ({ ThemeId::dark, 1100, 680, 1, false, false, false, false }); }
+
+//==================================================================================================
+// The fix pass (docs/NOTES-M4.md, Fix).
+
+namespace
+{
+    /** A mouse event on any component, at its own pixels. */
+    juce::MouseEvent eventOn (juce::Component& c, juce::Point<float> p, juce::ModifierKeys mods, double timeMs)
+    {
+        const auto time = juce::Time ((juce::int64) timeMs);
+        return juce::MouseEvent (juce::Desktop::getInstance().getMainMouseSource(), p, mods, juce::MouseInputSource::defaultPressure,
+                                 juce::MouseInputSource::defaultOrientation, juce::MouseInputSource::defaultRotation,
+                                 juce::MouseInputSource::defaultTiltX, juce::MouseInputSource::defaultTiltY,
+                                 &c, &c, time, p, time, 1, false);
+    }
+
+    int menuIndex (const RollView& roll, const std::string& text)
+    {
+        const auto& menu = roll.getMenu();
+        for (std::size_t i = 0; i < menu.size(); ++i)
+            if (menu[i].label == text)
+                return (int) i;
+        return -1;
+    }
+
+    int menuRowIndex (const RollView& roll)
+    {
+        const auto& menu = roll.getMenu();
+        for (std::size_t i = 0; i < menu.size(); ++i)
+            if (menu[i].kind == MenuItem::Kind::row)
+                return (int) i;
+        return -1;
+    }
+}
+
+SL_TEST ("ui", rollLiveMenuTakesNoKeys)
+{
+    section ("Live roll: the right-click menu is a panel on the page that takes no key. With Keys on, Space goes on to Cubase and runs "
+             "nothing, Escape closes it and keeps the selection; a click runs an item; a press elsewhere closes it (fix pass R4T-1, F3, UI4-1)");
+
+    LiveRig rig (clipOf ({ { "a", 60.0, 0.0, 1.0 }, { "b", 62.0, 2.0, 1.0 } }));
+    auto& editor = *rig.editor;
+    auto& view = rig.view();
+    auto& roll = rig.roll();
+    auto& doc = rig.doc();
+    const auto& geo = rig.geo();
+    const auto mouse = rig.mouse();
+    const double bw = geo.beatWidth();
+    using M = juce::ModifierKeys;
+    roll.setMenusShown (true);
+    editor.setKeysOn (true);
+    const auto space = juce::KeyPress (juce::KeyPress::spaceKey, M(), ' ');
+
+    // a right press on D3: the menu opens as a panel on the page, and nothing is modal (a JUCE menu is a modal window
+    // that takes every key, and with Keys on it ran the item under the mouse on Space)
+    const auto b = noteIn (doc.current(), "b");
+    const int modalBefore = juce::Component::getNumCurrentlyModalComponents();
+    mouse.rightClick ((b->s + 0.5) * bw, geo.baseYAt (*b, 0.5), 10000.0);
+    auto* panel = roll.getMenuPanel();
+    const int del = menuIndex (roll, "Delete");
+    const bool opened = panel != nullptr && roll.isMenuOpen() && panel->isVisible() && panel->getParentComponent() == &view
+                        && juce::Component::getNumCurrentlyModalComponents() == modalBefore && ! panel->isCurrentlyModal (false)
+                        && del >= 0 && view.getLocalBounds().contains (panel->getBounds().reduced (24).getTopLeft());
+    check (opened, "a right press on a note opens the menu as a panel on the page (MainView), inside it, with no modal window");
+    if (! opened)
+    {
+        editor.setKeysOn (false);
+        return;
+    }
+
+    // the mouse on Delete, then Space (to play): it goes on to Cubase, nothing is deleted, the menu stays
+    const auto clip0 = doc.current();
+    const auto delAt = roll.getMenuItemBounds ((std::size_t) del).toFloat().getCentre();
+    panel->mouseMove (eventOn (*panel, delAt, M(), 10500.0));
+    const bool spaceKept = editor.keyPressed (space);
+    check (! spaceKept && doc.current() == clip0 && roll.isMenuOpen() && label (rig.proc) == "Start",
+           "with Keys on and the mouse on Delete, Space goes on to Cubase: nothing is deleted, no undo step, the menu stays open");
+
+    // Escape: the menu closes and D3 stays selected (sl-ui.js's first key rule)
+    const bool escKept = editor.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey));
+    check (escKept && ! roll.isMenuOpen() && ! panel->isVisible() && doc.rollState().selected == std::vector<std::string> { "b" },
+           "Escape closes the menu; D3 stays selected");
+
+    // a click on Delete runs it: one undo step, and the menu closes
+    mouse.rightClick ((b->s + 0.5) * bw, geo.baseYAt (*b, 0.5), 11000.0);
+    const auto delAt2 = roll.getMenuItemBounds ((std::size_t) menuIndex (roll, "Delete")).toFloat().getCentre();
+    panel->mouseDown (eventOn (*panel, delAt2, M (M::leftButtonModifier), 11500.0));
+    panel->mouseUp (eventOn (*panel, delAt2, M(), 11540.0));
+    check (noteIn (doc.current(), "b") == nullptr && label (rig.proc) == "Delete note" && ! roll.isMenuOpen(),
+           fmt ("a click on Delete removes D3, one undo step (\"%s\"), and closes the menu", label (rig.proc).c_str()));
+
+    // Volume: Across keeps the menu open and lit (the row of two buttons)
+    view.setMode (3);
+    const auto a = noteIn (doc.current(), "a");
+    mouse.rightClick ((a->s + 0.5) * bw, geo.baseYAt (*a, 0.5), 12000.0);
+    const int row = menuRowIndex (roll);
+    bool across = false;
+    if (row >= 0)
+    {
+        const auto acrossAt = roll.getMenuItemBounds ((std::size_t) row, 1).toFloat().getCentre();
+        panel->mouseUp (eventOn (*panel, acrossAt, M(), 12500.0));
+        across = roll.isMenuOpen() && rig.proc.getUiState().scope == 1 && menuRowIndex (roll) == row
+                 && roll.getMenu()[(std::size_t) row].row.size() == 2 && roll.getMenu()[(std::size_t) row].row[1].on;
+    }
+    check (across, "in Volume a click on Across keeps the menu open, Across lit (UIST scope 1)");
+
+    // presses elsewhere: the one that opened the menu leaves it open, as does a press on the menu; a later one closes it
+    auto& other = view.getSelectAllButton();
+    roll.menuHeardPress (eventOn (other, { 4.0f, 4.0f }, M (M::leftButtonModifier), 12000.0));
+    const bool openerKept = roll.isMenuOpen();
+    roll.menuHeardPress (eventOn (*panel, { 30.0f, 30.0f }, M (M::leftButtonModifier), 13000.0));
+    const bool ownKept = roll.isMenuOpen();
+    roll.menuHeardPress (eventOn (other, { 4.0f, 4.0f }, M (M::leftButtonModifier), 13100.0));
+    check (openerKept && ownKept && ! roll.isMenuOpen(), "the press that opened the menu and a press on it leave it open; a press elsewhere closes it");
+
+    // a press on the roll closes it too, and does its own gesture (a click on empty space clears the selection)
+    mouse.rightClick ((a->s + 0.5) * bw, geo.baseYAt (*a, 0.5), 14000.0);
+    const bool reopened = roll.isMenuOpen();
+    mouse.click (7.0 * bw, geo.cy (70.0), 14500.0);
+    check (reopened && ! roll.isMenuOpen() && doc.rollState().selected.empty(),
+           "a click on empty roll closes the menu and clears the selection, as the click does without a menu");
+
+    // the roll hidden (the Diagnostics tab) closes it
+    mouse.rightClick ((a->s + 0.5) * bw, geo.baseYAt (*a, 0.5), 15000.0);
+    view.openTab (ui::MainView::diagTab);
+    const bool hiddenClosed = ! roll.isMenuOpen();
+    view.openTab (ui::MainView::sampleTab);
+    check (hiddenClosed, "opening the Diagnostics tab (the roll hidden) closes the menu");
+    editor.setKeysOn (false);
+}
+
+SL_TEST ("ui", rollLiveListsSpaceGuard)
+{
+    section ("Drop-down lists (the Grid, UI Scale, the sound and preset menus): Space closes the list and picks nothing (fix pass R4T-1)");
+
+    // JUCE lists are modal windows that pick the item under the mouse on Space, as on Return. The look and feel gives
+    // every list StrandLock opens a key listener that hears keys first and keeps only Space.
+    auto& guard = ui::StrandLookAndFeel::menuKeyGuard();
+    juce::Component list;
+    using M = juce::ModifierKeys;
+    const bool space = guard.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey, M(), ' '), &list);
+    const bool shiftSpace = guard.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey, M (M::shiftModifier), ' '), &list);
+    const bool ret = guard.keyPressed (juce::KeyPress (juce::KeyPress::returnKey), &list);
+    const bool down = guard.keyPressed (juce::KeyPress (juce::KeyPress::downKey), &list);
+    const bool esc = guard.keyPressed (juce::KeyPress (juce::KeyPress::escapeKey), &list);
+    const bool letter = guard.keyPressed (juce::KeyPress ('a', M(), 'a'), &list);
+    check (space && shiftSpace && ! ret && ! down && ! esc && ! letter,
+           "the lists' guard keeps Space (with or without Shift) and leaves Return, the arrows, Escape and letters to the list");
+}
+
+SL_TEST ("ui", rollLiveTypingKeepsKeys)
+{
+    section ("Live roll: while an inspector box is typed in, its keys are the box's: Ctrl+Z, Ctrl+Y and Ctrl+D run nothing on the roll, "
+             "with Keys on (fix pass F2)");
+
+    LiveRig rig (clipOf ({ { "a", 60.0, 0.0, 1.0 }, { "b", 62.0, 2.0, 1.0 } }));
+    auto& editor = *rig.editor;
+    auto& view = rig.view();
+    auto& doc = rig.doc();
+    auto& insp = view.getInspector();
+    using M = juce::ModifierKeys;
+    doc.setSelection ({ "a" }, std::string ("a"));
+    view.syncRollControls();
+    insp.getVelocity().type ("90");   // a step a Ctrl+Z on the roll would undo
+    editor.setKeysOn (true);
+    const auto clip0 = doc.current();
+    const auto label0 = label (rig.proc);
+    const bool redo0 = rig.proc.canRedo();
+
+    // the Start box open; a key goes to its text box first, then up its parents to the editor, as JUCE's window
+    // hands a key over (ComponentPeer::handleKeyPress). The box has no typing of its own to undo yet, and it knows
+    // no Ctrl+D, so before the fix these keys reached the roll.
+    auto& start = insp.getStart();
+    start.beginTyping();
+    juce::Component* const ed = start.getTextEditor();
+    const auto send = [ed] (const juce::KeyPress& k)
+    {
+        for (juce::Component* c = ed; c != nullptr; c = c->getParentComponent())
+            if (c->keyPressed (k))
+                return true;
+        return false;
+    };
+    const bool z = send (juce::KeyPress ('z', M::commandModifier, 0));
+    const bool y = send (juce::KeyPress ('y', M::commandModifier, 0));
+    const bool shiftZ = send (juce::KeyPress ('z', M::commandModifier | M::shiftModifier, 0));
+    const bool d = send (juce::KeyPress ('d', M::commandModifier, 0));
+    const bool all = send (juce::KeyPress ('a', M::commandModifier, 0));
+    const bool still = start.isBeingEdited();
+    check (ed != nullptr && z && y && shiftZ && d && all && still && doc.current() == clip0 && label (rig.proc) == label0
+               && rig.proc.canRedo() == redo0 && doc.rollState().selected == std::vector<std::string> { "a" },
+           fmt ("Start box open, Keys on: Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z, Ctrl+D and Ctrl+A change neither the clip nor the undo history (\"%s\") "
+                "and the box stays open", label (rig.proc).c_str()));
+
+    // the box let go (as a click elsewhere does: JUCE closes it on Escape or Enter through a posted message, which
+    // this runner does not deliver); with nothing typed the clip stays, and the shortcuts reach the roll again
+    start.finishEditing();
+    const bool closed = ! start.isBeingEdited() && doc.current() == clip0;
+    editor.keyPressed (juce::KeyPress ('D', M::commandModifier, 0));
+    check (closed && doc.current()->notes.size() == 3 && label (rig.proc) == "Duplicate",
+           "the box closed with nothing typed changes nothing; then Ctrl+D duplicates the selected note again (one step)");
+    editor.setKeysOn (false);
+}
+
+SL_TEST ("ui", rollLiveKeysWithRollHidden)
+{
+    section ("Live roll: while the Diagnostics tab hides the roll, the keys run no shortcut (they are kept with Keys on, and listed on the "
+             "page); with the roll back they work again (fix pass UI4-4)");
+
+    LiveRig rig (clipOf ({ { "a", 60.0, 0.0, 1.0 }, { "b", 62.0, 2.0, 1.0 } }));
+    auto& editor = *rig.editor;
+    auto& view = rig.view();
+    auto& doc = rig.doc();
+    using M = juce::ModifierKeys;
+    doc.setSelection ({ "a" }, std::string ("a"));
+    view.syncRollControls();
+    editor.setKeysOn (true);
+    view.openTab (ui::MainView::diagTab);
+    const auto clip0 = doc.current();
+    const auto label0 = label (rig.proc);
+    bool kept = true;
+    for (const auto& k : { juce::KeyPress ('3'), juce::KeyPress (juce::KeyPress::deleteKey), juce::KeyPress ('Z', M::commandModifier, 0),
+                           juce::KeyPress ('D', M::commandModifier, 0), juce::KeyPress ('B'), juce::KeyPress (juce::KeyPress::escapeKey) })
+        kept = editor.keyPressed (k) && kept;
+    const bool space = editor.keyPressed (juce::KeyPress (juce::KeyPress::spaceKey, M(), ' '));
+    const bool hidden = ! rig.roll().isVisible();
+    check (hidden && kept && ! space && doc.current() == clip0 && label (rig.proc) == label0 && view.getMode() == 1
+               && doc.rollState().selected == std::vector<std::string> { "a" } && ! rig.roll().getGestures().isLinkArmed(),
+           "Diagnostics tab open, Keys on: 3, Delete, Ctrl+Z, Ctrl+D, B and Escape are kept and change nothing (mode, notes, selection, "
+           "undo history); Space goes on to Cubase");
+
+    view.openTab (ui::MainView::sampleTab);
+    editor.keyPressed (juce::KeyPress (juce::KeyPress::deleteKey));
+    check (rig.roll().isVisible() && noteIn (doc.current(), "a") == nullptr && label (rig.proc) == "Delete note",
+           "with the roll back, Delete deletes the selected note");
+    editor.setKeysOn (false);
+}
+
+SL_TEST ("ui", rollLiveHeldB)
+{
+    section ("Live roll: B held down toggles Slide into once; let go, the next B toggles it back (fix pass F4)");
+
+    LiveRig rig (clipOf ({ { "a", 60.0, 0.0, 1.0 }, { "b", 62.0, 2.0, 1.0 } }));
+    auto& editor = *rig.editor;
+    auto& view = rig.view();
+    rig.doc().setSelection ({ "a" }, std::string ("a"));
+    view.syncRollControls();
+    editor.setKeysOn (true);
+    for (int i = 0; i < 8; ++i)   // a press and 7 repeats: toggled each time, Slide into would end where it began
+        editor.keyPressed (juce::KeyPress ('B'));
+    const bool armed = rig.roll().getGestures().isLinkArmed() && view.getSlideIntoButton().getToggleState();
+    (void) editor.keyStateChanged (false);   // let go
+    editor.keyPressed (juce::KeyPress ('B'));
+    const bool disarmed = ! rig.roll().getGestures().isLinkArmed() && ! view.getSlideIntoButton().getToggleState();
+    check (armed && disarmed, "B pressed and held through 7 repeats arms Slide into (lit); let go and pressed again, it is off");
+    editor.setKeysOn (false);
+}
+
+SL_TEST ("ui", rollLiveStartCountsTheClipsBars)
+{
+    section ("Live roll: on a clip with 3 beats in a bar, the inspector's Start box says the bar the ruler says, and a typed bar lands "
+             "there (fix pass F5)");
+
+    model::Clip c = clipOf ({ { "a", 60.0, 3.0, 1.0 } });
+    c.beatsPerBar = 3;
+    LiveRig rig (c);
+    auto& view = rig.view();
+    auto& doc = rig.doc();
+    auto& insp = view.getInspector();
+    doc.setSelection ({ "a" }, std::string ("a"));
+    view.syncRollControls();
+    const bool shown = insp.getStart().getValue() == "2.1.1";
+    insp.getStart().type ("3.2.1");
+    const auto a = noteIn (doc.current(), "a");
+    check (doc.current()->beatsPerBar == 3 && shown && a != nullptr && juce::exactlyEqual (a->s, 7.0) && insp.getStart().getValue() == "3.2.1",
+           fmt ("a note on beat 3 shows Start %s (2.1.1: bar 2, as the ruler numbers it); 3.2.1 typed puts it on beat %.2f (7 expected)",
+                str (insp.getStart().getValue()).c_str(), a != nullptr ? a->s : -1.0));
+}
+
+//==================================================================================================
+// Pictures of the right-click menu, for review: the Build menu with the mouse on an item, the shapes of a lane mode,
+// and the longest menu (Travel, mode 8) on the smallest window.
+
+namespace
+{
+    struct MenuShot
+    {
+        ThemeId theme = ThemeId::dark;
+        int width = 1100, height = 680;
+        int mode = 1;
+        const char* hover = nullptr;   // the item under the mouse
+        bool low = false;              // the right press near the bottom of the roll
+    };
+
+    juce::Image shootMenu (const MenuShot& s)
+    {
+        StrandLockProcessor proc;
+        proc.waitForSounds();
+        auto& settings = proc.getUserSettings();
+        settings.setTheme (s.theme);
+        settings.setUiScalePercent (100);
+        settings.setKeysDefault (false);
+        juce::Image image;
+        {
+            StrandLockEditor editor (proc);
+            editor.setLogicalSize (s.width, s.height);
+            auto& view = editor.getView();
+            auto& roll = view.getRoll();
+            view.setFolded (true);
+            editor.refreshNow();
+            const auto& geo = roll.getGeometry();
+            const Pointer mouse { roll.getCanvas(), geo };
+            roll.setScroll (0.0, geo.cy (77.0) - geo.viewHeight() / 2.0);
+            if (s.mode != 1)
+                view.setMode (s.mode, 0);
+            if (const auto n = noteIn (proc.getDocument().current(), "sd-25"))
+            {
+                const double x = (n->s + 0.3 * n->l) * geo.beatWidth(), y = geo.baseYAt (*n, 0.3);
+                mouse.click (x, y, 9000.0);
+                mouse.rightClick (x, s.low ? geo.scrollY() + geo.viewHeight() - 8.0 : y, 10000.0);
+            }
+            if (auto* panel = roll.getMenuPanel(); panel != nullptr && s.hover != nullptr)
+            {
+                const int i = menuIndex (roll, s.hover);
+                if (i >= 0)
+                    panel->mouseMove (eventOn (*panel, roll.getMenuItemBounds ((std::size_t) i).toFloat().getCentre(), {}, 10500.0));
+            }
+            editor.refreshNow();
+            image = editor.createComponentSnapshot (editor.getLocalBounds(), true, 1.0f);
+            roll.closeMenu();
+        }
+        resetUserSettings (proc);
+        return image;
+    }
+}
+
+SL_SNAPSHOT (live_menu_build_dark)          { return shootMenu ({ ThemeId::dark, 1100, 680, 1, "Duplicate" }); }
+SL_SNAPSHOT (live_menu_build_light)         { return shootMenu ({ ThemeId::light, 1100, 680, 1, "Delete" }); }
+SL_SNAPSHOT (live_menu_shapes_light)        { return shootMenu ({ ThemeId::light, 1100, 680, 3, "Swell" }); }
+SL_SNAPSHOT (live_menu_travel_narrow_dark)  { return shootMenu ({ ThemeId::dark, 900, 560, 8, "Rewind", true }); }

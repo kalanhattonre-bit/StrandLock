@@ -172,6 +172,15 @@ bool StrandLockEditor::keyPressed (const juce::KeyPress& key)
     return view.handleKey (key, keysOn);
 }
 
+bool StrandLockEditor::keyStateChanged (bool isKeyDown)
+{
+    // A key went up: a B that was held may toggle Slide into again (its repeats do not; fix pass F4). The key itself
+    // goes on as before (false: StrandLock keeps no key going up).
+    if (! isKeyDown)
+        view.keyReleased();
+    return false;
+}
+
 //==================================================================================================
 // Drops: a sound file loads as the sound (sl-ui.js: the first file dropped, rooted at C3); the Diagnostics page
 // records every drop (checklist step 6).

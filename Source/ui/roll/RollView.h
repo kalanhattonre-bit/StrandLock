@@ -120,7 +120,8 @@ namespace sl::ui::roll
         double getGrid() const noexcept;
 
         //==========================================================================================
-        // The right-click menu.
+        // The right-click menu: a panel over the page (not a JUCE PopupMenu, which would hold every key while
+        // open). A press anywhere else closes it; with Keys on, Escape does (MainView).
 
         /** The menu the last right press opened (its items), or empty. */
         const std::vector<MenuItem>& getMenu() const noexcept { return menuItems; }
@@ -128,8 +129,28 @@ namespace sl::ui::roll
         /** Runs an item of the open menu, as a click on it does. */
         void chooseMenuItem (const MenuItem& item);
 
-        /** False: a right press keeps the menu's items (getMenu) but opens no window (the tests). */
+        /** False: a right press keeps the menu's items (getMenu) but shows no panel (the tests). */
         void setMenusShown (bool shouldShow) noexcept { menusShown = shouldShow; }
+
+        /** Whether the menu's panel is showing. */
+        bool isMenuOpen() const noexcept;
+
+        /** Closes the menu (its items go too). */
+        void closeMenu();
+
+        /** Where the menu's panel opens: a component over the whole page (MainView); none = this view. */
+        void setMenuParent (juce::Component* parent) noexcept;
+
+        /** The menu's panel once a menu has been shown (the tests), else null. */
+        juce::Component* getMenuPanel() noexcept;
+
+        /** Where the open menu draws item `index` (button 0 or 1: one of a row's two buttons), in the panel's
+            pixels (the tests). */
+        juce::Rectangle<int> getMenuItemBounds (std::size_t index, int button = -1) const;
+
+        /** What the menu does with a press anywhere in StrandLock's windows (it hears them through the desktop's
+            mouse listener): one outside it closes it, except the press that opened it. Public for the tests. */
+        void menuHeardPress (const juce::MouseEvent& e);
 
         //==========================================================================================
         // Zoom and scroll.
@@ -190,8 +211,7 @@ namespace sl::ui::roll
 
     private:
         class Canvas;
-        class MenuHeader;
-        class MenuRow;
+        class MenuPanel;
 
         /** Everything that makes refresh repaint the whole roll (and the ruler and the keys) when it changes. The
             notes, the selection, the handles, the ghost, the box and the readout repaint only where they changed. */
@@ -227,8 +247,7 @@ namespace sl::ui::roll
 
         void changed();
         void toast (const juce::String& text);
-        void showMenu (juce::Point<float> at);
-        void menuClosed (int result);
+        void showMenu (juce::Point<float> at, double timeMs);
         void saveScope();
 
         const Theme& theme;
@@ -255,6 +274,7 @@ namespace sl::ui::roll
 
         std::vector<MenuItem> menuItems;   // the right-click menu open now
         bool menusShown = true;
+        juce::Component::SafePointer<juce::Component> menuParent;
 
         // auditions in flight: a note played by a gesture stops 220 ms later (sl-ui.js audition)
         struct PendingOff
@@ -263,6 +283,8 @@ namespace sl::ui::roll
             double due = 0.0;
         };
         std::vector<PendingOff> pendingOffs;
+
+        std::unique_ptr<MenuPanel> menuPanel;   // last, so it goes first
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RollView)
     };

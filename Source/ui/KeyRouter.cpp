@@ -60,10 +60,15 @@ namespace sl::ui
         return {};
     }
 
-    bool KeyRouter::route (const juce::KeyPress& key, bool keysOn) const
+    bool KeyRouter::keeps (const juce::KeyPress& key, bool keysOn) noexcept
     {
         // Keys off: everything goes to Cubase. Space always does (play and stop).
-        if (! keysOn || key.getKeyCode() == juce::KeyPress::spaceKey)
+        return keysOn && key.getKeyCode() != juce::KeyPress::spaceKey;
+    }
+
+    bool KeyRouter::route (const juce::KeyPress& key, bool keysOn) const
+    {
+        if (! keeps (key, keysOn))
             return false;
 
         const auto run = [] (const std::function<void()>& fn)
@@ -72,6 +77,17 @@ namespace sl::ui
                 fn();
         };
         const Hit hit = shortcutFor (key);
+        // A held key repeats its press, and JUCE does not say which presses are repeats. Only B changes something
+        // when it repeats (it toggles), so a B that is still held does nothing (fix pass F4). Another key's press ends
+        // B's repeats, as Windows stops repeating a key when another one goes down.
+        if (hit.what == Shortcut::armLink)
+        {
+            if (! linkKeyHeld)
+                run (actions.armLink);
+            linkKeyHeld = true;
+            return true;
+        }
+        linkKeyHeld = false;
         switch (hit.what)
         {
             case Shortcut::undo:            run (actions.undo); break;
@@ -82,7 +98,7 @@ namespace sl::ui
             case Shortcut::copyLanes:       run (actions.copyLanes); break;
             case Shortcut::pasteLanes:      run (actions.pasteLanes); break;
             case Shortcut::clearSelection:  run (actions.clearSelection); break;
-            case Shortcut::armLink:         run (actions.armLink); break;
+            case Shortcut::armLink:         break;   // above
             case Shortcut::mode:
                 if (actions.setMode)
                     actions.setMode (hit.mode);

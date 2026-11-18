@@ -315,6 +315,7 @@ namespace sl::ui
 
         // The roll, its inspector and the hint bar: every roll event shows its result in the rows above and below.
         addAndMakeVisible (roll);
+        roll.setMenuParent (this);   // the right-click menu opens over the whole page, as the prototype's #menu
         roll.onToast = [this] (const juce::String& text) { showToast (text); };
         roll.onEdit = [this] { syncRollControls(); };
         roll.onPress = [this] { inspector.finishEditing(); };
@@ -501,7 +502,30 @@ namespace sl::ui
 
     bool MainView::handleKey (const juce::KeyPress& key, bool keysNow)
     {
+        // While an inspector box is typed in, the keys are the box's: a key the box leaves (Ctrl+Z with no typing
+        // of its own to undo, Ctrl+Y, Ctrl+D) runs no shortcut and goes nowhere else, with Keys on or off (fix pass
+        // F2; sl-ui-panels.js stops a field's keys, and sl-ui.js runs no shortcut while a text field has the focus).
+        if (inspector.isEditing())
+            return true;
+
+        // With the right-click menu open, Escape closes it and keeps the selection (sl-ui.js's first key rule).
+        if (keysNow && roll.isMenuOpen() && key.isKeyCode (juce::KeyPress::escapeKey))
+        {
+            roll.closeMenu();
+            return true;
+        }
+
+        // While the Diagnostics tab hides the roll, no shortcut runs: the keys are only recorded there (fix pass
+        // UI4-4). With Keys on they are still kept, all but Space.
+        if (! roll.isVisible())
+            return KeyRouter::keeps (key, keysNow);
+
         return keyRouter.route (key, keysNow);
+    }
+
+    void MainView::keyReleased()
+    {
+        keyRouter.keyReleased();
     }
 
     void MainView::disarmClear()

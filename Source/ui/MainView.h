@@ -64,8 +64,13 @@ namespace sl::ui
         void setUiScalePercent (int percent);
 
         /** A key the editor received: the KeyRouter runs its shortcut on the roll (with Keys on). True when
-            StrandLock keeps the key; false sends it on to Cubase (every key with Keys off, Space always). */
+            StrandLock keeps the key; false sends it on to Cubase (every key with Keys off, Space always). While an
+            inspector box is typed in, every key is the box's and nothing runs; while the Diagnostics tab hides the
+            roll, no shortcut runs; with the right-click menu open, Escape closes it. */
         bool handleKey (const juce::KeyPress& key, bool keysOn);
+
+        /** A key went up (the editor's keyStateChanged). */
+        void keyReleased();
 
         /** The editor's timer: the host's tempo, the roll (what the document holds now), the Diagnostics page, the
             loaded sound, the Region and the banner. */

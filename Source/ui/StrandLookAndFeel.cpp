@@ -149,6 +149,35 @@ namespace sl::ui
         g.drawRect (0, 0, width, height, 1);
     }
 
+    namespace
+    {
+        /** Space on an open JUCE list: the list closes and nothing is picked. */
+        struct SpaceClosesTheList final : public juce::KeyListener
+        {
+            bool keyPressed (const juce::KeyPress& key, juce::Component*) override
+            {
+                if (! key.isKeyCode (juce::KeyPress::spaceKey))
+                    return false;
+                juce::PopupMenu::dismissAllActiveMenus();
+                return true;
+            }
+        };
+    }
+
+    juce::KeyListener& StrandLookAndFeel::menuKeyGuard()
+    {
+        // one for every list of every window, for as long as the plug-in is loaded (a list's window may outlive
+        // the editor that opened it by a moment)
+        static SpaceClosesTheList guard;
+        return guard;
+    }
+
+    void StrandLookAndFeel::preparePopupMenuWindow (juce::Component& newWindow)
+    {
+        // the window's key listeners hear a key before the list itself does (ComponentPeer::handleKeyPress)
+        newWindow.addKeyListener (&menuKeyGuard());
+    }
+
     void StrandLookAndFeel::drawScrollbar (juce::Graphics& g, juce::ScrollBar&, int x, int y, int width, int height,
                                            bool isScrollbarVertical, int thumbStartPosition, int thumbSize,
                                            bool isMouseOver, bool isMouseDown)

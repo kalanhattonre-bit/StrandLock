@@ -231,3 +231,28 @@ SL_TEST ("ui", keysDriveTheRoll)
            "Keys on: 3 picks Volume, Ctrl+A selects all 26 notes, Ctrl+D duplicates the two selected (1 undo step), Delete removes the copies "
            "(1 step), and Ctrl+Z twice is back to the start");
 }
+
+SL_TEST ("ui", keysHeldBTogglesOnce)
+{
+    section ("Keys: a held B toggles Slide into once, however often its key repeats; let go, the next B toggles again (fix pass F4)");
+
+    // JUCE hands over every repeat of a held key as one more key press and does not say it is a repeat. sl-ui.js
+    // ignores repeated keys (e.repeat); B is the one shortcut a repeat would change (it toggles).
+    Counter counter;
+    const KeyRouter router (counter.actions());
+    bool allKept = true;
+    for (int i = 0; i < 12; ++i)   // one press and 11 repeats
+        allKept = router.route (key ('B'), true) && allKept;
+    const int held = counter.runs["slide into"];
+    router.keyReleased();
+    allKept = router.route (key ('B'), true) && allKept;
+    allKept = router.route (key ('B'), true) && allKept;
+    const int again = counter.runs["slide into"];
+    (void) router.route (key ('3'), true);   // another key goes down: B is no longer repeating
+    allKept = router.route (key ('b'), true) && allKept;
+    const int afterOther = counter.runs["slide into"];
+    const bool off = ! router.route (key ('B'), false);
+    check (held == 1 && again == 2 && afterOther == 3 && allKept && off && counter.runs["mode"] == 1,
+           fmt ("B held through 11 repeats toggles once (%d); let go and pressed again, once more (%d); after another key, once more (%d); "
+                "every B is kept with Keys on and none with Keys off", held, again, afterOther));
+}

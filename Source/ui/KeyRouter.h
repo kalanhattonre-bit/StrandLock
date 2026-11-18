@@ -37,6 +37,13 @@ namespace sl::ui
         /** True when StrandLock keeps the key (it ran a shortcut, or Keys is on); false when it goes on to Cubase. */
         bool route (const juce::KeyPress& key, bool keysOn) const;
 
+        /** Whether route keeps the key, without running anything: with Keys on every key but Space (M0's rule). */
+        static bool keeps (const juce::KeyPress& key, bool keysOn) noexcept;
+
+        /** A key went up (the editor's keyStateChanged). A held B repeats its key press until it is let go, and only
+            its first press toggles Slide into (sl-ui.js ignores repeated keys); after this the next B toggles again. */
+        void keyReleased() const noexcept { linkKeyHeld = false; }
+
         enum class Shortcut { none, undo, redo, deleteSelection, selectAll, duplicate, copyLanes, pasteLanes, clearSelection, armLink, mode };
 
         struct Hit
@@ -47,5 +54,8 @@ namespace sl::ui
 
         /** The shortcut a key names when Keys is on (none for Space and for keys that are not shortcuts). */
         static Hit shortcutFor (const juce::KeyPress& key);
+
+    private:
+        mutable bool linkKeyHeld = false;   // B toggled Slide into and is not known to be let go yet
     };
 }

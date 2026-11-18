@@ -103,91 +103,365 @@ namespace sl::ui::roll
     };
 
     //==============================================================================================
-    /** A header of the right-click menu: small capitals, dim, or in a lane's colour (sl-ui.js openMenu's .h). */
-    class RollView::MenuHeader final : public juce::PopupMenu::CustomComponent
+    /** The right-click menu (sl-ui.js #menu): a panel of StrandLock's own over the page, not a JUCE PopupMenu. A JUCE
+        menu is a window that holds every key while it is open: with Keys on, Space ran the item under the mouse (Delete,
+        say) and never reached Cubase. This panel takes no key, so with Keys on Space goes on to Cubase and the other
+        keys work as they do without it; Escape closes it (MainView::handleKey). A press anywhere else closes it and
+        still does what it does there, as in the prototype; a click on an item runs it (fix pass R4T-1, F3, UI4-1).
+
+        It reads the view's items (getMenu) each time it paints, and lays them out as shell.html's #menu: a 6 px
+        padding, headers in small capitals (dim, or in a lane's colour), lines, items that light on hover, and the row
+        of two buttons (Each note / Across, the lit one in the accent). A menu taller than the page scrolls with the
+        wheel. Rings and rounded outlines are paths (R2's Direct2D rule). */
+    class RollView::MenuPanel final : public juce::Component
     {
     public:
-        MenuHeader (const juce::String& t, juce::Colour c) : juce::PopupMenu::CustomComponent (false), text (t.toUpperCase()), colour (c) {}
+        explicit MenuPanel (RollView& v) : view (v) {}
 
-        void getIdealSize (int& w, int& h) override
+        ~MenuPanel() override { listen (false); }
+
+        /** Opens the menu with its top left corner at `where` (the parent's pixels), kept inside the parent. timeMs:
+            the press that opened it, which must not close it again. */
+        void open (juce::Point<int> where, double timeMs)
         {
-            w = (int) std::ceil (Theme::textWidth (font(), text)) + 20;
-            h = 22;
-        }
-
-        void paint (juce::Graphics& g) override
-        {
-            g.setColour (colour);
-            g.setFont (font());
-            g.drawText (text, getLocalBounds().reduced (8, 0), juce::Justification::centredLeft, true);
-        }
-
-    private:
-        static juce::Font font() { return Theme::px (10.5f, false, 0.06f); }
-
-        juce::String text;
-        juce::Colour colour;
-    };
-
-    /** The menu's row of two buttons (Each note / Across): a click picks one and the menu stays open, the other
-        one lit (sl-ui.js openMenu's .row, its items' keep). */
-    class RollView::MenuRow final : public juce::PopupMenu::CustomComponent
-    {
-    public:
-        MenuRow (RollView& v, std::size_t index) : juce::PopupMenu::CustomComponent (false), view (&v), itemIndex (index) {}
-
-        void getIdealSize (int& w, int& h) override
-        {
-            w = 200;
-            h = 32;
-        }
-
-        void paint (juce::Graphics& g) override
-        {
-            if (view == nullptr)
-                return;
-            const Theme& t = view->theme;
-            const auto buttons = items();
-            const auto area = getLocalBounds().reduced (4, 3).toFloat();
-            const float w = (area.getWidth() - 4.0f) / 2.0f;
-            for (std::size_t i = 0; i < buttons.size() && i < 2; ++i)
-            {
-                const auto r = juce::Rectangle<float> (area.getX() + (float) i * (w + 4.0f), area.getY(), w, area.getHeight()).reduced (0.5f);
-                const bool on = buttons[i].on;
-                juce::Path box;
-                box.addRoundedRectangle (r, Theme::corner);
-                g.setColour (on ? t (Tok::acc) : t (Tok::btn));
-                g.fillPath (box);
-                g.setColour (on ? t (Tok::acc) : t (Tok::btnb));
-                g.strokePath (box, juce::PathStrokeType (1.0f));
-                g.setColour (on ? t (Tok::onacc) : t (Tok::txt));
-                g.setFont (Theme::px (12.0f, true));
-                g.drawText (juce::String::fromUTF8 (buttons[i].label.c_str()), r, juce::Justification::centred, true);
-            }
-        }
-
-        void mouseUp (const juce::MouseEvent& e) override
-        {
-            if (view == nullptr)
-                return;
-            const auto buttons = items();
-            const std::size_t i = e.position.x < (float) getWidth() * 0.5f ? 0 : 1;
-            if (i < buttons.size())
-                view->chooseMenuItem (buttons[i]);
+            anchor = where;
+            openedAt = timeMs;
+            scroll = 0;
+            hoverIndex = hoverButton = -1;
+            place();
+            setVisible (true);
+            toFront (false);
+            listen (true);
             repaint();
         }
 
-    private:
-        std::vector<MenuItem> items() const
+        /** The view's items changed while it stays open (Each note / Across): the same place, the new list. */
+        void itemsChanged()
         {
-            if (view == nullptr)
-                return {};
-            const auto& menu = view->getMenu();
-            return itemIndex < menu.size() ? menu[itemIndex].row : std::vector<MenuItem>();
+            place();
+            repaint();
         }
 
-        juce::Component::SafePointer<RollView> view;
-        std::size_t itemIndex;
+        void close()
+        {
+            listen (false);
+            hoverIndex = hoverButton = -1;
+            setVisible (false);
+        }
+
+        /** An item's area in this component's pixels (button 0 or 1: one of a row's buttons), for the tests. */
+        juce::Rectangle<int> boundsOf (std::size_t index, int button) const
+        {
+            for (const auto& s : slots)
+                if (s.index == index)
+                    return button >= 0 ? rowButton (s, button) : slotArea (s);
+            return {};
+        }
+
+        /** A press somewhere in StrandLock's windows (the desktop's mouse listener): one outside the menu closes it. */
+        void pressedSomewhere (const juce::MouseEvent& e)
+        {
+            if (! isVisible() || e.eventComponent == this || isParentOf (e.eventComponent))
+                return;
+            // the desktop's listeners also hear the press that opened the menu, after the roll did
+            if ((double) e.eventTime.toMilliseconds() <= openedAt)
+                return;
+            view.closeMenu();
+        }
+
+        bool hitTest (int x, int y) override { return box.contains (x, y); }
+
+        void parentSizeChanged() override
+        {
+            if (isVisible())
+                place();
+        }
+
+        void paint (juce::Graphics& g) override
+        {
+            const Theme& T = view.theme;
+            const auto b = box.toFloat();
+            juce::Path shape;
+            shape.addRoundedRectangle (b, kCorner);
+            juce::DropShadow (T (Tok::shadow), 18, { 0, 6 }).drawForPath (g, shape);
+            g.setColour (T (Tok::menu));
+            g.fillPath (shape);
+            {
+                const juce::Graphics::ScopedSaveState keep (g);
+                g.reduceClipRegion (box.reduced (1));
+                const auto& items = view.getMenu();
+                for (const auto& s : slots)
+                {
+                    const auto r = slotArea (s);
+                    if (s.index < items.size() && r.getBottom() >= box.getY() && r.getY() <= box.getBottom())
+                        paintItem (g, items[s.index], s, r);
+                }
+            }
+            if (contentHeight > box.getHeight())
+            {
+                // a scroller's bar along the right edge: there is more above or below
+                const float h = (float) box.getHeight(), thumb = juce::jmax (16.0f, h * h / (float) contentHeight);
+                const float y = (float) box.getY() + (h - thumb) * (float) scroll / (float) (contentHeight - box.getHeight());
+                juce::Path bar;
+                bar.addRoundedRectangle (juce::Rectangle<float> ((float) box.getRight() - 5.0f, y + 2.0f, 3.0f, thumb - 4.0f), 1.5f);
+                g.setColour (T (Tok::btnb));
+                g.fillPath (bar);
+            }
+            juce::Path border;
+            border.addRoundedRectangle (b.reduced (0.5f), kCorner - 0.5f);
+            g.setColour (T (Tok::line));
+            g.strokePath (border, juce::PathStrokeType (1.0f));
+        }
+
+        void mouseMove (const juce::MouseEvent& e) override { hoverAt (e.getPosition()); }
+        void mouseDrag (const juce::MouseEvent& e) override { hoverAt (e.getPosition()); }
+        void mouseExit (const juce::MouseEvent&) override { setHover (-1, -1); }
+
+        void mouseUp (const juce::MouseEvent& e) override
+        {
+            int button = -1;
+            const int index = itemAt (e.getPosition(), button);
+            const auto& items = view.getMenu();
+            if (index < 0 || index >= (int) items.size())
+                return;
+            const MenuItem m = items[(std::size_t) index];   // a copy: running it changes the list
+            if (m.kind == MenuItem::Kind::row)
+            {
+                if (button >= 0 && button < (int) m.row.size() && ! m.row[(std::size_t) button].disabled)
+                    view.chooseMenuItem (m.row[(std::size_t) button]);
+            }
+            else if (! m.disabled)
+            {
+                view.chooseMenuItem (m);
+            }
+        }
+
+        void mouseWheelMove (const juce::MouseEvent& e, const juce::MouseWheelDetails& w) override
+        {
+            // the wheel scrolls a tall menu and never the roll under it (CSS overscroll-behavior: contain)
+            const int most = juce::jmax (0, contentHeight - box.getHeight());
+            const int next = juce::jlimit (0, most, scroll - juce::roundToInt (w.deltaY * 200.0f));
+            if (next != scroll)
+            {
+                scroll = next;
+                hoverAt (e.getPosition());
+                repaint();
+            }
+        }
+
+    private:
+        struct Slot
+        {
+            std::size_t index = 0;   // into the view's items
+            int top = 0, height = 0; // in the list, before the scroll
+        };
+
+        /** Every press in StrandLock's windows (Desktop's global mouse listener): one outside the menu closes it. */
+        struct Outside final : public juce::MouseListener
+        {
+            explicit Outside (MenuPanel& p) : panel (p) {}
+            void mouseDown (const juce::MouseEvent& e) override { panel.pressedSomewhere (e); }
+            MenuPanel& panel;
+        };
+
+        static constexpr int kPad = 6, kHeaderHeight = 22, kSeparatorHeight = 9, kItemHeight = 28, kRowHeight = 34;
+        static constexpr int kMinWidth = 190;
+        static constexpr int kShadowSide = 18, kShadowTop = 12, kShadowBottom = 24;   // room for the drop shadow
+        static constexpr float kCorner = 10.0f;
+
+        static juce::Font itemFont() { return Theme::px (13.0f, true); }
+        static juce::Font headerFont() { return Theme::px (10.5f, false, 0.06f); }
+        static juce::String text (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
+        static int widthOf (const juce::Font& f, const juce::String& s) { return (int) std::ceil (Theme::textWidth (f, s)); }
+
+        void listen (bool on)
+        {
+            if (on == listening)
+                return;
+            listening = on;
+            if (on)
+                juce::Desktop::getInstance().addGlobalMouseListener (&outside);
+            else
+                juce::Desktop::getInstance().removeGlobalMouseListener (&outside);
+        }
+
+        void layout()
+        {
+            slots.clear();
+            const auto& items = view.getMenu();
+            int y = 0, widest = kMinWidth;
+            for (std::size_t i = 0; i < items.size(); ++i)
+            {
+                const auto& m = items[i];
+                int h = kItemHeight, w = 0;
+                switch (m.kind)
+                {
+                    case MenuItem::Kind::header:
+                        h = kHeaderHeight;
+                        w = widthOf (headerFont(), text (m.label).toUpperCase()) + 16;
+                        break;
+                    case MenuItem::Kind::separator:
+                        h = kSeparatorHeight;
+                        break;
+                    case MenuItem::Kind::item:
+                        h = kItemHeight;
+                        w = widthOf (itemFont(), text (m.label)) + 20;
+                        break;
+                    case MenuItem::Kind::row:
+                    {
+                        h = kRowHeight;
+                        int each = 0;
+                        for (const auto& r : m.row)
+                            each = juce::jmax (each, widthOf (itemFont(), text (r.label)) + 22);
+                        const int n = (int) m.row.size();
+                        w = n * each + 4 * juce::jmax (0, n - 1) + 8;
+                        break;
+                    }
+                }
+                slots.push_back ({ i, y, h });
+                y += h;
+                widest = juce::jmax (widest, w + 2 * kPad);
+            }
+            contentHeight = y + 2 * kPad;
+            boxWidth = widest;
+        }
+
+        void place()
+        {
+            layout();
+            auto* parent = getParentComponent();
+            if (parent == nullptr)
+                return;
+            const int pw = parent->getWidth(), ph = parent->getHeight();
+            const int w = juce::jmin (boxWidth, juce::jmax (60, pw - 16));
+            const int h = juce::jmin (contentHeight, juce::jmax (60, ph - 16));
+            const int x = juce::jlimit (4, juce::jmax (4, pw - w - 4), anchor.x);
+            const int y = juce::jlimit (4, juce::jmax (4, ph - h - 4), anchor.y);
+            box = { kShadowSide, kShadowTop, w, h };
+            setBounds (x - kShadowSide, y - kShadowTop, w + 2 * kShadowSide, h + kShadowTop + kShadowBottom);
+            scroll = juce::jlimit (0, juce::jmax (0, contentHeight - h), scroll);
+        }
+
+        juce::Rectangle<int> slotArea (const Slot& s) const
+        {
+            return { box.getX() + kPad, box.getY() + kPad + s.top - scroll, box.getWidth() - 2 * kPad, s.height };
+        }
+
+        /** One of a row's buttons (as shell.html's .row: 2 px and 4 px of padding, 4 px between). */
+        juce::Rectangle<int> rowButton (const Slot& s, int button) const
+        {
+            const auto& items = view.getMenu();
+            const int n = s.index < items.size() ? juce::jmax (1, (int) items[s.index].row.size()) : 1;
+            const auto area = slotArea (s).reduced (4, 2);
+            const int w = (area.getWidth() - 4 * (n - 1)) / n;
+            return { area.getX() + button * (w + 4), area.getY(), w, area.getHeight() };
+        }
+
+        int itemAt (juce::Point<int> p, int& button) const
+        {
+            button = -1;
+            if (! box.contains (p))
+                return -1;
+            const auto& items = view.getMenu();
+            for (const auto& s : slots)
+            {
+                if (s.index >= items.size() || ! slotArea (s).contains (p))
+                    continue;
+                const auto& m = items[s.index];
+                if (m.kind == MenuItem::Kind::item)
+                    return (int) s.index;
+                if (m.kind == MenuItem::Kind::row)
+                {
+                    for (int i = 0; i < (int) m.row.size(); ++i)
+                        if (rowButton (s, i).contains (p))
+                        {
+                            button = i;
+                            return (int) s.index;
+                        }
+                }
+                return -1;   // a header or a line
+            }
+            return -1;
+        }
+
+        void hoverAt (juce::Point<int> p)
+        {
+            int button = -1;
+            const int index = itemAt (p, button);
+            setHover (index, button);
+        }
+
+        void setHover (int index, int button)
+        {
+            if (index == hoverIndex && button == hoverButton)
+                return;
+            hoverIndex = index;
+            hoverButton = button;
+            repaint();
+        }
+
+        void paintItem (juce::Graphics& g, const MenuItem& m, const Slot& s, juce::Rectangle<int> r) const
+        {
+            const Theme& T = view.theme;
+            const bool hovered = (int) s.index == hoverIndex;
+            switch (m.kind)
+            {
+                case MenuItem::Kind::header:
+                    g.setColour (m.colour ? RollPainter::laneColour (T.colours(), *m.colour) : T (Tok::dim));
+                    g.setFont (headerFont());
+                    g.drawText (text (m.label).toUpperCase(), r.reduced (8, 0), juce::Justification::centredLeft, true);
+                    break;
+                case MenuItem::Kind::separator:
+                    g.setColour (T (Tok::line));
+                    g.fillRect (r.getX(), r.getCentreY(), r.getWidth(), 1);
+                    break;
+                case MenuItem::Kind::item:
+                {
+                    if (hovered && ! m.disabled)
+                    {
+                        juce::Path lit;
+                        lit.addRoundedRectangle (r.toFloat(), 6.0f);
+                        g.setColour (T (Tok::hover));
+                        g.fillPath (lit);
+                    }
+                    g.setColour (T (Tok::txt).withMultipliedAlpha (m.disabled ? 0.45f : 1.0f));
+                    g.setFont (itemFont());
+                    g.drawText (text (m.label), r.reduced (10, 0), juce::Justification::centredLeft, true);
+                    break;
+                }
+                case MenuItem::Kind::row:
+                {
+                    for (int i = 0; i < (int) m.row.size(); ++i)
+                    {
+                        const auto& button = m.row[(std::size_t) i];
+                        const auto rb = rowButton (s, i).toFloat().reduced (0.5f);
+                        juce::Path p;
+                        p.addRoundedRectangle (rb, 6.0f);
+                        if (button.on || (hovered && hoverButton == i && ! button.disabled))
+                        {
+                            g.setColour (button.on ? T (Tok::acc) : T (Tok::hover));
+                            g.fillPath (p);
+                        }
+                        g.setColour (button.on ? T (Tok::acc) : T (Tok::btnb));
+                        g.strokePath (p, juce::PathStrokeType (1.0f));
+                        g.setColour ((button.on ? T (Tok::onacc) : T (Tok::txt)).withMultipliedAlpha (button.disabled ? 0.45f : 1.0f));
+                        g.setFont (itemFont());
+                        g.drawText (text (button.label), rb, juce::Justification::centred, true);
+                    }
+                    break;
+                }
+            }
+        }
+
+        RollView& view;
+        Outside outside { *this };
+        bool listening = false;
+        juce::Point<int> anchor;
+        double openedAt = 0.0;
+        std::vector<Slot> slots;
+        int contentHeight = 0, boxWidth = kMinWidth, scroll = 0;
+        juce::Rectangle<int> box;
+        int hoverIndex = -1, hoverButton = -1;
     };
 
     //==============================================================================================
@@ -256,6 +530,8 @@ namespace sl::ui::roll
 
     RollView::~RollView()
     {
+        // the menu goes first: it sits on MainView and listens to the desktop's mouse
+        menuPanel.reset();
         // the window closed in the middle of a drag: the gesture ends as a release would (its undo step), with
         // nobody left to tell
         onToast = nullptr;
@@ -640,7 +916,7 @@ namespace sl::ui::roll
         // a press while a gesture is still held (a second button) ends that one first
         if (gestures->isDragging())
             gestures->pointerUp();
-        menuItems.clear();
+        closeMenu();   // a press on the roll closes the menu and does what it does (sl-ui.js rollDown)
         const auto p = getGeometry().toRoll ((double) at.x, (double) at.y);
         gestures->pointerDown (p.x, p.y, modsOf (mods), timeMs);
         changed();
@@ -674,73 +950,65 @@ namespace sl::ui::roll
         menuItems = gestures->contextMenu (p.x, p.y, timeMs);
         changed();
         if (menusShown)
-            showMenu (at);
+            showMenu (at, timeMs);
     }
 
     void RollView::visibilityChanged()
     {
-        // hidden in the middle of a drag (the Diagnostics tab took the roll's room): the gesture ends there
+        // hidden in the middle of a drag (the Diagnostics tab took the roll's room): the gesture ends there, and an
+        // open menu closes
         if (! isVisible())
+        {
             release();
+            closeMenu();
+        }
     }
 
     //==============================================================================================
     // The right-click menu: the gestures' items as a JUCE menu (sl-ui.js openMenu).
 
-    void RollView::showMenu (juce::Point<float> at)
+    void RollView::showMenu (juce::Point<float> at, double timeMs)
     {
-        juce::PopupMenu menu;
-        menu.setLookAndFeel (&getLookAndFeel());
-        for (std::size_t i = 0; i < menuItems.size(); ++i)
-        {
-            const auto& m = menuItems[i];
-            const auto label = juce::String::fromUTF8 (m.label.c_str());
-            switch (m.kind)
-            {
-                case MenuItem::Kind::header:
-                {
-                    juce::PopupMenu::Item it;
-                    it.customComponent = new MenuHeader (label, m.colour ? RollPainter::laneColour (theme.colours(), *m.colour) : theme (Tok::dim));
-                    it.isEnabled = false;
-                    menu.addItem (std::move (it));
-                    break;
-                }
-                case MenuItem::Kind::separator:
-                    menu.addSeparator();
-                    break;
-                case MenuItem::Kind::item:
-                    menu.addItem ((int) i + 1, label, ! m.disabled);
-                    break;
-                case MenuItem::Kind::row:
-                {
-                    juce::PopupMenu::Item it;
-                    it.customComponent = new MenuRow (*this, i);
-                    it.isEnabled = true;
-                    menu.addItem (std::move (it));
-                    break;
-                }
-            }
-        }
-        const auto screenArea = canvas->localAreaToGlobal (juce::Rectangle<int> (juce::roundToInt (at.x), juce::roundToInt (at.y), 1, 1));
-        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (canvas.get())
-                                                      .withTargetScreenArea (screenArea)
-                                                      .withMinimumWidth (190)
-                                                      .withMaximumNumColumns (1),
-                            [safe = juce::Component::SafePointer<RollView> (this)] (int result)
-                            {
-                                if (safe != nullptr)
-                                    safe->menuClosed (result);
-                            });
+        // over the whole page (MainView), where the click was, kept inside it
+        juce::Component* parent = menuParent != nullptr ? menuParent.getComponent() : static_cast<juce::Component*> (this);
+        if (menuPanel == nullptr)
+            menuPanel = std::make_unique<MenuPanel> (*this);
+        if (menuPanel->getParentComponent() != parent)
+            parent->addChildComponent (*menuPanel);
+        menuPanel->open (parent->getLocalPoint (canvas.get(), at).roundToInt(), timeMs);
     }
 
-    void RollView::menuClosed (int result)
+    bool RollView::isMenuOpen() const noexcept
     {
-        if (result > 0 && result <= (int) menuItems.size())
-        {
-            const auto item = menuItems[(std::size_t) result - 1];
-            chooseMenuItem (item);
-        }
+        return menuPanel != nullptr && menuPanel->isVisible();
+    }
+
+    void RollView::closeMenu()
+    {
         menuItems.clear();
+        if (menuPanel != nullptr)
+            menuPanel->close();
+    }
+
+    void RollView::setMenuParent (juce::Component* parent) noexcept
+    {
+        menuParent = parent;
+    }
+
+    juce::Component* RollView::getMenuPanel() noexcept
+    {
+        return menuPanel.get();
+    }
+
+    juce::Rectangle<int> RollView::getMenuItemBounds (std::size_t index, int button) const
+    {
+        return menuPanel != nullptr ? menuPanel->boundsOf (index, button) : juce::Rectangle<int>();
+    }
+
+    void RollView::menuHeardPress (const juce::MouseEvent& e)
+    {
+        if (menuPanel != nullptr)
+            menuPanel->pressedSomewhere (e);
     }
 
     void RollView::chooseMenuItem (const MenuItem& item)
@@ -753,6 +1021,14 @@ namespace sl::ui::roll
             menuItems.clear();
         if (gestures->settings().scope != scope)
             saveScope();
+        // the panel follows: it closes with the menu, or shows the new list in the same place
+        if (isMenuOpen())
+        {
+            if (menuItems.empty())
+                menuPanel->close();
+            else
+                menuPanel->itemsChanged();
+        }
         changed();
     }
 
@@ -815,10 +1091,9 @@ namespace sl::ui::roll
 
     void RollView::clearSelection()
     {
-        // sl-ui.js Escape: the selection goes, and so does an open menu
-        if (! menuItems.empty() && menusShown)
-            juce::PopupMenu::dismissAllActiveMenus();
-        menuItems.clear();
+        // sl-ui.js Escape: the selection goes (and a menu, though Escape with a menu open only closes the menu:
+        // MainView::handleKey)
+        closeMenu();
         gestures->clearSelection();
         changed();
     }

@@ -32,6 +32,16 @@ namespace sl::ui
         juce::Font getPopupMenuFont() override;
         void drawPopupMenuBackground (juce::Graphics&, int width, int height) override;
 
+        /** Every JUCE drop-down list StrandLock opens (the Grid, UI Scale, the sound and preset menus) gets the
+            menuKeyGuard: Space closes the list and picks nothing. JUCE's own rule is that Space picks the item under
+            the mouse, as Return does (fix pass R4T-1). */
+        void preparePopupMenuWindow (juce::Component& newWindow) override;
+
+        /** What preparePopupMenuWindow adds to a list's window: it keeps Space (closing the list) and leaves every
+            other key to the list. A JUCE list holds the keyboard while it is open, so Space cannot reach Cubase then
+            anyway; this way it does nothing harmful. */
+        static juce::KeyListener& menuKeyGuard();
+
         void drawScrollbar (juce::Graphics&, juce::ScrollBar&, int x, int y, int width, int height,
                             bool isScrollbarVertical, int thumbStartPosition, int thumbSize,
                             bool isMouseOver, bool isMouseDown) override;
