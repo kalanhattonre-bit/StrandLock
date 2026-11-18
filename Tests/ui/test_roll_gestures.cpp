@@ -20,9 +20,12 @@
 #include "core/Lanes.h"
 #include "core/Music.h"
 #include "core/Seeds.h"
+#include "model/ClipEdit.h"
 #include "model/History.h"
 #include "model/ModelFixture.h"
+#include "model/Node.h"
 #include "model/Normalize.h"
+#include "model/NoteSettings.h"
 #include "model/Presets.h"
 #include "support/Check.h"
 #include "support/FixtureJson.h"
@@ -805,3 +808,101 @@ SL_TEST ("ui", rollDragPublishesWithoutHistory)
     check (historyStill, "no undo step while the drag moves");
     check (oneStep && undone, "the release is one undo step \"Move notes\"; Undo puts the note back and leaves \"Spread notes\" next");
 }
+
+SL_TEST ("ui", rollAddNodeOnFullLane)
+{
+    section ("Roll gestures: a double-click on a lane that already holds 128 nodes drags the new node where the lane keeps it, "
+             "or none; never a place past the end of the list (fix pass F1)");
+
+    // A lane holds at most 128 nodes, so the 129th makes setLaneNodes simplify the list (capNodes). Where the new
+    // node ends up was found by running the prototype's model in node (the C++ cap is the same port): on a ramp
+    // with small steps the list shrinks and the new node moves to an earlier place; on a line that goes 0.1 / 0.9
+    // by turns the new node is the one the cap drops. The prototype's own drag keeps the place the node was
+    // inserted at: past the end of the shorter list (its move throws; in C++ it read and wrote past the vector), or
+    // on another node.
+    struct Case
+    {
+        const char* name;
+        bool jagged;     // 0.1 / 0.9 by turns; else a ramp from 0.1 to 0.9 with steps of 0.02
+        double near;     // where on the note the double-click lands (0..1), between two nodes
+        int lane;        // the lane's node count after the add
+        int at;          // the new node's place in it; -1 when the cap dropped it
+    };
+    const Case cases[] = { { "the ramp near its end", false, 0.9, 91, 83 },
+                           { "the ramp near its start", false, 0.1, 89, 11 },
+                           { "the 0.1 / 0.9 line", true, 0.3, 128, -1 } };
+    for (const auto& c : cases)
+    {
+        model::NodeList full;
+        for (int i = 0; i < model::kMaxNodes; ++i)
+        {
+            const double t = (double) i / 127.0;
+            const double v = c.jagged ? (i % 2 != 0 ? 0.9 : 0.1) : 0.1 + 0.8 * (double) i / 127.0 + (i % 2 != 0 ? 0.02 : 0.0);
+            full.push_back (model::mkNode (t, v, model::NodeShape::linear, 0.0));
+        }
+        const auto made = model::addNote (model::newClip (4.0), 60.0, 0.0, 4.0);
+        const std::string id = made.ids.front();
+        RollRig rig (model::setLaneNodes (made.clip, id, core::LaneId::amp, full));
+        auto& g = rig.gestures();
+        g.setMode (3);
+        rig.doc.setSelection ({ id }, id);
+        g.geometry().setZoom (400.0, 14.0);
+        g.sync();
+        const auto& geo = g.geometry();
+        const auto c0 = rig.doc.current();
+        const model::Note& n = *modelfx::findNote (*c0, id);
+        const model::NodeList& nd = model::noteLane (n, core::LaneId::amp);
+
+        // halfway between the two nodes around `near`, halfway up the lane's band
+        std::size_t j = 0;
+        while (j < nd.size() && ! (nd[j].t > c.near))
+            ++j;
+        if (j == 0 || j >= nd.size())
+            j = nd.size() - 1;
+        const double tm = (nd[j - 1].t + nd[j].t) / 2.0;
+        const double bw = geo.beatWidth();
+        const double x = n.s * bw + n.l * bw * tm, y = geo.baseYAt (n, tm) - 0.5 * geo.rowHeight() * ui::roll::kLaneRows;
+
+        g.pointerDown (x, y, {}, 2000.0);
+        g.pointerUp();
+        g.pointerDown (x, y, {}, 2100.0);
+        const model::NodeList lane1 = model::noteLane (*modelfx::findNote (*rig.doc.current(), id), core::LaneId::amp);
+        int at = -1;
+        for (std::size_t i = 0; i < lane1.size(); ++i)
+            if (fixture::withinAbs (lane1[i].t, tm, 1e-9))
+                at = (int) i;
+        const auto an = rig.doc.rollState().activeNode;
+        const bool capped = (int) lane1.size() == c.lane && at == c.at;
+        const bool picked = c.at >= 0 ? an.has_value() && an->k == c.at && an->len == (int) lane1.size() : ! an.has_value();
+        const bool inRange = ! an.has_value() || (an->k >= 0 && an->k < (int) lane1.size());
+
+        // a move: the new node goes up with the pointer and nothing else changes (when the cap dropped it, nothing
+        // moves at all). Before the fix the drag's place could lie past the end of the list; the test then stops
+        // here rather than read past the vector.
+        bool moved = false;
+        if (inRange)
+        {
+            g.pointerMove (x + 1.0, y - 6.0, {});
+            const model::NodeList lane2 = model::noteLane (*modelfx::findNote (*rig.doc.current(), id), core::LaneId::amp);
+            bool othersStay = lane2.size() == lane1.size();
+            for (std::size_t i = 0; othersStay && i < lane1.size(); ++i)
+                if ((int) i != c.at)
+                    othersStay = fixture::same (lane2[i].t, lane1[i].t) && fixture::same (lane2[i].v, lane1[i].v);
+            const bool newOneUp = c.at < 0 || lane2[(std::size_t) c.at].v > lane1[(std::size_t) c.at].v;
+            moved = othersStay && newOneUp;
+        }
+        g.pointerUp();
+        const bool laneChanged = ! model::sameClip (*rig.doc.current(), *c0);
+        const bool steps = laneChanged ? rig.steps == 1 && rig.labels.back() == "Add node" : rig.steps == 0;
+        const bool toastOk = c.at >= 0 || rig.lastToast() == std::string ("A lane holds at most 128 nodes, so this one has no room for another");
+        const std::string nodeText = an.has_value() ? fmt ("is %d of %d", an->k, an->len) : std::string ("is none");
+        const char* const moveText = ! inRange ? "was not tried (the drag's place lay past the end of the list)"
+                                   : moved     ? "moved the new node alone"
+                                               : "moved something else";
+        check (capped && picked && inRange && moved && steps && toastOk && laneChanged == (c.at >= 0),
+               fmt ("%s: after the double-click the lane holds %d nodes (%d expected) with the new node at %d (%d expected); the inspector's "
+                    "node %s; a move %s; %d undo steps%s", c.name, (int) lane1.size(), c.lane, at, c.at, nodeText.c_str(), moveText,
+                    rig.steps, c.at < 0 ? (toastOk ? "; the toast says the lane is full" : "; NO toast") : ""));
+    }
+}
+

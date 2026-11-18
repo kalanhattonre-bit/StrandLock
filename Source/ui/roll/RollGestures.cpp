@@ -26,6 +26,13 @@ namespace sl::ui::roll
 
         double clampD (double v, double a, double b) noexcept { return v < a ? a : v > b ? b : v; }
         double dist (double x, double y, Point p) noexcept { return jsHypot (x - p.x, y - p.y); }
+
+        /** The same node, value for value: setLaneNodes keeps every node it does not drop exactly as it was. */
+        bool sameNode (const model::Node& a, const model::Node& b) noexcept
+        {
+            const std::equal_to<double> same;
+            return same (a.t, b.t) && same (a.v, b.v) && a.shape == b.shape && same (a.bend, b.bend);
+        }
         std::string num (double v) { return core::jsNumberToString (v); }
 
         /** Math.sign (x) || 1: the sign, and 1 for 0, -0 and NaN. */
@@ -638,6 +645,8 @@ namespace sl::ui::roll
                 const double nx = x - d.gx, ny = y - d.gy;
                 model::NodeList nd = d.nodes0;
                 const int k = d.k, last = (int) nd.size() - 1;
+                if (k < 0 || k > last)
+                    break;   // a node a full lane had no room for: nothing to move (fix pass F1)
                 const double x0 = n->s * bw, x1 = (n->s + n->l) * bw;
                 double t = (nx - x0) / std::max (1.0, x1 - x0);
                 t = k == 0 ? 0.0 : k == last ? 1.0 : clampD (t, nd[(std::size_t) k - 1].t + 0.004, nd[(std::size_t) k + 1].t - 0.004);
@@ -846,20 +855,50 @@ namespace sl::ui::roll
         const double v = onLine ? model::evalNodes (src, t) : geo.laneValue (n, lane, t, y);
         const auto shape = prev.shape == model::NodeShape::step ? model::NodeShape::step
                          : prev.shape == model::NodeShape::linear ? model::NodeShape::linear : model::NodeShape::smooth;
-        nd.insert (nd.begin() + k, model::mkNode (t, clampD (v, 0.0, 1.0), shape, 0.0));
+        const model::Node added = model::mkNode (t, clampD (v, 0.0, 1.0), shape, 0.0);
+        nd.insert (nd.begin() + k, added);
         const std::string id = n.id;
-        show (model::setLaneNodes (*clip(), id, lane, nd));
-        host.doc.setActiveNode (doc::ActiveNode { id, lane, k, 0 });
+        const auto out = host.doc.apply (model::setLaneNodes (*clip(), id, lane, nd));
+        geo.setClip (clip());
+        if (out.refused)
+        {
+            toast (out.message);
+            return;
+        }
+
+        // A lane holds at most 128 nodes: on a full lane setLaneNodes simplifies the list (capNodes), which can move
+        // the new node to an earlier place or drop it. The drag and the inspector take the place it has in the lane
+        // as stored, or none, so a move never reaches past the end of the list (fix pass F1; in the prototype that
+        // move throws, or drags another node).
         Drag d;
         d.t = Drag::Type::node;
         d.id = id;
         d.lane = lane;
-        d.k = k;
+        d.k = -1;
         d.clip0 = clip();
         if (const model::Note* m = noteIn (*d.clip0, id))
             d.nodes0 = model::noteLane (*m, lane);
+        if (k < (int) d.nodes0.size() && sameNode (d.nodes0[(std::size_t) k], added))
+        {
+            d.k = k;   // the usual case: the lane had room
+        }
         else
-            d.nodes0 = nd;
+        {
+            for (std::size_t i = 0; i < d.nodes0.size() && d.k < 0; ++i)
+                if (sameNode (d.nodes0[i], added))
+                    d.k = (int) i;
+        }
+        if (d.k >= 0)
+        {
+            host.doc.setActiveNode (doc::ActiveNode { id, lane, d.k, 0 });
+        }
+        else
+        {
+            host.doc.setActiveNode (std::nullopt);
+            toast ("A lane holds at most " + std::to_string (model::kMaxNodes) + " nodes, so this one has no room for another");
+        }
+        // the release is one undo step "Add node" when the lane changed (the cap may simplify it even when the new
+        // node did not stay), as in the prototype
         d.label = "Add node";
         d.force = true;
         drag = std::move (d);

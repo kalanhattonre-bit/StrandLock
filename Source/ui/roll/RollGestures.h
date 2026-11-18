@@ -217,7 +217,7 @@ namespace sl::ui::roll
             Type t = Type::box;
             std::string id;
             core::LaneId lane = core::LaneId::pitch;
-            int k = 0;
+            int k = 0;                    // the node or segment; -1: a node a full lane kept no place for (moves nothing)
             model::NodeList nodes0;
             model::ClipPtr clip0;
             std::string label;
