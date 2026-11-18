@@ -367,7 +367,10 @@ d3424c6 (main).
 - Done: CI green on dd4da74 (run 44245520234, figures below), every picture of its artifact looked at; the
   inspector's boxes now give way on a short line (900 px cut the value box); the Cubase checklist's M4 section; the
   M4 summary.
-- In progress: CI on this commit, then the notes with its figures, then the fast-forward of main.
+- Done: CI green on 54e5481 (run 44248819010: the boxes that give way; figures below), its pictures looked at
+  (at 900 px the inspector now shows "0 semitones" whole).
+- In progress: CI on this commit (these notes, and Escape closing an open right-click menu), then the fast-forward
+  of main.
 
 ### Files
 
@@ -437,6 +440,7 @@ d3424c6 (main).
 - **The Keys button toasts what the keys do** (sl-ui.js), without the prototype's A to K and Z / X (the live
   keyboard, M8).
 - **The selection text keeps the room of "4096 notes selected"**, so the buttons after it never move.
+- **Escape closes an open right-click menu** as it clears the selection (sl-ui.js: Escape calls closeMenu).
 - **Notes snap to the grid; to the scale only with Scale lock**, which has no control until M7 (Key and Scale): the
   gestures already snap to the scale when the instrument's scale lock is on.
 - **The pictures, looked at** (run 44245520234: all 55 pictures of the artifact, the 8 new ones and every M0, M2
@@ -492,6 +496,10 @@ d3424c6 (main).
 - The roll view at 1100 x 680 with the Sample tab open: 1076 x 204 (canvas 1026 x 174; R2 had 1076 x 158), the
   first view centres C4 with 13 of the 26 notes in view; at 900 x 560 with the tabs folded the canvas is 826 x 171
   (R2 had 826 x 203).
+- Run 44248819010 on 54e5481 (the inspector's boxes giving way), green on every job and step: Windows Release 1646
+  checks in 265 tests, Linux Release 1638 in 265, the sanitizers' groups 808 in 139 and 142 in 20, the Debug-CRT
+  allocation run 38 in 7 (0 JUCE assertions), the Debug snapshots 0 JUCE assertions, pluginval strictness 10
+  SUCCESS, the fixture check passed (26 files, 4.87 MB). Full repaint 32.6 ms on Windows and 19.1 ms on Linux.
 - Drawing cost (R2's tests, unchanged code): a full repaint of the 512-note clip 31.3 ms on Windows and 20.2 ms on
   Linux (software, target 50 ms), Direct2D 28.1 ms; moving one note marks 3 notes' bounds and its partial repaint
   equals a full one with both renderers (0 pixels differ).

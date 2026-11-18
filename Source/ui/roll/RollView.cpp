@@ -815,6 +815,9 @@ namespace sl::ui::roll
 
     void RollView::clearSelection()
     {
+        // sl-ui.js Escape: the selection goes, and so does an open menu
+        if (! menuItems.empty() && menusShown)
+            juce::PopupMenu::dismissAllActiveMenus();
         menuItems.clear();
         gestures->clearSelection();
         changed();
