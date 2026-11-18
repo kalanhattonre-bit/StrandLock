@@ -879,7 +879,7 @@ namespace sl::ui
 
         // The selection row, the selection bar while it shows (updateBarHeight: notes selected or a drawer open) and the
         // inspector's line (always there). An open drawer takes at most what leaves the roll a quarter of the window
-        // (140 to 400 px; at least 60 px for the drawer, which scrolls), as the prototype's fitLayout shares the room;
+        // (140 to 400 px; at least 62 px for the drawer, which scrolls), as the prototype's fitLayout shares the room;
         // the pane keeps a scrolling row when a tab is open. A new width can change the drawer's height: it takes it now
         // unless the roll holds the bar's room still.
         {

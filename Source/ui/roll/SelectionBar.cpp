@@ -621,7 +621,7 @@ namespace sl::ui::roll
         addChildComponent (*lineGap);
 
         drawerView.setScrollBarsShown (true, false);
-        drawerView.setScrollBarThickness (8);
+        drawerView.setScrollBarThickness (drawerScrollBar);
         addChildComponent (drawerView);
         sync();
     }
@@ -753,7 +753,7 @@ namespace sl::ui::roll
 
     void SelectionBar::setDrawerMax (int px)
     {
-        drawerMax = juce::jlimit (60, drawerMaxHeight, px);
+        drawerMax = juce::jlimit (drawerMinHeight, drawerMaxHeight, px);
     }
 
     void SelectionBar::drawerHeightChanged()

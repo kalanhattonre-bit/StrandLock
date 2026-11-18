@@ -263,9 +263,15 @@ namespace sl::ui::roll
 
         static constexpr int lineHeight = 30;
         static constexpr int drawerPadX = 8, drawerPadY = 7, drawerMaxHeight = 320;
+        static constexpr int drawerScrollBar = 8;
+
+        /** The least room an open drawer takes. The prototype's fitLayout keeps 60 px (PART_MIN); this is 62, so a
+            drawer that scrolls shows its scroll bar: JUCE draws no thumb on a bar shorter than 32 px plus its smallest
+            thumb (twice the bar's thickness), and the drawer's padding takes 14 px. */
+        static constexpr int drawerMinHeight = 2 * drawerPadY + 32 + 2 * drawerScrollBar;
 
         /** The most the open drawer may take (MainView: what leaves the roll its room on this window); a taller drawer
-            scrolls. At least 60 px, as the prototype's fitLayout keeps it (PART_MIN). */
+            scrolls. At least drawerMinHeight. */
         void setDrawerMax (int px);
         int getDrawerMax() const noexcept { return drawerMax; }
 
@@ -280,6 +286,9 @@ namespace sl::ui::roll
 
         /** The drawer's box (this component's pixels), or empty when none is open. */
         juce::Rectangle<int> getDrawerArea() const noexcept { return drawerArea; }
+
+        /** The view that scrolls a drawer taller than its room. */
+        juce::Viewport& getDrawerView() noexcept { return drawerView; }
 
         void paint (juce::Graphics&) override;
         void resized() override;

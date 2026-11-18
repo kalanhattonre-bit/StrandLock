@@ -817,6 +817,51 @@ SL_TEST ("ui", selectionBarInTheEditor)
     }
 }
 
+SL_TEST ("ui", selectionBarSmallWindow)
+{
+    section ("The selection bar on a small window (900 x 560, the tabs folded): the Tools drawer with Walk's panel keeps its least room and "
+             "scrolls, and its scroll bar shows (JUCE draws no thumb on a bar shorter than 32 px plus twice its thickness)");
+
+    StrandLockProcessor proc;
+    {
+        auto& s = proc.getUserSettings();
+        s.setTheme (state::Theme::dark);
+        s.setUiScalePercent (100);
+        s.setKeysDefault (false);
+    }
+    {
+        StrandLockEditor editor (proc);
+        editor.setLogicalSize (900, 560);
+        auto& view = editor.getView();
+        auto& roll = view.getRoll();
+        auto& bar = view.getSelectionBar();
+        roll.setMenusShown (false);
+        view.setFolded (true);
+        editor.refreshNow();
+        roll.selectAll();
+        view.setMode (5);
+        bar.getDrawerButton (ToolSettings::Drawer::tools).onClick();
+        auto* tools = dynamic_cast<ui::roll::ToolsDrawer*> (bar.getOpenDrawer());
+        if (tools != nullptr)
+            tools->getButton ("Walk" + juce::String::charToString ((juce::juce_wchar) 0x2026)).onClick();
+        editor.refreshNow();
+
+        auto& vp = bar.getDrawerView();
+        auto& sb = vp.getVerticalScrollBar();
+        const auto* content = vp.getViewedComponent();
+        const int box = bar.getDrawerArea().getHeight();
+        const int contentHeight = content != nullptr ? content->getHeight() : 0;
+        const int thumbFrom = 32 + 2 * vp.getScrollBarThickness();
+        const bool scrolls = content != nullptr && contentHeight > vp.getHeight();
+        const bool barShown = sb.isVisible() && sb.getHeight() >= thumbFrom;
+        check (tools != nullptr && tools->getPanel() != nullptr && scrolls && barShown && box >= ui::roll::SelectionBar::drawerMinHeight,
+               fmt ("Walk's panel open: the drawer's box is %d px (at least %d), its contents %d px in a %d px view, so it scrolls; its scroll bar is "
+                    "%s and %d px long (a thumb from %d px); the roll's canvas keeps %d px",
+                    box, ui::roll::SelectionBar::drawerMinHeight, contentHeight, vp.getHeight(), sb.isVisible() ? "shown" : "hidden", sb.getHeight(),
+                    thumbFrom, roll.getCanvas().getHeight()));
+    }
+}
+
 //==================================================================================================
 // Pictures for review: the bar with the Connect drawer, the Tools drawer with Walk's panel, and Chop refused.
 
