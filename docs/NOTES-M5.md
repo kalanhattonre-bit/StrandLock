@@ -44,13 +44,17 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
 
 ### Decisions and deviations
 
-- **The bar's line is always there.** The prototype shows the bar only while notes are selected (or a drawer is
-  open), and moves the roll back under the mouse while the bars above it change (sl-ui.js keepRollStill). Here, as
-  M4 did for the inspector's line, the line stays: with nothing selected and no drawer open it says how to select
-  ("Select notes (click one, or drag a box around several) to use the selection tools."), so selecting a note never
-  moves the roll under the mouse. The roll gives up the line's 30 px. An open drawer takes room under the line until
-  its button closes it (a click on the bar, as in the prototype); with nothing selected it stays where it is, faded
-  and asleep, as the prototype keeps it.
+- **The bar shows while notes are selected or a drawer is open, as in the prototype, and the roll stays still under
+  the mouse.** The prototype hides the bar when nothing is selected and, while the pointer is on the roll, lets the
+  bars above it grow but not shrink, scrolling the roll by as much as they grew (sl-ui.js holdStart, keepRollStill).
+  `MainView::updateBarHeight` does the same: the bar's room grows at once (the roll scrolls down by the same amount
+  when the mouse is on the roll or a gesture is held, so the notes stay where they were under the mouse, and a drag
+  goes on where it was), and shrinks only once the mouse has left the roll (the editor's timer). While it is held,
+  the bar's line says how to select ("Select notes (click one, or drag a box around several) to use the selection
+  tools."). A first try kept the line always there (as M4 keeps the inspector's line), which took 30 px from the roll
+  on every window and cut the 900 x 560 roll to 141 px (M4's snapshot test wants 150; run 44302433699); with nothing
+  selected the roll now has M4's room. An open drawer takes room under the line until its button closes it; with
+  nothing selected it stays where it is, faded and asleep, as the prototype keeps it.
 - **Connect and Tools are drawers, as in the prototype** (sl-ui-panels.js DRAWERS.connect and DRAWERS.tools): their
   buttons are the plan's "direct actions". Shapes, Pattern, Random and Turn into nodes are S2's: their buttons are on
   the line and toast "Shapes, Pattern, Random and Turn into nodes arrive in the next build".
@@ -82,8 +86,8 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
 
 ### For the architect
 
-- The bar's line costs the roll 30 px on every window; on a small window with a tab open the roll is small. Decision
-  6 (S3) folds the tabs on a first open.
+- While notes are selected the bar's line takes 30 px from the roll (more with a drawer open); on a small window
+  with a tab open the roll is small then. Decision 6 (S3) folds the tabs on a first open.
 - The inspector's group value for several picked nodes (sl-ui-panels.js commitNodeValue with a group) is left for a
   later part (S2 or the fix pass); the Nodes switch works without it.
 

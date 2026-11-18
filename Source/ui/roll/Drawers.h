@@ -24,6 +24,11 @@ namespace sl::ui::roll
 {
     class RollView;
 
+    /** No control holds the keyboard (M0's rule, StrandLockEditor::applyFocusRules): a component made after the editor
+        applied it (a drawer, a tool's panel) is set the same way, with everything in it. JUCE's buttons and lists want
+        the keyboard by default. */
+    void noKeyboardFocus (juce::Component& c);
+
     //==============================================================================================
     // Small controls of the drawers (not parameters: the bar's own settings).
 
@@ -55,7 +60,7 @@ namespace sl::ui::roll
     class ArrowButton final : public FlatButton
     {
     public:
-        ArrowButton (const Theme&, const juce::String& text);
+        ArrowButton (const Theme&, const juce::String& buttonText);
 
         void setOpen (bool isOpen);
         int widthWithArrow() const;

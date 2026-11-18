@@ -608,6 +608,7 @@ SL_TEST ("ui", boxSelectInTheEditor)
         auto& view = editor.getView();
         auto& roll = view.getRoll();
         roll.setMenusShown (false);
+        view.setFolded (true);   // the tabs folded: only the selection bar's line moves the roll
         proc.editClip ("Start", clip64 (6404));
         editor.refreshNow();
 
@@ -629,15 +630,46 @@ SL_TEST ("ui", boxSelectInTheEditor)
         const double vx0 = 2.0, vy0 = 2.0, vx1 = (double) canvas.getWidth() - 3.0, vy1 = (double) canvas.getHeight() - 3.0;
         const auto r0 = geo.toRoll (vx0, vy0), r1 = geo.toRoll (vx1, vy1);
         const bool startEmpty = geo.hitNote (*proc.getDocument().current(), proc.getDocument().rollState(), r0.x, r0.y) == nullptr;
+        const int top0 = roll.getY();
+        const double scroll0 = geo.scrollY();
         canvas.mouseDown (event (vx0, vy0, juce::ModifierKeys::leftButtonModifier, 100000.0));
         canvas.mouseDrag (event (vx1, vy1, juce::ModifierKeys::leftButtonModifier, 100050.0));
         const bool boxShown = roll.getPaintState().box.has_value();
+        // the box selected notes: the selection bar's line came in above the roll, and the roll scrolled by as much,
+        // so its notes stayed where they were under the mouse
+        const int grew = roll.getY() - top0;
+        const double scrolled = geo.scrollY() - scroll0;
         canvas.mouseUp (event (vx1, vy1, 0, 100100.0));
         const auto want = expectedHits (geo, *proc.getDocument().current(), false, r0.x, r0.y, r1.x, r1.y);
         const auto got = proc.getDocument().rollState().selected;
         const juce::String text = view.getSelectionText();
         check (startEmpty && boxShown && want.size() >= 2 && got == want && text == juce::String ((int) want.size()) + " notes selected",
                fmt ("a drag across the canvas draws the box and selects the %d notes it meets (\"%s\")", (int) want.size(), text.toRawUTF8()));
+        check (grew == ui::roll::SelectionBar::lineHeight && juce::exactlyEqual (scrolled, (double) grew) && view.getSelectionBar().isVisible()
+                   && ! view.getSelectionBar().isIdleShown(),
+               fmt ("the selection bar's line came in with the selection (the roll moved down %d px) and the roll scrolled %.0f px, so the notes "
+                    "stayed still under the box", grew, scrolled));
+
+        // a click on empty space clears the selection: the line goes once nothing holds the roll (here at once)
+        double cx = vx0, cy = vy0;
+        for (int i = 0; i < 30; ++i)
+        {
+            const auto p = geo.toRoll (vx0 + 7.0 * i, vy0 + 1.0 * (i % 5));
+            if (geo.hitNote (*proc.getDocument().current(), proc.getDocument().rollState(), p.x, p.y) == nullptr)
+            {
+                cx = vx0 + 7.0 * i;
+                cy = vy0 + 1.0 * (i % 5);
+                break;
+            }
+        }
+        canvas.mouseDown (event (cx, cy, juce::ModifierKeys::leftButtonModifier, 102000.0));
+        canvas.mouseUp (event (cx, cy, 0, 102040.0));
+        check (proc.getDocument().rollState().selected.empty() && roll.getY() == top0 && view.getSelectionBar().getHeight() == 0,
+               fmt ("a click on empty space clears the selection and the bar's line goes (the roll back at %d, the bar %d px)", roll.getY(),
+                    view.getSelectionBar().getHeight()));
+        // select them again for what follows
+        proc.getDocument().setSelection (want, std::nullopt);
+        roll.edited();
 
         // the Nodes button: greyed in Build, lit in a lane mode, and the hint says what to do; N with Keys on switches it
         const bool greyInBuild = ! view.getNodesButton().isEnabled();
@@ -691,8 +723,10 @@ namespace
             roll.setScroll (0.0, geo.cy (66.0) - geo.viewHeight() / 2.0);
             if (nodes)
             {
+                // eight notes selected (at most 16 show their nodes), Volume, the Nodes switch on
                 view.setMode (3);
-                roll.selectAll();
+                proc.getDocument().setSelection ({ "sd-1", "sd-2", "sd-3", "sd-4", "sd-5", "sd-6", "sd-7", "sd-8" }, std::string ("sd-1"));
+                roll.edited();
                 view.getNodesButton().onClick();
             }
             // a box from the first empty point near the top left of the view, down and right across the notes (not let
@@ -712,7 +746,7 @@ namespace
                 }
             }
             g.pointerDown (x0, y0, {}, 10000.0);
-            g.pointerMove (x0 + 4.2 * geo.beatWidth(), y0 + 0.6 * geo.viewHeight(), {});
+            g.pointerMove (x0 + (nodes ? 2.6 : 4.2) * geo.beatWidth(), y0 + (nodes ? 0.9 : 0.6) * geo.viewHeight(), {});
             if (nodes)
                 g.pointerUp();
             roll.edited();

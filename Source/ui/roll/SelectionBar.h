@@ -262,7 +262,12 @@ namespace sl::ui::roll
         std::function<void()> onHeightChange;
 
         static constexpr int lineHeight = 30;
-        static constexpr int drawerPadX = 8, drawerPadY = 7, drawerMaxHeight = 220;
+        static constexpr int drawerPadX = 8, drawerPadY = 7, drawerMaxHeight = 320;
+
+        /** The most the open drawer may take (MainView: what leaves the roll its room on this window); a taller drawer
+            scrolls. At least 60 px, as the prototype's fitLayout keeps it (PART_MIN). */
+        void setDrawerMax (int px);
+        int getDrawerMax() const noexcept { return drawerMax; }
 
         // For the tests.
         FlatButton& getDrawerButton (ToolSettings::Drawer d) noexcept;
@@ -300,6 +305,7 @@ namespace sl::ui::roll
         juce::Rectangle<int> drawerArea;
         bool idle = true;
         int lastWantedHeight = -1;
+        int drawerMax = drawerMaxHeight;
 
         /** What the open drawer showed at its last sync: sync () runs on the editor's timer, and the drawer is synced
             again only when one of these changed (its own controls sync it themselves). */

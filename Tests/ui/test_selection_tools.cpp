@@ -524,8 +524,9 @@ SL_TEST ("ui", selectionToolsSweep)
     note (fmt ("%d runs (%d actions x the fixture clips x 2 selections), %d changed the clip%s%s", runs, (int) actions.size(), changed,
                firstBad.empty() ? "" : "; first other: ", firstBad.c_str()));
     check (runs >= 250 && same == runs, fmt ("%d of %d runs: the bar's action gives the bytes of the direct model call", same, runs));
-    check (stepsRight == runs && changed >= runs * 3 / 4, fmt ("%d of %d runs: 1 undo step with the bar's label when the clip changed (%d did), none "
-                                                               "otherwise", stepsRight, runs, changed));
+    check (stepsRight == runs && changed >= runs / 2 && runs - changed >= 20,
+           fmt ("%d of %d runs: 1 undo step with the bar's label when the clip changed (%d did), none otherwise (%d)", stepsRight, runs, changed,
+                runs - changed));
 }
 
 //==================================================================================================
@@ -654,23 +655,27 @@ SL_TEST ("ui", selectionToolsToastsAndLanes)
            fmt ("Connect: \"%d slides among the selected notes\"; Disconnect takes them away; one note alone: \"No slides made...\"; Re-roll moves "
                 "the seed to 2 (\"Connect: random (re-rolled)\")", links));
 
-    // Legato: one chord alone has nowhere to go; notes already touching have nothing to stretch
-    ToolRig l (lead);
-    const auto chord = model::selectSimilar (lead, "vl-d1", model::SimilarKind::bar, model::Ids::all());
-    std::vector<std::string> first;
-    for (const auto& n : lead.notes)
-        if (juce::exactlyEqual (n->s, lead.notes.front()->s))
-            first.push_back (n->id);
-    l.select (first);
+    // Legato: one chord alone has nowhere to go; a gap before the next chord stretches; notes already touching have
+    // nothing to stretch
+    model::Clip gap = model::newClip (4.0);
+    gap.notes.push_back (std::make_shared<const model::Note> (model::mkNote (60.0, 0.0, 1.0, "lg-a")));
+    gap.notes.push_back (std::make_shared<const model::Note> (model::mkNote (64.0, 0.0, 1.0, "lg-b")));
+    gap.notes.push_back (std::make_shared<const model::Note> (model::mkNote (67.0, 2.0, 1.0, "lg-c")));
+    ToolRig l (gap);
+    l.select ({ "lg-a", "lg-b" });
     l.tools->legato();
-    const bool oneChord = l.rig.steps == 0 && l.lastToast() == "No later selected note to stretch to: select the notes that follow as well";
-    l.select (allIds (lead));
+    const std::string t1 = l.lastToast();
+    const bool oneChord = l.rig.steps == 0 && t1 == "No later selected note to stretch to: select the notes that follow as well";
+    l.select (allIds (gap));
     l.tools->legato();
-    const bool stretched = l.rig.steps == 1 && l.lastToast() == "Each note now reaches the next one: try Connect \xe2\x96\xb8 Nearest";
+    const std::string t2 = l.lastToast();
+    const bool stretched = l.rig.steps == 1 && t2 == "Each note now reaches the next one: try Connect \xe2\x96\xb8 Nearest"
+                           && l.bytes() == model::encodeClip (model::legato (gap, l.tools->ids()));
     l.tools->legato();
-    const bool touching = l.rig.steps == 1 && l.lastToast() == "Already touching: nothing to stretch";
-    check (oneChord && stretched && touching && ! chord.empty(),
-           "Legato: one chord alone says to select the notes that follow; the whole clip stretches (one step); again: already touching");
+    const std::string t3 = l.lastToast();
+    const bool touching = l.rig.steps == 1 && t3 == "Already touching: nothing to stretch";
+    check (oneChord && stretched && touching,
+           fmt ("Legato: one chord alone: \"%s\"; the chord and a later note: one step, \"%s\"; again: \"%s\"", t1.c_str(), t2.c_str(), t3.c_str()));
 
     // Select similar: the selection only, with a toast; no undo step
     ToolRig s (lead);
@@ -681,14 +686,14 @@ SL_TEST ("ui", selectionToolsToastsAndLanes)
            fmt ("Select similar, same pitch as vl-a3: %d notes selected, the primary stays (%s), \"%s\", no undo step", (int) sel.selected.size(),
                 sel.primary.c_str(), s.lastToast().c_str()));
 
-    // the lane tools in Build act on the bar's Lane and show its mode
+    // the lane tools in Build act on the bar's Lane and show its mode (Volume: flat at 0.8, it flips to 0.2)
     ToolRig b (lead);
     b.select (allIds (lead));
-    b.settings().lane = core::LaneId::formant;
+    b.settings().lane = core::LaneId::amp;
     b.tools->flip();
     const auto st = b.rig.doc.rollState();
-    check (st.mode == 6 && b.lastLabel() == "Flip (Formant)" && b.bytes() == model::encodeClip (model::flipLane (lead, b.tools->ids(), core::LaneId::formant)),
-           fmt ("Flip in Build acts on the Lane (Formant) and shows its mode (%d): \"%s\"", st.mode, b.lastLabel().c_str()));
+    check (st.mode == 3 && b.lastLabel() == "Flip (Volume)" && b.bytes() == model::encodeClip (model::flipLane (lead, b.tools->ids(), core::LaneId::amp)),
+           fmt ("Flip in Build acts on the Lane (Volume) and shows its mode (%d): \"%s\"", st.mode, b.lastLabel().c_str()));
     b.settings().lane = core::LaneId::heads;
     b.rig.gestures().setMode (1);
     b.tools->pickLane (core::LaneId::heads);
@@ -788,6 +793,18 @@ SL_TEST ("ui", selectionBarInTheEditor)
                fmt ("Tools: Walk... opens Walk's panel, its Walk button is one step (%d); a drag of Last note is live and its release one step (%d); "
                     "Chop... and Chop make \"Chop 1/16\" (%d); Select similar opens its menu and Flip the selection runs (%d)", (int) walked,
                     (int) slid, (int) chopped, (int) menu));
+
+        // M0's rule holds for what the bar makes later: no control in an open drawer or tool panel wants the keyboard
+        std::function<int (const juce::Component&)> wanting = [&wanting] (const juce::Component& c)
+        {
+            int n = c.getWantsKeyboardFocus() ? 1 : 0;
+            for (auto* child : c.getChildren())
+                n += wanting (*child);
+            return n;
+        };
+        const int wanters = wanting (bar);
+        check (wanters == 0 && ! editor.isKeysOn(), fmt ("with Keys off no control of the bar, its drawer or its tool panel wants the keyboard (%d do)",
+                                                          wanters));
 
         // the Lane list picks a mode; the S2 drawers say they arrive later
         bar.getLaneBox().setSelectedId (core::laneIndex (core::LaneId::hollow) + 1, juce::sendNotificationSync);

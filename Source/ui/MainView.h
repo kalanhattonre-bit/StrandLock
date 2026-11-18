@@ -159,8 +159,16 @@ namespace sl::ui
         void saveUiState();
         void layoutPane();
         void layoutSelectionRow();
-        int selectionAreaHeight() const;   // the selection row, the selection bar (and its drawer) and the inspector
         void showLane (core::LaneId lane); // the selection bar's Lane picks a mode
+
+        /** The selection bar's room follows what it wants (its line while notes are selected or a drawer is open, the
+            drawer under it), as the prototype's bar shows and hides. While the mouse is on the roll (or a gesture is
+            held) it may grow but not shrink, and when it grows the roll scrolls by as much, so the notes stay where
+            they are under the mouse (sl-ui.js holdStart and keepRollStill); it settles when the mouse leaves the roll
+            (the editor's timer). */
+        void updateBarHeight();
+        bool rollHeld();
+
         void disarmClear();
         int toastTop() const noexcept;   // where the toast sits
 
@@ -208,6 +216,7 @@ namespace sl::ui
         juce::String dropText;
         int ticks = 0;
         double clearArmedAt = -1.0;   // when Clear all was clicked once (milliseconds), or -1
+        int barHeight = 0;            // the room the selection bar has now (updateBarHeight)
 
         // Areas from resized(), for paint().
         juce::Rectangle<int> card, topBarArea, bannerArea, modeBarArea, selRowArea, tabsArea, paneArea, hintArea;

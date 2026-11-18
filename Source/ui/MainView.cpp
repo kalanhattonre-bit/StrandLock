@@ -277,11 +277,7 @@ namespace sl::ui
             addAndMakeVisible (*b);
         // the selection bar (M5) under the selection row: a drawer that opens or closes moves what is below it
         addAndMakeVisible (selectionBar);
-        selectionBar.onHeightChange = [this]
-        {
-            resized();
-            repaint();
-        };
+        selectionBar.onHeightChange = [this] { updateBarHeight(); };
         roll.getTools().onShowLane = [this] (core::LaneId lane) { showLane (lane); };
         addAndMakeVisible (inspector);
 
@@ -523,8 +519,10 @@ namespace sl::ui
         multiButton.setToggleState (g.settings().multi, juce::dontSendNotification);
         nodesButton.setToggleState (g.settings().nodes, juce::dontSendNotification);
 
-        // the selection bar (M5): its Lane, its drawer and what the drawer says about the selection now
+        // the selection bar (M5): its Lane, its drawer and what the drawer says about the selection now; its room (it
+        // settles here, on the editor's timer, once the mouse has left the roll)
         selectionBar.sync();
+        updateBarHeight();
 
         // Undo and Redo (sl-ui.js historyChanged): enabled when there is a step, the step's name in the tooltip
         const auto undoLabel = processor.undoLabel(), redoLabel = processor.redoLabel();
@@ -759,12 +757,28 @@ namespace sl::ui
         paneContent.setSize (inner, h);
     }
 
-    int MainView::selectionAreaHeight() const
+    bool MainView::rollHeld()
     {
-        // the selection row, the selection bar's line (always there, so selecting never moves the roll) and its open
-        // drawer, and the inspector's line
-        const int barWidth = juce::jmax (100, card.getWidth() - 2 * kBarPadX);
-        return kSelRowHeight + selectionBar.heightFor (barWidth) + kInspectorRowHeight;
+        // the mouse is on the roll, or a gesture is held there (a drag that started on the roll)
+        return roll.isMouseOverOrDragging (true) || roll.getGestures().isDragging();
+    }
+
+    void MainView::updateBarHeight()
+    {
+        const int want = selectionBar.heightFor (juce::jmax (100, card.getWidth() - 2 * kBarPadX));
+        if (want == barHeight)
+            return;
+        const bool held = rollHeld();
+        if (want < barHeight && held)
+            return;   // settles when the mouse leaves the roll (tick)
+        const int rollTop = roll.getY();
+        barHeight = want;
+        resized();
+        repaint();
+        // the bar grew (or shrank) above the roll under the mouse: the roll scrolls by as much, so its notes stay put
+        if (held && roll.isVisible())
+            if (const int dy = roll.getY() - rollTop; dy != 0)
+                roll.scrollBy (0.0, (double) dy);
     }
 
     void MainView::layoutSelectionRow()
@@ -798,7 +812,6 @@ namespace sl::ui
         selRowSeparator = right - 1;
 
         const int barWidth = selRowArea.getWidth() - 2 * kBarPadX;
-        const int barHeight = selectionBar.heightFor (barWidth);
         selectionBar.setBounds (selRowArea.getX() + kBarPadX, selRowArea.getY() + kSelRowHeight, barWidth, barHeight);
 
         const auto row3 = selRowArea.withTrimmedTop (kSelRowHeight + barHeight).withTrimmedBottom (1).reduced (kBarPadX, 0);
@@ -864,9 +877,23 @@ namespace sl::ui
             flowLayout (modeItems, modeBarArea.reduced (kBarPadX, 7), kModeGap, kGap, true);
         }
 
-        // The selection row, the selection bar and the inspector's line under it (always there, so selecting never
-        // moves the roll; an open drawer of the bar does, as its button is clicked).
-        selRowArea = area.removeFromTop (selectionAreaHeight());
+        // The selection row, the selection bar while it shows (updateBarHeight: notes selected or a drawer open) and the
+        // inspector's line (always there). An open drawer takes at most what leaves the roll a quarter of the window
+        // (140 to 400 px; at least 60 px for the drawer, which scrolls), as the prototype's fitLayout shares the room;
+        // the pane keeps a scrolling row when a tab is open. A new width can change the drawer's height: it takes it now
+        // unless the roll holds the bar's room still.
+        {
+            const int below = kTabsHeight + kHintHeight + WaveStrip::heightFor (getHeight());
+            const bool paneOpen = ! folded && openTabIndex != diagTab;
+            const int rollMin = juce::jlimit (140, 400, juce::roundToInt ((double) getHeight() * 0.26));
+            const int room = area.getHeight() - kSelRowHeight - kInspectorRowHeight - roll::SelectionBar::lineHeight - 4 - below
+                           - (paneOpen ? kMinScrollingPane : 0);
+            selectionBar.setDrawerMax (room - rollMin);
+            const int want = selectionBar.heightFor (juce::jmax (100, area.getWidth() - 2 * kBarPadX));
+            if (want > barHeight || ! rollHeld())
+                barHeight = want;
+        }
+        selRowArea = area.removeFromTop (kSelRowHeight + barHeight + kInspectorRowHeight);
         layoutSelectionRow();
 
         tabsArea = area.removeFromTop (kTabsHeight);

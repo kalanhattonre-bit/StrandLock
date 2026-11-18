@@ -52,6 +52,13 @@ namespace sl::ui::roll
         int buttonWidth (const FlatButton& b) { return b.preferredWidth() + 2; }
     }
 
+    void noKeyboardFocus (juce::Component& c)
+    {
+        c.setWantsKeyboardFocus (false);
+        for (auto* child : c.getChildren())
+            noKeyboardFocus (*child);
+    }
+
     //==============================================================================================
     NoteText::NoteText (const Theme& t, bool isWarning)
         : theme (t), warn (isWarning)
@@ -111,8 +118,8 @@ namespace sl::ui::roll
     }
 
     //==============================================================================================
-    ArrowButton::ArrowButton (const Theme& t, const juce::String& text)
-        : FlatButton (t, text)
+    ArrowButton::ArrowButton (const Theme& t, const juce::String& buttonText)
+        : FlatButton (t, buttonText)
     {
     }
 
@@ -559,7 +566,10 @@ namespace sl::ui::roll
             panel = makeToolPanel (want, theme, tools, [this] { edited(); });
             panelTool = want;
             if (panel != nullptr)
+            {
                 addAndMakeVisible (*panel);
+                noKeyboardFocus (*panel);
+            }
             if (onHeightChange)
                 onHeightChange();
         }

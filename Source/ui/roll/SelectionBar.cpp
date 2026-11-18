@@ -671,6 +671,8 @@ namespace sl::ui::roll
         {
             drawer->onHeightChange = [this] { drawerHeightChanged(); };
             drawerView.setViewedComponent (drawer.get(), false);
+            noKeyboardFocus (*drawer);
+            noKeyboardFocus (drawerView);
         }
         drawerView.setVisible (drawer != nullptr);
         drawerHeightChanged();
@@ -690,8 +692,10 @@ namespace sl::ui::roll
         const bool none = ids.empty();
         const auto& st = tools.settings();
 
-        // nothing selected and no drawer open: the line says how to select (sl-ui-panels.js paintBar hides the bar)
+        // nothing selected and no drawer open: the bar takes no room (sl-ui-panels.js paintBar hides it); while the
+        // roll holds its room still (MainView) the line says how to select
         const bool nowIdle = none && st.drawer == ToolSettings::Drawer::none;
+        bool changed = false;
         if (nowIdle != idle)
         {
             idle = nowIdle;
@@ -702,6 +706,7 @@ namespace sl::ui::roll
             bakeButton->setVisible (! idle);
             lineGap->setVisible (! idle);
             repaint();
+            changed = true;
         }
         laneBox->showLane (tools.lane());
         for (int i = 0; i < 5; ++i)
@@ -716,30 +721,39 @@ namespace sl::ui::roll
             rebuildDrawer();
             rebuilt = true;
         }
-        if (drawer == nullptr)
-            return;
-        // the drawer follows the clip, the selection, the lane, the tempo and the sound; the editor's timer calls this
-        // too, so it is synced again only when one of them changed
-        const auto& rs = tools.rollSettings();
-        Seen now { tools.clip(), ids, core::laneIndex (tools.lane()), rs.bpm, rs.sampleSeconds, rs.inst.region.start, rs.inst.region.end };
-        if (! rebuilt && now == seen)
-            return;
-        seen = std::move (now);
-        // with nothing selected an open drawer stays where it is, faded and asleep (it wakes with the next selection),
-        // so clearing the selection never moves the roll
-        drawer->setAlpha (none ? 0.45f : 1.0f);
-        drawer->setInterceptsMouseClicks (! none, ! none);
-        drawer->sync();
-        drawerHeightChanged();
+        if (drawer != nullptr)
+        {
+            // the drawer follows the clip, the selection, the lane, the tempo and the sound; the editor's timer calls
+            // this too, so it is synced again only when one of them changed
+            const auto& rs = tools.rollSettings();
+            Seen now { tools.clip(), ids, core::laneIndex (tools.lane()), rs.bpm, rs.sampleSeconds, rs.inst.region.start, rs.inst.region.end };
+            if (rebuilt || ! (now == seen))
+            {
+                seen = std::move (now);
+                // with nothing selected an open drawer stays where it is, faded and asleep (it wakes with the next
+                // selection), so clearing the selection never moves the roll
+                drawer->setAlpha (none ? 0.45f : 1.0f);
+                drawer->setInterceptsMouseClicks (! none, ! none);
+                drawer->sync();
+                changed = true;
+            }
+        }
+        if (changed)
+            drawerHeightChanged();
     }
 
     int SelectionBar::heightFor (int width) const
     {
         if (drawer == nullptr)
-            return lineHeight;
+            return idle ? 0 : lineHeight;
         const int inner = juce::jmax (40, width - 2 * drawerPadX);
-        const int box = juce::jmin (drawerMaxHeight, drawer->heightFor (inner) + 2 * drawerPadY);
+        const int box = juce::jmin (drawerMax, drawer->heightFor (inner) + 2 * drawerPadY);
         return lineHeight + box + 4;
+    }
+
+    void SelectionBar::setDrawerMax (int px)
+    {
+        drawerMax = juce::jlimit (60, drawerMaxHeight, px);
     }
 
     void SelectionBar::drawerHeightChanged()
@@ -781,7 +795,7 @@ namespace sl::ui::roll
         const int w = getWidth();
         const int inner = juce::jmax (40, w - 2 * drawerPadX);
         const int content = drawer->heightFor (inner);
-        const int box = juce::jmin (drawerMaxHeight, content + 2 * drawerPadY);
+        const int box = juce::jmin (drawerMax, content + 2 * drawerPadY);
         drawerArea = { 0, lineHeight, w, box };
         const auto view = drawerArea.reduced (drawerPadX, drawerPadY);
         drawerView.setBounds (view);
