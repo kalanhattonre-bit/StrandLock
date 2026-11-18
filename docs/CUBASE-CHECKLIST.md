@@ -22,15 +22,18 @@ are in **M4: the piano roll** at the end. Please go through them and send back y
 
 ## Where things are in the StrandLock window
 
-- **Top bar**, left to right: the purple ring logo and STRANDLOCK; the theme button (it shows **Light** with a
-  sun while the window is dark, and **Dark** with a moon while it is light); the **Keys** button (a small
-  keyboard picture; it turns purple when on); **TEMPO (HOST)**, the tempo Cubase is sending (read only); and
-  **UI SCALE**, a drop-down from 75 % to 200 %.
-- **Mode bar**: **1 Build**, then 2 Pitch to 8 Sample in their colours, and the four small Sample buttons. They
-  only change the line of help at the bottom for now.
-- **Tabs** (under the "No notes selected" row): Sample, Macros, Note settings, Slides, Copy / Paste, Mod wheels,
-  Sound and **Diagnostics**. Sample, Macros and Sound have working knobs. **Hide** on the right folds the tabs
-  away; click it again (it then says **Show**), or click any tab, to bring them back.
+- **Top bar**, left to right: the purple ring logo and STRANDLOCK; from the M4 build the **Undo** and **Redo**
+  arrows; the theme button (it shows **Light** with a sun while the window is dark, and **Dark** with a moon while
+  it is light); the **Keys** button (a small keyboard picture; it turns purple when on); **TEMPO (HOST)**, the
+  tempo Cubase is sending (read only); from the M4 build **GRID**; and **UI SCALE**, a drop-down from 75 % to
+  200 %.
+- **Mode bar**: **1 Build**, then 2 Pitch to 8 Sample in their colours, and the four small Sample buttons. In the
+  M0 to M3 builds they only changed the line of help at the bottom. From the M4 build they change what the mouse
+  does on the piano roll (see M4 below).
+- **Tabs** (under the "No notes selected" row; from the M4 build under the inspector's line below that row):
+  Sample, Macros, Note settings, Slides, Copy / Paste, Mod wheels, Sound and **Diagnostics**. Sample, Macros and
+  Sound have working knobs. **Hide** on the right folds the tabs away; click it again (it then says **Show**), or
+  click any tab, to bring them back.
 - **The Diagnostics tab** fills the middle of the window. It has a **Copy report** button at its top right and
   these boxes: THIS COMPUTER, BLOCKS, POSITION AND TEMPO, MIDI, CUBASE'S CHANGES AND SAVING, KEYS and DROPS.
   Everything on it updates by itself while you play.
@@ -62,7 +65,9 @@ are in **M4: the piano roll** at the end. Please go through them and send back y
 5. **Keys, with Keys ON.** Click **Keys** so it turns purple. Click once on an empty part of the StrandLock
    window, then press the same keys as in step 4. The KEYS box lists every key StrandLock received under
    **Last keys**. Which keys reached StrandLock? Which ones did Cubase still take first? Space should still start
-   and stop Cubase. (Turn Keys off again afterwards. StrandLock remembers the setting for the next window.)
+   and stop Cubase. On the Diagnostics tab these keys change nothing in StrandLock, in the M4 build too: its
+   shortcuts work only while the piano roll shows. (Turn Keys off again afterwards. StrandLock remembers the
+   setting for the next window.)
 
 6. **Dropping sounds.** From M2 a dropped sound also loads and plays (M2 step 4); this step is about what Cubase
    hands StrandLock. Drag a WAV file onto the StrandLock window from each of these: Windows Explorer;
@@ -75,8 +80,9 @@ are in **M4: the piano roll** at the end. Please go through them and send back y
 
 7. **Playing with Cubase.** Press Play. In the POSITION AND TEMPO box, **Transport** says playing and
    **Position (ppq)** counts quarter notes from the start of the project (bar 1 is 0.0000, bar 2 is 4.0000 in
-   4/4). Does it start at bar 1? Click any other tab (for example Sample): an orange line moves across the empty
-   roll while Cubase plays. Then click Diagnostics again. Set a 4-bar cycle and let it
+   4/4). Does it start at bar 1? Click any other tab (for example Sample): an orange line moves across the roll
+   while Cubase plays (in the M0 to M3 builds the roll was empty; from M4 it shows the notes). Then click
+   Diagnostics again. Set a 4-bar cycle and let it
    go round 3 times: does **Cycle wraps** go up? **Last wraps** shows the position just before and after each
    wrap: does the "before" look like 16.0000 or slightly off (for example 15.9970)? Does **Wraps inside a block**
    go up, and does it go up more with ASIO-Guard on? Add a tempo change on the tempo track: do **Tempo** and the
@@ -122,8 +128,8 @@ step 10 and the text from **Copy report**.
 
 A few things to know first:
 - **StrandLock now plays its own clip.** A new StrandLock opens on the demo clip (Strand Demo) and plays it in
-  time with Cubase whenever Cubase plays. You cannot see or change the notes yet: the piano roll comes in a later
-  build. Your keyboard plays the sound too, at any time.
+  time with Cubase whenever Cubase plays. In the M2 and M3 builds you could not see or change the notes; from the
+  M4 build the piano roll shows them (see M4 below). Your keyboard plays the sound too, at any time.
 - **Only the Tape engine played in the M2 build.** (This was true of the M2 build only. From the M3 build on
   every engine plays itself; see the M3 part below.) On the Sample tab the Engine buttons are Tape, Voice and
   Cloud. In the M2 build, notes set to Voice or Cloud played as Tape, and the Diagnostics tab counted them. Tape
@@ -148,8 +154,8 @@ A few things to know first:
    - Click **Browse...** and pick one of your own songs (a WAV, AIFF, FLAC, OGG or MP3).
    - Drag the same song onto the StrandLock window from Windows Explorer.
    - Drag it again from MediaBay.
-   Each time: did it load? A short message appears in the middle of the window, near the top of the empty
-   piano roll; what does it say? The file line shows the name and length. For a song longer than 20 seconds
+   Each time: did it load? A short message appears in the middle of the window, near the top of the piano roll;
+   what does it say? The file line shows the name and length. For a song longer than 20 seconds
    StrandLock starts with a 4-second part from about a third of the way in. For a song longer than 10 minutes it
    loads the first 10 minutes and says so. (The Diagnostics tab still lists each drop in its DROPS box.)
 
@@ -158,8 +164,9 @@ A few things to know first:
    the whole box. **-** and **+** zoom the wave, **Show all** shows the whole song again. Hold the mouse button
    down inside the Region to hear it from that point. Then play the part from your keyboard: C3 plays it as
    recorded, other keys play it higher or lower. Does it sound right? Does the Region box follow your mouse
-   smoothly? (Undo for StrandLock's own changes comes in a later build. For now Ctrl+Z goes to Cubase and undoes
-   your last Cubase edit, so do not use it to undo a Region change.)
+   smoothly? (In the M2 and M3 builds StrandLock had no Undo of its own and Ctrl+Z went to Cubase. From the M4
+   build the **Undo** button in the top bar undoes a Region change, and so does Ctrl+Z while **Keys** is on. With
+   Keys off Ctrl+Z still goes to Cubase and undoes your last Cubase edit.)
 
 6. **At the end.** Hold a key and try **At the end** on the file line: **Loop** (the part repeats with a soft
    joint), **Hold** (it stops moving at the end and keeps sounding), **Stop** (it goes quiet at the end). Do you
@@ -312,7 +319,8 @@ Where the new things are:
    name and the bar and beat. (Notes will also snap to a scale once the Key and Scale controls arrive in M7.) Drag
    the small dot at the note's right end sideways: the note gets longer or shorter. Drag that dot up or down
    instead: the end of the note bends up or down in semitones. Try **GRID** set to 1/4 and to Free. Does all of
-   this feel right? Is anything hard to grab?
+   this feel right? Is anything hard to grab? (Dragging on an empty part of the roll draws a dashed box, but it
+   selects nothing yet: selecting notes with a box comes in M5.)
 
 4. **Draw the lanes.** Click **2 Pitch**, then click a note to select it. The note's pitch line now has round
    nodes on it. Drag a node up or down: it moves in whole semitones (hold Shift for in between), and the small box
@@ -337,7 +345,9 @@ Where the new things are:
    Right-click an empty part of the roll for **New note here**. In a lane mode (for example **3 Volume**) the menu
    offers shapes for the selected notes: **Ramp up**, **Ramp down**, **Swell**, **Dip**, **Squiggle**, **Random**,
    **Decay** and **Reset**, with **Each note** or **Across** at the top. Try a few. Does each one do what its name
-   says?
+   says? A click anywhere else closes the menu, and so does Escape while **Keys** is on. Then turn **Keys** on,
+   right-click a note, rest the mouse on **Delete** and press Space: Cubase should start (or stop), the note stays
+   and the menu stays open. Does it?
 
 8. **Undo and Redo.** After a few changes, click the **Undo** button a few times, then **Redo**. Each click
    should undo or redo exactly one change (one drag, one new note, one typed value), and a short message says
@@ -346,15 +356,18 @@ Where the new things are:
 9. **Keys on and off.** With **Keys** off (not purple), click on the roll and press 2, Delete and Ctrl+Z: nothing
    in StrandLock should change, and Cubase gets the keys. Click **Keys** so it turns purple and click on the roll
    again. Now 1 to 8 change the mode, Ctrl+Z undoes, Ctrl+Shift+Z (or Ctrl+Y) redoes, Delete deletes the selected
-   notes, Ctrl+A selects all, Ctrl+D duplicates, Escape clears the selection and B starts Slide into. Space must
-   still start and stop Cubase, with Keys on or off. Does it? Turn Keys off again afterwards.
+   notes, Ctrl+A selects all, Ctrl+D duplicates, Escape clears the selection and B starts Slide into (holding B
+   down counts as one press). Space must still start and stop Cubase, with Keys on or off. Does it? One exception:
+   while a drop-down list is open (**GRID**, **UI SCALE** or the sound menu), Space only closes the list, and the
+   next Space starts Cubase. Turn Keys off again afterwards.
 
 10. **The inspector.** Select a note and click the **START** box. Type a new position, for example 2.1.1 (bar 2,
     beat 1), and press Enter: the note moves there. Try **LENGTH** (0.5, or a note value like 1/8), **PITCH** (a
     name like D3, or a number like 62) and **VELOCITY** (1 to 127). Escape puts the old value back. In **2 Pitch**,
     click a node, then type a **VALUE** such as +3 (semitones) or **AT** such as 0.5 (beats into the note). Typing
     in these boxes works with Keys off too; after Enter the keys go to Cubase again. Does it? (While you type in a
-    box, Space types a space; after Enter it starts and stops Cubase again.)
+    box, Space types a space and the shortcuts such as Ctrl+Z and Ctrl+D do nothing in the roll; after Enter Space
+    starts and stops Cubase again.)
 
 11. **Play it all back.** Make a short phrase of your own: a few notes, a slide, a drawn Pitch line and a Volume
     line. Press Play in Cubase. Does it play what you see, in time?

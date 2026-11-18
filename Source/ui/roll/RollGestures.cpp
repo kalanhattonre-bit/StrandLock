@@ -30,7 +30,7 @@ namespace sl::ui::roll
         /** The same node, value for value: setLaneNodes keeps every node it does not drop exactly as it was. */
         bool sameNode (const model::Node& a, const model::Node& b) noexcept
         {
-            const std::equal_to<double> same;
+            const std::equal_to<double> same {};
             return same (a.t, b.t) && same (a.v, b.v) && a.shape == b.shape && same (a.bend, b.bend);
         }
         std::string num (double v) { return core::jsNumberToString (v); }

@@ -540,3 +540,181 @@ hint bar; the note layer's image cache.
   more picks) comes with the Nodes switch.
 - **Handed to M6:** Sample mode's chevrons and per-note thumbnails, the Note settings tab, "Try this" (the hint
   bar's right-hand text is still M0's).
+
+## Fix
+
+The M4 fix pass (plan 7.6: review, then a fix pass): three reviews of main at c96b7bb (gesture parity, the UI against
+the prototype, tests and real time) reported 18 findings. Branch `m4-fixes`, from main c96b7bb. Each finding was
+checked against the code, the JUCE 8.0.15 source and the prototype before it was fixed or set aside.
+
+### Progress
+
+- Done: F1, R4T-2, F5, then the keys and the menu (R4T-1 with F3 and UI4-1, UI4-2, F2, F4, UI4-4), each with its
+  tests (commits df70b4a, 51e4843, cf41fd3, d02ae31); CI green on d02ae31 (run 44283180626, figures below); the
+  four pictures of the open menu looked at; the Cubase checklist (UI4-5, UI4-8 and the new keys).
+- In progress: CI on this commit (these notes, the checklist, two clearer test messages), then the fast-forward of
+  main and CI on main.
+
+### The findings
+
+- **F1 (high), fixed.** Confirmed in the code and in node (sl-ui.js and sl-model.js unmodified): a double-click on a
+  lane holding 128 nodes inserts a 129th, setLaneNodes caps the list (RDP), and the drag kept the inserted place.
+  On a ramp with 0.02 steps the lane falls to 91 nodes with the new one at 83 while the drag held 115: the first
+  move read and wrote past the vector. On a 0.1 / 0.9 line the cap drops the new node and the drag moved another
+  one. `addNodeAt` now finds the new node in the stored lane (by its exact values: the cap keeps a node as it is)
+  and drags it there, or starts no node drag and sets no inspector node when it is gone, with a toast; the release
+  is still one "Add node" step when the lane changed, as in the prototype. A refused edit starts no drag. The node
+  drag also stops when its place is not in the list. Test `rollAddNodeOnFullLane`: three cases whose sizes and
+  places came from the prototype's model; before the fix the first stops at the out-of-range place and the other
+  two move the wrong node.
+- **F2 (medium), fixed.** Confirmed: TextEditor::keyPressed returns false for Ctrl+Z and Ctrl+Y when the box has no
+  typing to undo or redo (Label::showEditor's setText clears that history) and for Ctrl+D (no mapping); the key then
+  goes up the parents to the editor, whose KeyRouter ran the roll's Undo, Redo or Duplicate. `MainView::handleKey`
+  now runs nothing while an inspector box is open, Keys on or off. Test `rollLiveTypingKeepsKeys` sends the keys
+  as JUCE's window does: the text box first, then each parent.
+- **F3 (medium), UI4-1 (medium), R4T-1 (high): one cause, fixed.** Confirmed in juce_PopupMenu.cpp: the menu window
+  enters a modal state, ComponentPeer::getTargetForKeyPress gives a blocked component's keys to it, and
+  MenuWindow::keyPressed treats Space as Return (it runs the item under the mouse). While any JUCE component is
+  modal, HWNDComponentPeer::doKeyDown also reports every key as used, so no key reaches Cubase. R4T-1's first remedy
+  (give the keyboard away while the menu is open) would not work: with no focused component the key goes to the
+  peer's own component, which the menu blocks too. The right-click menu is now a panel of StrandLock's own on the
+  page (`RollView::MenuPanel`), as the prototype's #menu: nothing is modal, Space goes on to Cubase, and the other
+  shortcuts work as they do without it. The JUCE drop-down lists (the Grid, UI Scale, the sound and preset menus)
+  get a key listener from the look and feel (`StrandLookAndFeel::preparePopupMenuWindow`): Space closes the list and
+  picks nothing. Tests `rollLiveMenuTakesNoKeys` and `rollLiveListsSpaceGuard`; four pictures of the open menu.
+- **F4 (low), fixed.** Confirmed: JUCE hands every repeat of a held key over as a press, and armLink toggles. The
+  KeyRouter runs only the first B until a key goes up (the editor's keyStateChanged) or another key goes down. The
+  other repeats change nothing, as the finding says, so only B is guarded. Tests `keysHeldBTogglesOnce` and
+  `rollLiveHeldB` (8 presses: toggled each time, Slide into would end off).
+- **F5 (low), fixed.** Confirmed: the Start box used 4 beats per bar while the ruler and the readout count the
+  clip's. `fmtPos` and `parsePos` take the beats per bar (4 by default, so the fixture's cases are the prototype's);
+  the inspector passes the clip's. The reviewer suggested a fixture case with 3 beats per bar, but the fixtures are
+  the prototype's own output and its bars always hold 4 beats, so the cases are worked out by hand in
+  `inspectorPositionsCountTheClipsBars` instead (and `rollLiveStartCountsTheClipsBars` through the editor). The
+  Length box's bar forms ("1 bar", "1.0.0.0") stay 4 beats: they are the model's rate `1bar`, which is 4 beats.
+- **UI4-2 (low), partly rejected.** The finding says sl-ui.js clears the selection when Escape closes the menu. It
+  does not: the first line of its key handler is `if (menuOpen() && e.key === 'Escape') { closeMenu(); ...; return; }`,
+  so Escape with the menu open only closes it; the selection goes on the next Escape. What a JUCE menu did with
+  Escape was therefore the prototype's behaviour. The finding is right that R3's note "Escape closes an open
+  right-click menu as it clears the selection" was wrong, and that the branch in `RollView::clearSelection` could
+  not be reached from a key. With the panel, `MainView::handleKey` follows the prototype's rule (Keys on: Escape
+  closes the menu and keeps the selection), and R3's note is corrected here.
+- **UI4-3 (low), kept, and given to the architect.** Confirmed: with Keys off a click on an inspector box gives
+  StrandLock's window the Windows keyboard focus (Label::showEditor), and nothing hands it back after Enter. Cubase
+  then gets keys only through JUCE's forwarding (PostMessage to the host's window), which no Cubase result has
+  confirmed yet; checklist step 10 asks. Handing the focus back needs Windows calls outside JUCE and cannot be
+  tested here, so it waits for Kalan's answer. Added to the deviations below.
+- **UI4-4 (low), fixed.** Confirmed: the shortcuts edited the hidden roll while the Diagnostics tab was open. Now
+  they run nothing there (with Keys on the keys are still kept, as M0's rule says, and listed on the page). Test
+  `rollLiveKeysWithRollHidden`.
+- **UI4-5 (low), fixed.** The checklist's earlier parts now say which lines were true for the M0 to M3 builds only
+  (the top bar, the mode bar, the tabs' place, the empty roll, the notes not shown, Undo).
+- **UI4-6 (low), deferred to the architect.** Confirmed: the zoom buttons' box (122 px) covers the ruler's last bar
+  numbers; at 900 x 560 the default clip's bar 4 has no number. No cheap fix is good: a number moved left of the box
+  would sit beside another bar's beat tick, and four buttons cannot be much narrower. Where the buttons go is a
+  layout call (R2 put them there because the top bar has no room at 900 px).
+- **UI4-7 (low), deferred to the architect.** Confirmed (the pane cut through the knob row at 900 x 560 with a tab
+  open). It is R2's and R3's open question: fold the tabs on a small window, as sl-ui.js init does, or a UIST default.
+- **UI4-8 (low), fixed in the checklist.** Step 3 now says that a drag on empty space draws a box that selects
+  nothing until M5. R2 draws the box for M5, so it stays.
+- **UI4-9 (low), handed to M6** (below).
+- **R4T-2 (medium), fixed.** Confirmed: `deliverSoundLoads` pushed the sound's step with `clipDoc.current ()`, the
+  drag's unfinished clip while a drag is held. The step now keeps the clip of the history's last finished edit.
+  Every other change to the document outside an undo step is a gesture's live step, so the history's clip is the
+  right one in every case. Test `rollSoundLoadDuringDrag`: before the fix, Undo of the drag landed on its middle.
+- **R4T-3 (low), deferred to the architect.** Confirmed by reading: `computeGlides` compares every pair of notes
+  and runs on every drag step and twice per compile. The model is not M4's (plan 7.6); see the list below.
+- **R4T-4 (low), deferred.** Confirmed: the note layer's key and the line cache's key hold the tempo and the
+  vibrato rate, so a tempo ramp redraws every note at each refresh. A fix keys the tempo per note (only notes with a
+  vibrato that is not flat, or with automatic slides, depend on it) across R1's line cache and R2's note layer; that
+  is more than a fix pass should change without a gate. Rounding the drawing tempo was not taken: the readouts and
+  the hit tests read the same geometry. See the list below.
+
+### Decisions and deviations
+
+- **The right-click menu is StrandLock's own panel, not a JUCE menu (R3 used a JUCE menu).** It is drawn as
+  shell.html's #menu (the menu colour, a 10 px corner, the line around it, a drop shadow, 6 px of padding, items
+  in 13 px bold that light on hover, headers in small capitals, lines, the row of two buttons with the lit one in
+  the accent), opens at the click and stays inside the page, and scrolls with the wheel when taller than the page.
+  It closes when an item without "keep" runs, on a press anywhere in StrandLock's windows (Desktop's global mouse
+  listener; the press still does what it does there, as in the prototype), on Escape with Keys on, and when the
+  roll is hidden. It takes no key. Items are 28 px high, not the prototype's 31: the longest menu (Travel, 19
+  entries) then fits the smallest window (525 of 544 px).
+- **Space with a JUCE drop-down list open closes the list** and does not reach Cubase (JUCE holds every key while a
+  list is open). Before, it picked the item under the mouse: a sound, a preset, a UI Scale.
+- **Escape with the menu open closes only the menu** (Keys on), as sl-ui.js does. With Keys off the keys are
+  Cubase's, so a click closes the menu.
+- **While an inspector box is typed in, the keys are the box's**: no shortcut runs and no key goes on to Cubase,
+  with Keys on or off. A JUCE text box holds a modal state while open, so on Windows no key reached Cubase then
+  anyway; now no shortcut runs either. (Space types a space, as before.)
+- **No shortcut runs while the Diagnostics tab hides the roll.**
+- **A double-click on a full lane** (128 nodes) toasts "A lane holds at most 128 nodes, so this one has no room for
+  another" when the cap drops the new node; the prototype says nothing (its drag then throws or moves another
+  node).
+- **R3's note on Escape is corrected** (UI4-2 above): Escape with the menu open closes it and keeps the selection.
+- **Additions to the M4 summary's deviations:** the right-click menu as a panel of StrandLock's own; Space closing
+  an open drop-down list; with Keys off, typing in an inspector box takes the Windows keyboard focus from Cubase
+  until Kalan clicks in Cubase again (UI4-3; JUCE forwards the keys meanwhile, unconfirmed in Cubase).
+
+### For the architect
+
+- **UI4-3: the keyboard focus after typing with Keys off.** Hand the Windows focus back to Cubase's window when an
+  inspector edit ends (Windows code outside JUCE), or keep JUCE's forwarding. Checklist step 10 will say whether the
+  forwarding works in Cubase.
+- **UI4-6: where the zoom buttons go.** At the ruler's right end they hide the last 122 px of bar numbers (at
+  900 x 560 the 4-bar clip's "4"). The top bar has no room for them at 900 px; the prototype has them there.
+- **UI4-7: the roll's room on a small window** (R2, R3): fold the tabs on a first open when the window is small, as
+  sl-ui.js init does, or give UIST a folded default.
+- **R4T-3: computeGlides at 4096 notes.** It compares every pair (in node 0.2 to 0.4 s at 4096 notes, 4.6 ms at
+  512), once per drag step on the message thread and twice per compile on the publisher thread; the audio thread
+  never waits, but the roll and the sound would follow the mouse late on a clip near the cap. Searching only the
+  notes that start within reach of each note's end (sorted starts and a binary search) gives the same result. The
+  model is not M4's.
+- **R4T-4: a tempo ramp redraws every note.** Key the drawing's tempo per note (only lines with vibrato or
+  automatic slides depend on it), or accept it: 512 notes take about 38 ms per full repaint, the demo's 26 far less.
+- **Plan 4 M4 "keys" row, two exceptions for the record:** while an inspector box is typed in, Space types a space;
+  while a JUCE drop-down list is open, Space closes it. The roll's own menu no longer holds Space.
+
+### Hand-off
+
+- **M5:** the right-click menu is `RollView::MenuPanel`. The lane buttons' menus (sl-ui.js openLaneMenu) can open
+  the same panel, so their keys behave the same, and the hover ghosts can hook into its hover (the panel tracks the
+  item under the mouse). A JUCE PopupMenu would take every key while open again.
+- **M6 (UI4-9): the per-note decorations are drawn in every mode, not in mode 8 alone.** sl-ui-panels.js decorate
+  runs for every visible note (sl-ui.js runNoteDecorators): the H4 direction and speed chevrons under the note and
+  the U7 faint waveform above it. The thumbnail's alpha is `mode === 8 || mode === 1 ? (sel ? 0.42 : 0.24) : (sel ?
+  0.22 : 0.11)` and the chevrons' strength `mode === 8 ? (sel ? 1 : 0.8) : (sel ? 0.8 : 0.5)`; fresh1100.png shows
+  both in Build. The plan's M6 text names them with mode 8; R2 left them out of M4 on purpose.
+
+### CI results
+
+- Run 44283180626 on d02ae31 (every fix and its tests), green on every job and step: Windows Release 1670 checks in
+  275 tests (main had 1646 in 265), Linux Release 1662 in 275, the sanitizers' contract, model and engine groups 808
+  in 139 and the state group 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug
+  snapshots 0 JUCE assertions, pluginval strictness 10 SUCCESS, the fixture check passed (4.87 MB of the 5 MB budget;
+  the fix pass adds no fixtures). The `ui` group: 64 tests, 330 checks (the fix pass added 10 tests and 24 checks).
+- F1: the ramp near its end leaves 91 nodes with the new one at 83, the inspector on 83 of 91, a move moves it alone,
+  1 undo step; near its start 89 nodes, the new one at 11; the 0.1 / 0.9 line keeps 128 nodes without the new one,
+  no inspector node, a move moves nothing, 0 steps, and the toast says the lane is full.
+- R4T-2: mid-drag the note is 2 rows up and "Sound: Evolving pad" is a step of its own; the release is "Move notes"
+  (3 rows up); its Undo puts the note back at pitch 58, where it was before the drag (the middle of the drag was
+  60), with the new sound; Undo of the load brings the old sound back.
+- The menu: a right press opens the panel on the page with no modal window; with Keys on and the mouse on Delete,
+  Space goes on to Cubase and nothing is deleted; Escape closes the menu and keeps the selection; a click on Delete
+  is one step; Across keeps the menu open and lit; the opening press and a press on the menu leave it open, a press
+  elsewhere closes it, and so do a click on the roll and the Diagnostics tab. The drop-down lists' guard keeps Space
+  and leaves Return, the arrows, Escape and letters to the list.
+- The keys: with the Start box open and Keys on, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z, Ctrl+D and Ctrl+A changed neither
+  the clip nor the undo history; on the Diagnostics tab 3, Delete, Ctrl+Z, Ctrl+D, B and Escape were kept and
+  changed nothing, and Space went on to Cubase; a B held through 11 repeats toggled once (and through the editor,
+  through 7 repeats).
+- F5: 10 of 10 positions worked out by hand, 679 of 679 sixteenths read back with 1 to 7 beats per bar; through the
+  editor a note on beat 3 of a 3-beat clip shows 2.1.1, and 3.2.1 typed puts it on beat 7.
+- Drawing cost (R2's test, unchanged code): a full repaint of the 512-note clip 31.8 ms on Windows (software, target
+  50 ms), 28.5 ms with Direct2D; moving one note marks 3 notes' bounds and its partial repaint equals a full one.
+- The pictures of the open menu (run 44283180626's artifact), looked at against lanemenu.png: the Build menu with
+  Duplicate lit (dark) and Delete lit (light), the Volume shapes with Each note lit and the header in Volume's
+  colour (light), and the longest menu, Travel in mode 8, whole inside the 900 x 560 window with Rewind lit (dark).
+  The menu colour, the line around it, the shadow, the small capitals, the greyed Paste lanes and the row of two
+  buttons are the prototype's; nothing is cut or overlapping. The prototype draws its items in 13 px semibold, which
+  Segoe UI shows lighter than JUCE's bold; StrandLock's buttons already use the same bold.

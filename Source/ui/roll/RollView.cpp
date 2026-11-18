@@ -965,7 +965,7 @@ namespace sl::ui::roll
     }
 
     //==============================================================================================
-    // The right-click menu: the gestures' items as a JUCE menu (sl-ui.js openMenu).
+    // The right-click menu: the gestures' items in the menu panel (sl-ui.js openMenu).
 
     void RollView::showMenu (juce::Point<float> at, double timeMs)
     {

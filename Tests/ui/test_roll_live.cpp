@@ -1123,12 +1123,14 @@ SL_TEST ("ui", rollLiveStartCountsTheClipsBars)
     auto& insp = view.getInspector();
     doc.setSelection ({ "a" }, std::string ("a"));
     view.syncRollControls();
-    const bool shown = insp.getStart().getValue() == "2.1.1";
+    const auto shownBefore = insp.getStart().getValue();
     insp.getStart().type ("3.2.1");
     const auto a = noteIn (doc.current(), "a");
-    check (doc.current()->beatsPerBar == 3 && shown && a != nullptr && juce::exactlyEqual (a->s, 7.0) && insp.getStart().getValue() == "3.2.1",
-           fmt ("a note on beat 3 shows Start %s (2.1.1: bar 2, as the ruler numbers it); 3.2.1 typed puts it on beat %.2f (7 expected)",
-                str (insp.getStart().getValue()).c_str(), a != nullptr ? a->s : -1.0));
+    check (doc.current()->beatsPerBar == 3 && shownBefore == "2.1.1" && a != nullptr && juce::exactlyEqual (a->s, 7.0)
+               && insp.getStart().getValue() == "3.2.1",
+           fmt ("a note on beat 3 shows Start %s (2.1.1 expected: bar 2, as the ruler numbers it); 3.2.1 typed puts it on beat %.2f "
+                "(7 expected) and the box then shows %s", str (shownBefore).c_str(), a != nullptr ? a->s : -1.0,
+                str (insp.getStart().getValue()).c_str()));
 }
 
 //==================================================================================================

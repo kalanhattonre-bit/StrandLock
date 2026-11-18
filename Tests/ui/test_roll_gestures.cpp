@@ -898,7 +898,7 @@ SL_TEST ("ui", rollAddNodeOnFullLane)
         const bool toastOk = c.at >= 0 || rig.lastToast() == std::string ("A lane holds at most 128 nodes, so this one has no room for another");
         const std::string nodeText = an.has_value() ? fmt ("is %d of %d", an->k, an->len) : std::string ("is none");
         const char* const moveText = ! inRange ? "was not tried (the drag's place lay past the end of the list)"
-                                   : moved     ? "moved the new node alone"
+                                   : moved     ? (c.at >= 0 ? "moved the new node alone" : "moved nothing")
                                                : "moved something else";
         check (capped && picked && inRange && moved && steps && toastOk && laneChanged == (c.at >= 0),
                fmt ("%s: after the double-click the lane holds %d nodes (%d expected) with the new node at %d (%d expected); the inspector's "
