@@ -23,6 +23,9 @@
 //
 // The right-click menu's shapes have hover ghosts (M5 S2): menuItemGhost makes the clip a shape would make, which the
 // view draws and never applies. The lane-button menus are LaneMenu's. Not here: Sample mode's thumbnails (M6).
+//
+// Copy notes and Paste notes (M5 S3, the Copy / Paste tab) sit beside Copy lanes and Paste lanes: a paste and a
+// Duplicate are one model call and one undo step each, refused past 4096 notes with the clip unchanged.
 
 #include "BoxSelect.h"
 #include "RollGeometry.h"

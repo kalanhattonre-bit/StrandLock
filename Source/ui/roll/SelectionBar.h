@@ -15,7 +15,8 @@
 //   (7.7 decision 1). Walk's and Humanize's sliders change the clip live after their first click, and Pattern's and
 //   Random's after Apply, as the prototype's do: every move is shown and sent to the engine with no undo step, the
 //   release is one step (decision 2). Before that a move only draws a ghost of the result. Random values stay put
-//   until Re-roll (decision 3: the seeds are the bar's and the notes', only Re-roll changes them).
+//   until Re-roll (decision 3: the seeds are the bar's and the notes', only Re-roll changes them). The Slides tab's
+//   Selected notes slider, Auto and Jump, no slide (S3) act through these tools too.
 // - SelectionBar: the JUCE line and its drawer, drawn as shell.html and sl-ui-panels.css draw them. With nothing
 //   selected and no drawer open it says how to select; an open drawer stays open, faded and asleep, while nothing is
 //   selected, so clearing the selection never moves the roll (the prototype keeps it the same way).

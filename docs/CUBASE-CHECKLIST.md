@@ -5,8 +5,9 @@ plain saw sound you can play. It was there to find out how Cubase treats StrandL
 steps below (The checklist) still apply. The M2 build plays the real sound engine: its own steps are in
 **M2: the first real sound**. The M3 build adds the grain engines (Voice, Cloud and Lock): its steps are in
 **M3: the grain engines**. The M4 build adds the piano roll, where you see, draw and change the notes: its steps
-are in **M4: the piano roll** at the end. Please go through them and send back your answers and the text from the
-**Copy report** button.
+are in **M4: the piano roll**. The M5 build adds the selection tools (selecting with a box, the tools for the
+selected notes, the Copy / Paste and Slides tabs): its steps are in **M5: selection tools** at the end. Please go
+through them and send back your answers and the text from the **Copy report** button.
 
 ## Getting the test build
 
@@ -32,8 +33,10 @@ are in **M4: the piano roll** at the end. Please go through them and send back y
   does on the piano roll (see M4 below).
 - **Tabs** (under the "No notes selected" row; from the M4 build under the inspector's line below that row):
   Sample, Macros, Note settings, Slides, Copy / Paste, Mod wheels, Sound and **Diagnostics**. Sample, Macros and
-  Sound have working knobs. **Hide** on the right folds the tabs away; click it again (it then says **Show**), or
-  click any tab, to bring them back.
+  Sound have working knobs (from the M5 build Slides and Copy / Paste work too). **Hide** on the right folds the
+  tabs away; click it again (it then says **Show**), or click any tab, to bring them back. From the M5 build a new
+  StrandLock starts with the tabs folded, and the zoom buttons **H−**, **H+**, **V−** and **V+** sit just left of
+  **Hide** / **Show**.
 - **The Diagnostics tab** fills the middle of the window. It has a **Copy report** button at its top right and
   these boxes: THIS COMPUTER, BLOCKS, POSITION AND TEMPO, MIDI, CUBASE'S CHANGES AND SAVING, KEYS and DROPS.
   Everything on it updates by itself while you play.
@@ -291,6 +294,7 @@ apply; this part is about the piano roll. Please go through it and send back you
 Where the new things are:
 - **The roll** is in the middle of the window: the bar numbers along the top, the piano keys down the left, the
   notes in between. The four small buttons **H−**, **H+**, **V−** and **V+** at the right end of the bar numbers
+  (from the M5 build they sit at the right end of the tab row, just left of **Hide** / **Show**)
   zoom in time and in height. The mouse wheel scrolls up and down; hold Shift to scroll sideways, or Ctrl to zoom
   in time.
 - **Top bar**: right after STRANDLOCK are the **Undo** button (an arrow curving left) and the **Redo** button (an
@@ -374,5 +378,117 @@ Where the new things are:
 
 12. **Save and reopen.** Save the project, close it and open it again. Are your notes, lanes and slides back? Are
     the mode, the **GRID** and the zoom as you left them?
+
+13. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.
+
+## M5: selection tools
+
+From this build on you can select notes with a box and change many of them at once: shapes, patterns and random
+lines on a lane, slides between notes, and tools such as Walk, Chop, Humanize and Strum. The Copy / Paste and
+Slides tabs work too. The steps above still apply; this part is about the new tools. Please go through it and send
+back your answers and the text from **Copy report**. A screenshot helps whenever something looks wrong.
+
+What is new, and what moved:
+- **The tabs start folded** in a new StrandLock, so the roll has the room. Click **Show** at the right end of the
+  tab row (or any tab) to open them. A project you saved with a tab open opens with it open.
+- **The zoom buttons** **H−**, **H+**, **V−** and **V+** moved from the end of the bar numbers to the tab row, just
+  left of **Hide** / **Show**, so every bar number shows.
+- **The selection bar.** While notes are selected, a line appears under the row that says how many are selected.
+  It holds **LANE** (a list of the ten lanes), **Shapes**, **Pattern**, **Random**, **Turn into nodes**,
+  **Connect** and **Tools**. **Shapes**, **Pattern**, **Random**, **Connect** and **Tools** each open a box of
+  controls under the line (a drawer); click the same button again to close it.
+- **The dashed preview.** Hold the mouse over a shape, a pattern or most tool buttons (without clicking): the roll
+  draws what it would do as dashed lines, and the hint bar at the bottom says what it is. Nothing changes until you
+  click.
+- **A small window.** When the window is too short for a whole row of a tab's knobs, the tabs stay folded rather
+  than cut the row in half; clicking a tab then says so. When the window is short and a drawer is open, the
+  inspector's line (START, LENGTH and the rest) steps aside so the roll keeps some room; it comes back when the
+  drawer closes.
+
+1. **Install the new build** the same way as before (Getting the test build, at the top). Add StrandLock to a new
+   Instrument track. Do the tabs start folded, with a big roll? Click **Show**: does the Sample tab open?
+
+2. **Select with a box.** In **1 Build**, press on an empty part of the roll and drag: a dashed box appears and
+   every note it touches is selected as you drag. Let go. Now hold Shift and drag another box: those notes join the
+   selection. Hold Ctrl and drag a box over some selected notes: they leave the selection (and the others join).
+   Click an empty spot to clear the selection. Try the same in **5 Tone**. Does the box pick exactly the notes it
+   touches?
+
+3. **The Nodes switch.** In **3 Volume**, select two or three notes, then click **Nodes** on the mode bar (it turns
+   purple). Drag a box around some of their round nodes: they get a ring. Drag one of them up: all the ringed nodes
+   move together. With three nodes ringed, the inspector's line says **3 NODES (VOLUME)** with one value box: click
+   it, type -6 dB and press Enter: do all three move to that value? Click **Nodes** again to turn it off.
+
+4. **Connect.** In **1 Build**, select a few notes that follow each other, and open **Connect**. Try **Nearest**,
+   **Furthest** and **Random**: each one makes slides between the selected notes (dashed lines join them), and a
+   message says how many. **Re-roll** gives another random set; **Disconnect** removes them. Click **Undo** after
+   each one: does each click undo exactly one change? Press Play: do the slides glide?
+
+5. **Tools.** Select a few notes and open **Tools**. Try each button on a few notes and click **Undo** after each:
+   - **Walk…** opens a small panel: pick what to walk in its list (Start, Velocity or a lane), set the two sliders,
+     and click **Walk**. Then move a slider: the notes change while you drag.
+   - **Chop…**: pick a rate and click **Chop**: each note becomes repeats. A rate that would make more than 1024
+     notes is refused with a message.
+   - **Reverse**, **Flip**, **More** and **Less** change the lane shown in **LANE** (backwards, upside down, bigger
+     or smaller swings).
+   - **Select similar** opens a list (same pitch, same length, every other note, this bar, or the opposite
+     selection).
+   - **Humanize…**: set the sliders and click **Humanize**; **Re-roll** gives other small nudges.
+   - **Strum…**: pick a gap and click **Strum up** or **Strum down** on a chord.
+   - **Legato** stretches each note to reach the next one.
+
+   Does each one do what its name says?
+
+6. **Shapes, Pattern and Random.** Select a few notes and click **5 Tone** (or pick Tone in **LANE**).
+   - Open **Shapes**. Hold the mouse over **Ramp up**, **Swell** and the others without clicking: the dashed preview
+     shows on the notes. Click one: the notes take it. **Each note** gives every note the whole shape; **Across**
+     spreads one shape across all the selected notes.
+   - Open **Pattern**. Hold the mouse over a pattern button (**Squiggle**, **Saw up** and the others) to see the
+     preview, then click **Apply**. Now drag **DEPTH AT START** or **DEPTH AT END**: the notes change while you drag,
+     and letting go is one undo step. Turn **Lock to the beat** off and try **SPEED UP / SLOW DOWN**.
+   - Open **Random**, click **Apply**, then press Play: does the random line play the same on every loop? Click
+     **Re-roll**: does it change once, and then stay the same again?
+   - **Turn into nodes** (on the line, or in the drawers) turns the pattern or random into ordinary nodes you can
+     drag. **Remove** takes it off.
+
+   Click **Undo** after each step: one click, one change?
+
+7. **The lane-button arrows.** Each lane button on the mode bar (**2 Pitch** to **8 Sample**) has a small arrow (▾)
+   on its right. With notes selected, click the arrow next to **3 Volume**: a menu opens with Volume's shapes,
+   **Each note** / **Across**, the pattern and random from the drawers, **Pattern settings…**, **Random
+   settings…**, **Re-roll the random**, **Remove pattern / random** and **Turn into nodes**. Hold the mouse over a
+   shape to see its preview, then click it. With no note selected the arrow says to select notes first.
+
+8. **Copy / Paste.** Open the **Copy / Paste** tab.
+   - Its first row says **LANES TO COPY**, then a button for each lane (all lit), **Copy**, **Paste** and what is
+     held (**NOTHING COPIED**).
+   - Draw something on one note's Pitch and Volume lines (in **2 Pitch** and **3 Volume**). Select that note and
+     click **Copy**: the text says what it holds. Select three other notes of different lengths and click **Paste**:
+     do their lanes now look like the first note's, stretched or squeezed to each note's length? **Undo** puts them
+     back.
+   - Click the **Pitch** lane button so it goes dark, then **Copy** and **Paste** again: only the other lanes are
+     pasted. Save, close the project and open it again: is **Pitch** still dark?
+   - The second row is for whole notes: select a few notes and click **Copy notes**, then select another note and
+     click **Paste notes**: the copies start where that note ends, and any slides between them come along.
+     **Duplicate** copies the selected notes right after themselves. In **1 Build**, right-click an empty spot:
+     **Paste notes here** puts the copied notes there.
+
+9. **Slides.** Open the **Slides** tab.
+   - **AUTO SLIDE**: **Off**, **Legato (touching notes)** or **Always (next note)**: which notes slide into the next
+     one by themselves. **SLIDE TIME**: how long a slide takes (1/32 to 1/2). Play a phrase and try each. If you
+     automate **Auto Slide** or **Slide Time** in Cubase, do these lists follow while it plays?
+   - **SELECTED NOTES**: select a note that slides into another and drag the slider: the slide gets longer or
+     shorter while you drag, and letting go is one undo step. **Auto** puts the notes back on **SLIDE TIME**;
+     **Jump, no slide** makes them jump straight to the next note.
+
+10. **Play it back.** Make a short phrase with a few of these: a shape, a pattern, a random line, a slide, a pasted
+    lane. Press Play in Cubase. Does it play what you see, in time, the same on every loop?
+
+11. **A small window.** Drag the StrandLock window to its smallest size. Open the **Sample** tab: do the tabs stay
+    folded rather than show half a row of knobs? Is there a message when you click the tab? Select some notes and
+    open **Tools**: is the roll still big enough to use? Make the window bigger again: does everything come back?
+
+12. **Save and reopen.** Save the project, close it and open it again. Are your notes, shapes, patterns, slides and
+    the **Copy / Paste** lane buttons as you left them?
 
 13. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.

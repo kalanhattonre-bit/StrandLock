@@ -829,12 +829,14 @@ SL_TEST ("ui", decisionSixLayout)
                fmt ("a new instance: folded, the roll %d px; a project saved with Macros open opens with Macros open", foldedRoll));
     }
 
-    // every tab at every height from 560 to 900 (and two widths): whole rows or folded, never a row cut
+    // every tab at every height from 560 to 900 (and two widths): whole rows or folded, never a row cut, and never a fold
+    // when a whole row would have fitted (the fonts differ between platforms, so which tabs fold where is worked out
+    // from each panel's own rows, not written down)
     {
         EditorRig e;
         auto& view = e.view();
-        int shown = 0, foldedCount = 0, cut = 0, squeezed = 0, cases = 0;
-        juce::String firstCut;
+        int shown = 0, foldedCount = 0, cut = 0, squeezed = 0, needless = 0, cases = 0;
+        juce::String firstCut, firstNeedless, foldList;
         bool sampleFoldsSmall = false, sampleShowsDefault = false;
         for (const int w : { 900, 1100 })
             for (int h = 560; h <= 900; h += 20)
@@ -847,22 +849,40 @@ SL_TEST ("ui", decisionSixLayout)
                     ++cases;
                     const int pane = view.getPaneArea().getHeight();
                     const int roll = view.getRollArea().getHeight();
+                    const int width = view.getPaneArea().getWidth();
+                    const int bar = view.getPaneViewport().getScrollBarThickness();
                     auto* panel = view.getTabPanel (tab);
                     if (pane == 0)
                     {
                         foldedCount += view.isAutoFolded() ? 1 : 0;
+                        foldList << (foldList.isEmpty() ? "" : ", ") << w << " x " << h << " " << view.getTabStrip().getSelected();
                         if (tab == MainView::sampleTab && w == 900 && h == 560)
                             sampleFoldsSmall = true;
+                        // the fold was needed: with the tabs folded the roll has all the room, and no whole panel within
+                        // 2/5 of it, nor a scrolling pane of whole rows (at least 64 px), leaves the roll its floor
+                        bool fits = false;
+                        if (panel != nullptr)
+                        {
+                            const auto whole = panel->rowEnds (width);
+                            fits = ! whole.empty() && whole.back() <= std::max (80, roll * 2 / 5) && roll - whole.back() >= MainView::rollFloor;
+                            for (const int end : panel->rowEnds (width - bar))
+                                fits = fits || (end >= 64 && roll - end >= MainView::rollFloor);
+                        }
+                        if (fits)
+                        {
+                            ++needless;
+                            if (firstNeedless.isEmpty())
+                                firstNeedless << w << " x " << h << " tab " << tab << " (roll " << roll << " px)";
+                        }
                         continue;
                     }
                     ++shown;
                     if (tab == MainView::sampleTab && w == 1100 && h == 680)
                         sampleShowsDefault = true;
-                    const int width = view.getPaneArea().getWidth();
                     bool whole = false;
-                    for (const int bar : { 0, view.getPaneViewport().getScrollBarThickness() })
+                    for (const int b : { 0, bar })
                         if (panel != nullptr)
-                            for (const int end : panel->rowEnds (width - bar))
+                            for (const int end : panel->rowEnds (width - b))
                                 whole = whole || end == pane;
                     if (! whole)
                     {
@@ -873,28 +893,50 @@ SL_TEST ("ui", decisionSixLayout)
                     squeezed += roll < MainView::rollFloor ? 1 : 0;
                 }
             }
-        check (cut == 0 && squeezed == 0 && shown + foldedCount == cases && sampleFoldsSmall && sampleShowsDefault,
-               fmt ("%d tab and window cases: %d show whole rows, %d fold (%d cut a row%s%s, %d leave the roll under %d px); the Sample tab folds "
-                    "at 900 x 560 (%s) and shows at 1100 x 680 (%s)", cases, shown, foldedCount, cut, firstCut.isEmpty() ? "" : ", first ",
-                    firstCut.toRawUTF8(), squeezed, MainView::rollFloor, sampleFoldsSmall ? "yes" : "NO", sampleShowsDefault ? "yes" : "NO"));
+        note (fmt ("the Sample tab at 900 x 560 (M4 review UI4-7: its pane cut the knob row): %s; folded (window, tab 0 Sample .. 6 Sound): %s",
+                   sampleFoldsSmall ? "folded" : "shown whole", foldList.toRawUTF8()));
+        check (cut == 0 && squeezed == 0 && needless == 0 && shown + foldedCount == cases && shown > 0 && foldedCount > 0 && sampleShowsDefault,
+               fmt ("%d tab and window cases: %d show whole rows, %d fold (%d cut a row%s%s, %d leave the roll under %d px, %d folded where a whole "
+                    "row fitted%s%s); the Sample tab shows at 1100 x 680 (%s)", cases, shown, foldedCount, cut, firstCut.isEmpty() ? "" : ", first ",
+                    firstCut.toRawUTF8(), squeezed, MainView::rollFloor, needless, firstNeedless.isEmpty() ? "" : ", first ", firstNeedless.toRawUTF8(),
+                    sampleShowsDefault ? "yes" : "NO"));
 
-        // folded for want of room: a click on the tab or Show says why, and the person's choice stays
-        e.editor->setLogicalSize (900, 560);
-        view.openTab (MainView::sampleTab);
+        // folded for want of room: a click on the tab or Show says why, and the person's choice stays. The first tab and
+        // height at 900 px wide that folds (which one depends on the fonts).
+        int foundTab = -1, foundHeight = 0;
+        for (int h = 560; h <= 900 && foundTab < 0; h += 20)
+        {
+            e.editor->setLogicalSize (900, h);
+            for (const int tab : { MainView::sampleTab, MainView::macrosTab, MainView::soundTab, MainView::copyTab, MainView::slidesTab })
+            {
+                view.openTab (tab);
+                e.editor->refreshNow();
+                if (view.isAutoFolded())
+                {
+                    foundTab = tab;
+                    foundHeight = h;
+                    break;
+                }
+            }
+        }
+        bool told = false, stillOpen = false;
+        if (foundTab >= 0)
+        {
+            view.getTabStrip().onClick (foundTab);
+            told = view.isToastShown() && view.getToastText().startsWith ("This window is too short") && view.isAutoFolded() && ! view.isFolded()
+                && e.proc.getUiState().folded == 0 && view.getPaneArea().getHeight() == 0;
+            view.getFoldButton().onClick();
+            stillOpen = ! view.isFolded() && view.isAutoFolded() && e.proc.getUiState().folded == 0;
+        }
+        e.editor->setLogicalSize (900, 900);
         e.editor->refreshNow();
-        view.getTabStrip().onClick (MainView::sampleTab);
-        const bool told = view.isToastShown() && view.getToastText().startsWith ("This window is too short") && view.isAutoFolded()
-                       && ! view.isFolded() && e.proc.getUiState().folded == 0;
-        view.getFoldButton().onClick();
-        const bool stillOpen = ! view.isFolded() && view.isAutoFolded();
-        e.editor->setLogicalSize (900, 800);
-        e.editor->refreshNow();
-        check (told && stillOpen && ! view.isAutoFolded() && view.getPaneArea().getHeight() > 0,
-               fmt ("at 900 x 560 a click on the Sample tab says \"%s\" and keeps the choice; at 900 x 800 the tab opens by itself (%d px)",
-                    view.getToastText().toRawUTF8(), view.getPaneArea().getHeight()));
+        check (foundTab >= 0 && told && stillOpen && ! view.isAutoFolded() && view.getPaneArea().getHeight() > 0,
+               fmt ("folded at 900 x %d (tab %d): a click on the tab and on Show say \"%s\" and keep the choice; at 900 x 900 the tab opens by "
+                    "itself (%d px)", foundHeight, foundTab, view.getToastText().toRawUTF8(), view.getPaneArea().getHeight()));
     }
 
-    // an open drawer on a short window takes the inspector's line
+    // an open drawer on a window too short for the roll's floor takes the inspector's line, and only then. Walk's panel
+    // makes the Tools drawer take its least room (62 px).
     {
         EditorRig e (ThemeId::dark, 900, 560);
         auto& view = e.view();
@@ -902,18 +944,39 @@ SL_TEST ("ui", decisionSixLayout)
         e.roll().selectAll();
         view.setMode (5);
         e.bar().getDrawerButton (ToolSettings::Drawer::tools).onClick();
-        e.editor->refreshNow();
-        const bool foldedSmall = view.isInspectorFolded() && ! view.getInspector().isVisible() && view.getRollArea().getHeight() >= MainView::rollFloor;
-        const int smallRoll = view.getRollArea().getHeight();
-        e.editor->setLogicalSize (1100, 680);
-        e.editor->refreshNow();
-        const bool backLarge = ! view.isInspectorFolded() && view.getInspector().isVisible();
+        if (auto* tools = dynamic_cast<ui::roll::ToolsDrawer*> (e.bar().getOpenDrawer()))
+            tools->getButton ("Walk" + juce::String::charToString ((juce::juce_wchar) 0x2026)).onClick();
+        constexpr int inspectorLine = 32;   // MainView's line for the inspector
+        int folds = 0, kept = 0, wrong = 0, smallRoll = 0;
+        juce::String firstWrong;
+        for (int h = 560; h <= 760; h += 8)
+        {
+            e.editor->setLogicalSize (900, h);
+            e.editor->refreshNow();
+            const bool folded = view.isInspectorFolded();
+            const int roll = view.getRollArea().getHeight();
+            const int withLine = roll - (folded ? inspectorLine : 0);   // what the roll would have kept with the line
+            const bool lineGone = ! view.getInspector().isVisible()
+                               && view.getSelectionRowArea().getHeight() == 36 + view.getSelectionBar().getHeight();
+            const bool right = folded ? (lineGone && withLine < MainView::rollFloor) : (view.getInspector().isVisible() && withLine >= MainView::rollFloor);
+            (folded ? folds : kept) += 1;
+            if (h == 560)
+                smallRoll = roll;
+            if (! right)
+            {
+                ++wrong;
+                if (firstWrong.isEmpty())
+                    firstWrong << "900 x " << h << ": " << (folded ? "folded" : "kept") << ", roll " << roll;
+            }
+        }
         e.bar().getDrawerButton (ToolSettings::Drawer::tools).onClick();   // closed
         e.editor->setLogicalSize (900, 560);
         e.editor->refreshNow();
-        check (foldedSmall && backLarge && ! view.isInspectorFolded() && view.getInspector().isVisible(),
-               fmt ("900 x 560, the tabs folded, the Tools drawer open: the inspector's line goes to the roll (%d px, at least %d); at 1100 x 680, "
-                    "or with the drawer closed, the inspector is back", smallRoll, MainView::rollFloor));
+        check (wrong == 0 && folds > 0 && kept > 0 && ! view.isInspectorFolded() && view.getInspector().isVisible(),
+               fmt ("900 x 560 to 760, the tabs folded, the Tools drawer with Walk's panel open: the inspector's line goes to the roll exactly when "
+                    "the roll would keep less than %d px (%d heights fold, %d keep it, %d wrong%s%s; at 560 the roll has %d px); with the drawer "
+                    "closed the inspector is back", MainView::rollFloor, folds, kept, wrong, firstWrong.isEmpty() ? "" : ": ", firstWrong.toRawUTF8(),
+                    smallRoll));
     }
 
     // the zoom buttons in the tab row, clear of the ruler, which runs the whole width; they still zoom
@@ -997,18 +1060,23 @@ namespace
         e.editor->refreshNow();
         if (what == M5Shot::boxSelect)
         {
-            // Build: two notes selected, then a box from empty space down and right across the notes, still held
+            // Tone (box select works in every mode): two notes selected, then a Shift box from empty space down and right
+            // across the notes, still held (S1's m5_box_select pictures show a plain one in Build)
             auto& g = roll.getGestures();
             const auto& geo = roll.getGeometry();
+            view.setMode (5);
+            roll.setScroll (0.0, geo.cy (66.0) - geo.viewHeight() / 2.0);
             const auto c = e.proc.getDocument().current();
             e.select ({ c->notes[0]->id, c->notes[1]->id }, c->notes[0]->id);
             e.editor->refreshNow();
             out.without = e.picture();
+            const auto st = e.proc.getDocument().rollState();
             double x0 = geo.scrollX() + 30.0, y0 = geo.scrollY() + 10.0;
             for (int step = 0; step < 40; ++step)
             {
                 const double x = geo.scrollX() + 30.0 + 13.0 * step, y = geo.scrollY() + 10.0 + 3.0 * step;
-                if (geo.hitNote (*c, e.proc.getDocument().rollState(), x, y) == nullptr)
+                const bool onNode = st.activeLane().has_value() && geo.hitNode (*c, st, x, y, *st.activeLane()).has_value();
+                if (geo.hitNote (*c, st, x, y) == nullptr && ! onNode)
                 {
                     x0 = x;
                     y0 = y;

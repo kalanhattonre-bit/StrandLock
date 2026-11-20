@@ -391,6 +391,117 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   instance folded, whole rows or folded, the inspector's line on a short window with a drawer, the zoom buttons in the
   tab row), `Tests/ui/test_copy_paste.cpp` with the M5 table's pictures, and the tests the changes touch
   (`test_editor`, `test_controls`).
-- In progress: CI on the first push.
-- Next: the pictures looked at, the Cubase checklist's M5 section, the notes' decisions and figures, the M5 summary,
-  then the merge to main.
+- Done: run 44692540376 on 9d6360a (the first push): both platforms built it; every new test passed but the
+  decision 6 one, which had written down layouts that depend on the fonts (3 checks on Linux, 1 on Windows; below).
+  Fixed in the test. JUCE assertions in the Debug pictures 0, pluginval SUCCESS. Its 88 pictures compared with S2's
+  and looked at (below).
+- Done: the Cubase checklist's M5 section.
+- In progress: CI on the second push (the decision 6 test made font-independent, the box picture in Tone).
+- Next: the notes' figures, the M5 summary, then the merge to main.
+
+### Files
+
+- `Source/ui/tabs/CopyPasteTab`: shell.html's "copy" pane (sl-ui.js copyLanes, pasteLanes, the chips): LANES TO COPY
+  with a chip per lane in its colour (the gestures' `copyMask`, kept in UIST `copyMask`), Copy, Paste and what is held
+  ("nothing copied", "holding: Pitch, Tone", "holding: 9 lanes"); on a second row NOTES with Copy notes, Paste notes,
+  Duplicate and what is held. `lanesHeld` is the text, for the tests.
+- `Source/ui/tabs/SlidesTab`: shell.html's "glide" pane (sl-ui.js syncGlideUI, wirePanels): AUTO SLIDE (a `ChoiceBox` on
+  `glideMode` with the prototype's words), SLIDE TIME (`SlideTimeBox`, the prototype's 1/32 .. 1/2 on the float
+  `glideTime`), a line, SELECTED NOTES (a `ToolSlider`, 0 .. 2 beats in 1/64 steps), Auto and Jump, no slide.
+- `Source/ui/tabs/TabPanel`: `add` (any component as an item of the flow), `shortSeparator` (a button's height, not a
+  knob's), `bound` (a parameter one of the panel's own controls holds), `setItemWidth` and `onLayoutChange` (a text
+  that grows lays the pane out again).
+- `Source/ui/Controls`: `ChoiceBox::setLabels` (other words for a choice parameter's items).
+- `Source/ui/roll/RollGestures`: `copyNotes`, `pasteNotes`, `pasteNotesAt`, `noteClipboard`, `laneClipboard`, and
+  `placeCopies` (Duplicate's and Paste notes' second half: the copies past the clip's end left out, the rest cut, one
+  document edit and one undo step); the right-click menu's Paste notes here (Build, empty space, once notes are
+  copied).
+- `Source/ui/roll/RollView`: `copyNotes`, `pasteNotes`; the zoom buttons stay in the ruler only while they are the
+  view's own children.
+- `Source/ui/roll/SelectionBar`: `SelectionTools::slideTime` (a live session, key "slide"), `slideAuto`, `slideJump`.
+- `Source/ui/roll/Drawers`: `ToolSlider::preferredWidthFor`; the slider ignores the mouse while disabled.
+- `Source/ui/MainView`: the two tabs, decision 6 (`paneHeightFor`, `isAutoFolded`, `isInspectorFolded`,
+  `rollFloor`), the zoom buttons in the tab row, the fold button's tooltip, `getFoldButton`, `getTabsArea`.
+- `Source/PluginProcessor.cpp`: a new instance's UIST starts folded.
+- Tests: `Tests/ui/test_copy_paste.cpp` (below); `test_editor` (a new instance folded; the Slides tab's two parameters
+  bound, every parameter but bypass now has a control; at 900 x 560 with the banner the tabs fold, at 900 x 640 the
+  pane scrolls whole rows with its thumb) and `test_controls` (the timer moves the Slides tab's two controls too).
+- `docs/CUBASE-CHECKLIST.md`: the section "M5: selection tools", and notes on what moved in the earlier parts.
+
+### Decisions and deviations
+
+- **Every paste and duplicate is one model call and one undo step** (decisions 1 and 5): Paste lanes is
+  `model::pasteLanes` with `model::copyLanes` of the primary note and the chips' lanes, Duplicate `model::duplicateNotes`,
+  Paste notes `model::pasteNotes`; each is one `ClipDocument` edit and one step ("Paste lanes", "Duplicate", "Paste
+  notes"). Past 4096 notes the model refuses it, the toast says "That would make 4097 notes; the limit is 4096." and
+  nothing changes (no bytes, no step, no clip version); the document's own caps (32 MiB, the snapshot budget) refuse
+  the same way.
+- **Paste notes is new, so its place is chosen to match Duplicate.** The prototype pastes only lanes (M1 added
+  `model::pasteNotes` for the plan's cap). The copies start where the selected notes end (where Duplicate puts its
+  copies), or right after the copied notes when nothing is selected, so Copy notes then Paste notes again and again
+  lays the phrase out one copy after another; the pasted notes are selected. A place of one's own: the Build
+  right-click menu on empty space gets Paste notes here (the grid line at or before the click, as New note here),
+  only once notes are copied, so M4's menus (and the gesture fixtures) are unchanged. As Duplicate (sl-ui.js
+  duplicateSel), copies that would start at or after the clip's end are left out and the rest end at it; the toast
+  says how many were pasted. Ctrl+C and Ctrl+V stay the prototype's lanes.
+- **A Duplicate the document refuses keeps the selection.** M4's Duplicate set the selection to the copies even when
+  the document refused the edit (the 32 MiB cap), which left nothing selected; it now returns with the toast.
+- **The clipboards live as long as the editor window** (the gestures'), as the bar's settings do; the lanes Copy
+  takes are the project's (UIST `copyMask`, which M0's format already had and nothing used).
+- **"holding: ..." lists the lanes in the registry's order.** The prototype lists them in the order the chips were
+  last switched on (a JavaScript Set keeps insertion order); the lanes copied are the same either way. With no lane
+  chosen it says "holding: " and nothing, as the prototype.
+- **Auto slide and Slide time** (decision 4) are lists as in the prototype: AUTO SLIDE with its words ("Legato
+  (touching notes)", "Always (next note)") over the parameter's Off / Legato / Always, SLIDE TIME with 1/32 .. 1/2.
+  Slide time is a float parameter (0 .. 16 beats): a value the list does not hold (automation, a v3 save) shows as the
+  parameter's own text ("0.700 beats"). A pick is one host gesture and one undo step "Auto slide" / "Slide time" (the
+  prototype's patchInst labels); the 30 Hz timer moves them when Cubase's automation does, never an attachment.
+- **SELECTED NOTES is a live slider** (decision 2): `SelectionTools::slideTime` runs a live session as Walk's sliders
+  do (each move rebuilt from the clip the drag started from, shown and played, no undo step; the release one step "Slide
+  time (notes)"). With no note selected it is greyed and reads an em dash; a `ToolSlider` now ignores the mouse while
+  disabled (JUCE hands a disabled component its mouse events). Auto ("Slide: auto": glide null, curve 0) and Jump, no
+  slide ("Slide: jump": glide 0) are one step each, through `SelectionTools::act`.
+- **No hover ghosts on the two tabs.** The prototype's Slides and Copy / Paste panes preview nothing (U6 is shapes,
+  patterns and recipes); their buttons explain themselves in tooltips, as the M0 tabs' do.
+- **Decision 6, a first open:** a new instance's UIST starts with the tabs folded (the processor sets it; the state
+  format's default is unchanged). The prototype folds on a first open in a window under 900 px high; a new StrandLock
+  window is always 680 px high, so it always folds. A project keeps the fold it was saved with.
+- **Decision 6, a short window:** the pane shows whole rows only, and the roll keeps `MainView::rollFloor` (110 px, the
+  number M0's pane rule used) under it: the whole panel when it fits in 2/5 of the room, else whole rows up to the
+  first row end past 2/5 (or the last before it), at least 64 px so the scroll bar has a thumb (fix pass R2-7). When no
+  whole row fits, the tabs show folded (`isAutoFolded`): the person's fold in UIST is unchanged, the tab opens again by
+  itself when the window is taller, and a click on a tab or Show says "This window is too short to show the tab. Make
+  the window taller and the tab opens by itself." The prototype instead cuts the row (its pane's least share is 60 px,
+  fresh1100tab.png cuts the knob row). At 900 x 560 the Sample and Macros tabs fold; Slides, Copy / Paste and Sound
+  show (with notes selected Sound folds too).
+- **Decision 6, the 75 px roll at 900 x 560 with a drawer open** (S1's and S2's note): with the tabs folded and a drawer
+  open, a window too short for the roll's floor gives the inspector's line to the roll (`isInspectorFolded`): at 900 x
+  560 the roll has 137 px (a 107 px canvas) instead of 105 (75). The inspector comes back when the drawer closes or the
+  window grows. The prototype keeps its roll at 150 px there by shrinking the waveform to 40 px and then scrolling the
+  page; the plugin's page cannot scroll, and the strip's sound column (three 26 px buttons) needs its 98 px. The other
+  rows were not touched: the tab row is how the tabs come back, the hint bar shows the hovered control's text, and the
+  mode bar's second row at 900 px is M0's.
+- **Decision 6, the bar numbers (UI4-6):** the zoom buttons H−, H+, V− and V+ moved from the ruler's right end to the
+  tab row, just left of Hide / Show (22 px high there), and the ruler runs the whole width, so no bar number is hidden.
+  The roll view still owns them (MainView takes them as its children; a roll view on its own, as in the tests, keeps
+  them in its ruler). They hide while the Diagnostics tab takes the roll's place. The tab row was chosen because it
+  sits right above the roll on a first open (the tabs folded), near where the buttons were; the top bar and the
+  selection row have no room for them at 900 px.
+- **The M5 table's pictures** are `m5_table_shapes_drawer_*` (the Shapes drawer on Volume), `m5_table_hover_ghost_*`
+  (the mouse on Ramp up: its ghost and its words in the hint bar), `m5_table_box_select_*` (a Shift box in Build
+  adding to two selected notes, held), `m5_tab_copy_paste_*` and `m5_tab_slides_*`, dark and light at 100 %; S1's
+  `m5_box_select_*` and S2's `m5_ghost_*` stay. `m5SnapshotPictures` checks what each must show, so the table's
+  snapshot row is gated too.
+
+### For the architect
+
+- **Paste notes' place** (the prototype has no note paste): after the selected notes, as Duplicate, or at the right-
+  click menu's Paste notes here. A key for it (Ctrl+C and Ctrl+V are the prototype's lane keys) or a paste at Cubase's
+  cursor would need a decision.
+- **A tab on a window too short for it** folds, and a click says why; nothing forces it open. Letting a click open it
+  anyway (the roll then under its floor) is the other way.
+- **The inspector's line gives way to an open drawer on a short window.** The alternatives touch M2's waveform strip
+  (a shorter strip with a compact sound column), or the mode bar's second row at 900 px (M0's).
+- **The zoom buttons in the tab row.** The prototype has them in its top bar, which has no room at 900 px (M4 R2).
+- **The clipboards live with the window:** closing the StrandLock window forgets what was copied. Keeping them in the
+  processor (or sharing them between StrandLock instances) is a small change if Kalan wants it.
