@@ -137,13 +137,165 @@ function sampleRules() {
   for (const parts of [[pk('hit', 0.1, 0.2), pk('quiet', 0.3, 0.4), pk('loop', 0.5, 0.7), pk('steady', 0.8, 0.9)], [pk('hit', 0, 0.1), pk('quiet', 0.2, 0.3)], [pk('steady', 0.5, 0.5), pk('hit', 0.1, 0.2)],
     [], null, [null, pk('other', 0.1, 0.4)], [pk('loop', 0.6, 0.2), pk('loop', 0.1, 0.3)]])
     cases.push({ fn: 'pickPart', input: parts, output: SUI.pickPart(parts) });
+  // M6 T1: the plan's whole product, every sound preset x recipe (none, 1-8) x clip preset (864 pairs), one digest each
+  cases.push({ fn: 'productClips', input: null, output: M.CLIP_PRESETS.map(cp => cp.id) });
+  for (const p of M.SOUND_PRESETS) for (const n of [0, ...M.RECIPES.map(R => R.n)]) {
+    const output = M.CLIP_PRESETS.map(cp => {
+      let I = insts['sound:' + p.id], c = M.loadClipPreset(cp.id);
+      if (n) { const r = M.applyRecipe(c, I, n, null); I = r.inst; c = r.clip; }
+      return fnvText(productText(SUI.fades(I, c), SUI.contexts(I, c), SUI.grainKind(I, c)));
+    }).join(' ');
+    cases.push({ fn: 'product', input: [p.id, n], output });
+  }
   return { prototype: C.prototypeHashes(['src/sl-ui-sample.js']),
     tolerance: { text: 'exact', default: 'exact' },
     notes: ['input.inst names an entry of insts (sound:<id> = applySoundPreset(defaultInst(), id).inst, recipe:<n> = applyRecipe(Strand Demo, sound:init, n).inst, the rest are sound:init with a patch); input.clip names a clip ("preset:<id>" = loadClipPreset)',
       'input.recipe: n = the clip after applyRecipe(clip, inst, n, every note)',
       'fades/contexts/grainKind/headsMulti/toneAllOpen/randomInUse are SLSampleUI\'s pure part (sl-ui-sample.js) with the same (inst, clip)',
-      'the plan asks for every sound preset x recipe x clip preset; that product (864 fades) is far over the size budget, so the cases are every sound preset x 4 clips, every recipe on Strand Demo and 8 targeted cases'],
+      'the plan asks for every sound preset x recipe x clip preset; that product (864 fades) is far over the size budget, so the cases are every sound preset x 4 clips, every recipe on Strand Demo and 8 targeted cases',
+      'product (M6 T1): the whole product as digests. Input [sound preset id, recipe n]: inst = sound:<id>, and with a recipe (n > 0) inst and clip are applyRecipe(clip, inst, n, every note); output: one digest per clip preset in productClips\' order, space-separated, each FNV-1a 32 over the UTF-8 bytes of the text as 8 lowercase hex digits',
+      'product text: per fades rule in order "<id> <1|0 faded> <notes> <reason>\\n"; per context "<who> <count> <kind> <engine> <motion> <travel> <from: lock motion tape rev jump as 0/1, no spaces>\\n"; then "grainKind <kind|null>\\n"'],
     clips, insts, cases };
+}
+
+// The text a product digest is taken over (sampleRules' notes say how it is laid out).
+function productText(F, cx, gk) {
+  let t = '';
+  for (const id of Object.keys(F)) t += id + ' ' + (F[id].faded ? 1 : 0) + ' ' + F[id].notes + ' ' + F[id].reason + '\n';
+  for (const c of cx) t += [c.who, c.count, c.kind, c.engine, c.motion, c.travel, ['lock', 'motion', 'tape', 'rev', 'jump'].map(k => (c.from[k] ? 1 : 0)).join('')].join(' ') + '\n';
+  return t + 'grainKind ' + (gk === null ? 'null' : gk) + '\n';
+}
+function fnvText(text) {
+  const b = Buffer.from(text, 'utf8');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < b.length; i++) { h ^= b[i]; h = Math.imul(h, 0x01000193); }
+  return (h >>> 0).toString(16).padStart(8, '0');
+}
+
+// M6 T1: what the Sample and Macros tabs' controls do, from the real sl-ui-sample.js running under the prototype tests'
+// own minimal DOM and fake SLApp (prototype-v4/tests/test-ui-sample.js boot (), word for word): a drag, a typed value
+// and a double-click on every knob, the knobs' readouts, and every control's faded state, tooltip and hint line in a
+// few settings on Strand Demo.
+function sampleControls() {
+  const { M, SND, AN } = C.load();
+  const H = require(path.join(C.TESTS, 'ui-helpers', 'minidom.js'));
+  const boot = new Function('fs', 'vm', 'M', 'SND', 'AN', 'makeDocument', 'Option', 'SRC',
+    '"use strict";\n' + C.testFunctionSource('test-ui-sample.js', 'boot') + '\nreturn boot;')(fs, require('vm'), M, SND, AN, H.makeDocument, H.Option, C.SRC);
+  const drag = new Function('dispatch', '"use strict";\n' + C.testFunctionSource('test-ui-sample.js', 'drag') + '\nreturn drag;')(H.dispatch);
+  const T = boot();
+  const { doc, S, App, flush } = T;
+  const box = id => doc.getElementById(id);
+  const dialsIn = id => H.findAll(box(id), n => n.tagName === 'SVG' && n.classList.contains('sls-dial'));
+  const valOf = dial => dial.parentNode.childNodes[2];
+
+  // the knobs, each with the inst field it edits (the Grain knob's depends on the engine)
+  const OFFSETS = ['amp', 'vib', 'tone', 'formant', 'hollow'], OFFSET_NAMES = ['Volume', 'Vibrato', 'Tone', 'Formant', 'Hollow'];
+  const GRAIN = { voice: 'grainVoice', cloud: 'grainCloud', lock: 'grainLock', tape: 'grainVoice' };
+  const knobs = [
+    ['Speed', I => I.speed, v => ({ speed: v })], ['Heads', I => I.heads, v => ({ heads: v })], ['Spread', I => I.spread, v => ({ spread: v })],
+    ['Grain', null, null], ['Spray', I => I.spray, v => ({ spray: v })], ['Drift', I => I.drift, v => ({ drift: v })], ['Pitch', I => I.pitch, v => ({ pitch: v })],
+    ['Refresh time', I => I.refresh.ms, v => ({ refresh: { ms: v } })], ['Skip', I => I.refresh.skip, v => ({ refresh: { skip: v } })],
+    ...M.MACRO_NAMES.map((name, i) => ['Macro ' + name, I => I.macros[i], (v, I) => ({ macros: I.macros.map((x, k) => (k === i ? v : x)) })]),
+    ...OFFSETS.map((k, j) => ['Offset ' + OFFSET_NAMES[j], I => I.offsets[k], v => ({ offsets: { [k]: v } })])];
+  const dials = [...dialsIn('sampleTab'), ...dialsIn('macrosBox')];
+  const shown = dials.map(d => d.getAttribute('aria-label'));
+  const want = knobs.map(k => k[0].replace(/^(Macro|Offset) /, ''));
+  if (JSON.stringify(shown) !== JSON.stringify(want)) throw new Error('make-fixtures: the Sample and Macros tabs\' knobs are not ' + want.join(', ') + ' but ' + shown.join(', '));
+
+  // the settings: sound:init on Strand Demo, plus patches; each is in insts in full
+  const I0 = S.inst, insts = {};
+  const CTX = { voice: {}, cloud: { engine: 'cloud' }, lock: { engine: 'cloud', lock: true }, tape: { engine: 'tape' },
+    busy: { engine: 'cloud', lock: true, motion: 'scatter', heads: 2.5, refresh: { mode: 'free', skip: 0.25 }, spray: 0.2, drift: 0.3, macros: [0.75, 0.5, 0.5, 0.5, 0.5, 0.5, 0.95, 0.5], offsets: { tone: 0.2 } },
+    still: { engine: 'tape', motion: 'bounce', heads: 3, refresh: { mode: 'sync' }, headTune: 'fifths', tape: true, rev: true, region: { atEnd: 'hold' } } };
+  for (const k of Object.keys(CTX)) insts[k] = M.normalizeInst(M.mergeInst(I0, CTX[k]));
+  const getter = (k, ctx) => (knobs[k][1] || (I => I[GRAIN[ctx]]));
+  const patcher = (k, ctx) => (knobs[k][2] || (v => ({ [GRAIN[ctx]]: v })));
+  const setUp = (ctx, k, from) => {
+    let I = insts[ctx];
+    if (from != null) I = M.mergeInst(I, patcher(k, ctx)(from, I));
+    App.setInst(I, null);
+    flush();
+  };
+  const cases = [];
+  const R = (fn, input, output) => cases.push({ fn, input, output });
+  const result = (k, ctx, n0, t0) => {
+    const o = [getter(k, ctx)(S.inst), valOf(dials[k]).textContent, S.pushes.length - n0, S.pushes.length > n0 ? S.pushes[n0] : null];
+    if (S.toasts.length > t0) o.push(S.toasts[S.toasts.length - 1]);
+    return o;
+  };
+  // where each knob starts: its default (or for Grain, the engine's grain default), and one more value (binary32-exact)
+  const FROM = { Speed: [1, 0.25], Heads: [1, 4.5], Spread: [0.25, 0.75], Spray: [0, 0.5], Drift: [0, 0.375], Pitch: [0, -12], 'Refresh time': [120, 750], Skip: [0, 0.5] };
+  const GRAIN_FROM = { voice: [2, 0.5], cloud: [140, 20], lock: [4, 11], tape: [2] };
+  const DRAGS = [[1, false], [3, false], [17, false], [85, false], [-9, false], [-60, false], [5, true], [-23, true]];
+  const TYPED = ['0.5', '4.3', '-3', 'abc', '2 s', '99999'];
+  for (let k = 0; k < knobs.length; k++) {
+    const name = knobs[k][0], grain = name === 'Grain';
+    const ctxs = grain ? ['voice', 'cloud', 'lock', 'tape'] : ['voice'];
+    for (const ctx of ctxs) {
+      const froms = grain ? GRAIN_FROM[ctx] : (FROM[name] || [k < 17 ? 0.75 : -0.5]);
+      for (const from of froms) {
+        for (const [dy, shift] of DRAGS) {
+          setUp(ctx, k, from);
+          const n0 = S.pushes.length, t0 = S.toasts.length;
+          drag(dials[k], dy, shift);
+          flush();
+          R('knobDrag', [name, ctx, from, dy, shift], result(k, ctx, n0, t0));
+        }
+        setUp(ctx, k, from);
+        const n0 = S.pushes.length, t0 = S.toasts.length;
+        H.dispatch(dials[k], 'dblclick', {});
+        flush();
+        R('knobReset', [name, ctx, from], result(k, ctx, n0, t0));
+      }
+      // typing (the macros and offsets take no typing: clicking their value does nothing)
+      for (const text of (k < 9 ? TYPED : k === 9 || k === 17 ? ['0.7'] : [])) {
+        setUp(ctx, k, null);
+        const n0 = S.pushes.length, t0 = S.toasts.length;
+        valOf(dials[k]).click();
+        const inp = H.findAll(doc.body, n => n.tagName === 'INPUT' && n.className === 'sls-kin')[0];
+        if (inp) { inp.value = text; H.dispatch(inp, 'keydown', { key: 'Enter' }); }
+        flush();
+        R('knobType', [name, ctx, text], [...result(k, ctx, n0, t0), !!inp]);
+      }
+    }
+  }
+
+  // every control's faded state, tooltip and hint line, in each setting
+  const tab = box('sampleTab'), mac = box('macrosBox');
+  const sugLine = tab.firstChild;
+  const fadedIn = (n, top) => { for (let x = n; x && x !== top.parentNode; x = x.parentNode) if (x.classList && x.classList.contains('sls-faded')) return true; return false; };
+  const controls = () => {
+    const out = [];
+    const segLabel = b => { const seg = b.parentNode; return seg.classList.contains('sls-seg') ? seg.parentNode.firstChild.textContent : null; };
+    for (const b of H.findAll(tab, n => n.tagName === 'BUTTON' && !n.classList.contains('sls-pin') && !sugLine.contains(n))) {
+      const g = segLabel(b);
+      out.push([(g ? g + ': ' : '') + b.textContent, b, b, tab]);
+    }
+    for (const s of H.findAll(tab, n => n.tagName === 'SELECT')) out.push([s.getAttribute('aria-label'), s.parentNode, s.parentNode, tab]);
+    for (let k = 0; k < dials.length; k++) out.push([knobs[k][0], dials[k].parentNode, dials[k].parentNode, k < 9 ? tab : mac]);
+    for (const b of H.findAll(mac, n => n.tagName === 'BUTTON')) out.push([b.textContent, b, null, mac]);
+    return out;
+  };
+  let first = null;
+  for (const ctx of ['voice', 'cloud', 'busy', 'still']) {
+    setUp(ctx, 0, null);
+    App.setInst(S.inst, 'x');   // a finished change syncs every control at once
+    flush();
+    const out = {};
+    for (const [name, node, hover, top] of controls()) {
+      if (out[name]) throw new Error('make-fixtures: two controls named ' + name);
+      let hint = null;
+      if (hover) { H.dispatch(hover, 'mouseenter', {}); hint = S.hint; H.dispatch(hover, 'mouseleave', {}); }
+      const knob = node.classList.contains('sls-knob');
+      const o = [fadedIn(node, top) ? 1 : 0, knob && node.classList.contains('sls-off') ? 1 : 0, node.title, hint, knob ? node.childNodes[2].textContent : null];
+      // after the first setting, a tooltip or hint the same as the first setting's is written as 0
+      if (first) { if (o[2] === first[name][2]) o[2] = 0; if (o[3] === first[name][3] && hint !== null) o[3] = 0; }
+      out[name] = o;
+    }
+    if (!first) first = out;
+    R('controls', ctx, out);
+  }
+  return { insts, cases };
 }
 
 function readouts() {
@@ -179,10 +331,18 @@ function readouts() {
   for (const [st, fst, marks, tol] of qN) for (const v of [1.04, 1.93, 2.5, 0.123456, 7.97, -3.3, 0.3333]) for (const fine of [false, true])
     R('qLin', [st, fst, marks, tol, v, fine], KM.qLin(st, fst, marks || undefined, tol == null ? undefined : tol)(v, fine));
   for (const [v, marks, tol] of [[1.03, [1, 2], 0.06], [1.5, [1, 2], 0.06], [190, [20, 50, 100, 140, 200, 500, 1000], 0.04], [205, [200], 0.04]]) R('magnetLog', [v, marks, tol], KM.magnetLog(v, marks, tol));
-  return { prototype: C.prototypeHashes(['src/sl-ui-sample.js']),
+  const controls = sampleControls();
+  for (const c of controls.cases) cases.push(c);
+  return { prototype: C.prototypeHashes(['src/sl-ui-sample.js', 'tests/test-ui-sample.js', 'tests/ui-helpers/minidom.js']),
     tolerance: { text: 'exact', default: 'exact' },
     notes: ['macroText, offsetText, parseNum/parseMs/parsePct and KNOB_MATH are exported by SLSampleUI; fmtX, fmtPct, fmtSt, fmtCycles, fmtMs, fmtHeads and signed are private and read from an in-memory copy of sl-ui-sample.js with those names added to its pure export',
-      'qLog input [marks, digits|null, v, fine] = qLog(marks, digits)(v, fine); qLin input [step, fineStep, marks|null, tol|null, v, fine]; toNorm/fromNorm input [knob spec, value]; the specs are the Sample tab\'s (Speed, Heads, Cloud grain, Pitch, Spread)'],
+      'qLog input [marks, digits|null, v, fine] = qLog(marks, digits)(v, fine); qLin input [step, fineStep, marks|null, tol|null, v, fine]; toNorm/fromNorm input [knob spec, value]; the specs are the Sample tab\'s (Speed, Heads, Cloud grain, Pitch, Spread)',
+      'M6 T1: knobDrag, knobReset, knobType and controls come from the real sl-ui-sample.js run under prototype-v4/tests/test-ui-sample.js\'s own boot () (its minimal DOM and fake SLApp) on Strand Demo, the instrument insts[ctx]',
+      'a knob is named by its undo label (Speed ... Skip on the Sample tab, "Macro Speed" ..., "Offset Volume" ...); Grain edits grainVoice, grainCloud or grainLock as the engine asks (ctx voice, cloud, lock; in tape it does nothing)',
+      'knobDrag input [knob, ctx, from, dy, shift]: the knob set to from, then the test file\'s drag (dial, dy, shift): pointer down at y 300, five moves to y 300 - dy k / 5 with Shift, up; knobReset input [knob, ctx, from]: a double-click; knobType input [knob, ctx, text]: a click on the value, text typed, Enter',
+      'their output [value, readout, undo steps, the first step\'s label or null, the toast when one came]; knobType adds whether a text box opened',
+      'controls input ctx, output {control: [faded 1|0 (it or a group around it is), off 1|0 (a knob with nothing to do), tooltip (title), hint line on hover (null: none), knob readout or null]}; a control is named by its text ("Engine: Tape" inside a group), a drop-down by its label, a knob as above; after the first case a tooltip or hint equal to the first case\'s is written as 0'],
+    insts: controls.insts,
     cases };
 }
 

@@ -64,8 +64,8 @@ default lanes, `"NaN"` strings), rebuilt the inputs from the JSON alone, ran the
 | analysis/detect.json | 28 | 12,546 |
 | ui/theme.json | 2 | 4,279 |
 | ui/inspector.json | 408 | 106,025 |
-| ui/sample-rules.json | 309 | 176,595 |
-| ui/readouts.json | 907 | 60,879 |
+| ui/sample-rules.json | 382 | 189,014 |
+| ui/readouts.json | 1309 | 134,522 |
 | state/prototype-*.json (4) | - | 65,770 |
 | state/import.json | 4 | 29,508 |
 | **total** | | **4,681,609 (4.68 MB)** |
@@ -95,8 +95,8 @@ Strand Demo at res 256 is 176 KB inside snapshots.json, as the plan measured.
 | `analysis/detect.json` | detects the same pitch, key and suggested parts on the starters, the test signals, silence, and four long files joined from them. |
 | `ui/theme.json` | has the 77 colour tokens of each theme with the prototype's exact values. |
 | `ui/inspector.json` | parses and prints bar positions, lengths, note names, rates and typed lane values like the inspector, and simulates what head 1 reads for the note thumbnails. |
-| `ui/sample-rules.json` | fades the same Sample-tab controls with the same reasons, finds the same contexts and grain kind, and makes the same engine suggestion and default part. |
-| `ui/readouts.json` | prints every macro, offset and knob readout character for character, and parses typed values and knob positions the same way. |
+| `ui/sample-rules.json` | fades the same Sample-tab controls with the same reasons, finds the same contexts and grain kind, and makes the same engine suggestion and default part. Since M6 also the whole sound preset x recipe x clip preset product (864 pairs), as one digest per pair. |
+| `ui/readouts.json` | prints every macro, offset and knob readout character for character, and parses typed values and knob positions the same way. Since M6 also what the real Sample and Macros tabs do (run under the prototype tests' own minimal DOM): where a drag, a typed value and a double-click leave each knob, with its undo steps, and every control's faded state, tooltip and hint line in four settings. |
 
 ## Encoding (plan 5.1, plus what the plan left open)
 
