@@ -647,11 +647,13 @@ prototype UI5-1 and UI5-2, tests and threads R5T-1 to R5T-4). Branch `m5-fixes`,
 
 ### Progress
 
-- Done: every finding read against the code and the prototype; 10 fixed with a test that fails without the fix, 1
-  (UI5-2) kept as it is with a question on Kalan's checklist, 1 (R5T-4) the same fault as P2.
-- In progress: the first CI run of the fixes.
-- Next: look at the new pictures (`m5_ghost_connect_dark`, `m5_ghost_disconnect_light`) and the changed ones, then
-  the CI figures here, then the fast-forward of main.
+- Done: every finding read against the code and the prototype. Fixed: P1 to P6, R5T-1 to R5T-3 (each with a check
+  that fails without the fix) and UI5-1 (the checklist); R5T-4 is P2's fault, fixed with it; UI5-2 is kept as it is,
+  with a question on Kalan's checklist (below).
+- Done: run 44722901249 on e273559 (the fixes), green on every job and step (figures below); its 90 pictures compared
+  with main's and the 2 new ones looked at. The new ones showed the notes low in the roll (the scroll was set before
+  the bar took its room), so the pictures' scroll is now set after it.
+- In progress: CI on this commit (the pictures' scroll and these notes), then the fast-forward of main.
 
 ### The findings
 
@@ -750,3 +752,46 @@ prototype UI5-1 and UI5-2, tests and threads R5T-1 to R5T-4). Branch `m5-fixes`,
   it to whole rows needs either a drawer under the 62 px scroll bar floor or a roll under decision 6's 110 px.
 - **RollState::isSelected searches the selection list.** Its callers that loop over notes now use a set; a set kept in
   RollState would need every writer of the selection to keep it (M8's performance pass, with M4's R4T-3).
+
+### CI results
+
+- Run 44722901249 on e273559 (the fixes), green on every job and step the first time: Windows Release 1815 checks in
+  310 tests (main had 1797 in 303), Linux Release 1807 in 310 (1789 in 303), the `ui` group 99 tests and 475 checks
+  on both platforms (S3: 92 and 457; the fix pass adds 7 tests and 18 checks), the sanitizers' contract, model and
+  engine groups 808 in 139 and the state group 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions),
+  the Debug pictures 0 JUCE assertions, pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4.87 MB
+  of the 5 MB budget; the fix pass adds no fixtures). Every M0-M5 test still passes, among them the drawer sweep (the
+  busy rule changes no bytes) and the editor ghost test (every hover drew its ghost and none after).
+- P1 (`selectionBarPrimaryChange`): A primary, the drawer shows Square, 1/8, 80 %, locked; B made the primary, the same
+  drawer shows Triangle, 1/4, 20 %, unlocked; Lock to the beat then makes "Pattern locked to the beat (Tone)" on B's
+  Triangle; C as the primary lights Apply with "Choose the settings (the dashed line shows the result), then Apply.".
+- P2 (`copyPasteLanesRefusedBySize`): the direct call encodes to 33.8 MB; refused with "That would make the clip 33.8
+  MB; the limit is 32 MB.", 0 undo steps, the bytes and the version unchanged; onto 3 notes "Pasted onto 3 notes", one
+  step "Paste lanes", the bytes of `model::pasteLanes`.
+- P3 (`copyPasteCopiesPastTheEndDoNotCount`): Duplicate of the review's 100 notes: 4087 notes, the bytes of the
+  prototype's whole Duplicate, one step, the 87 copies selected; Paste notes the same, "Pasted 87 of 100 notes: the
+  rest would start after the clip's end"; on 4050 notes "That would make 4137 notes; the limit is 4096."; 120 of 120
+  seeded Duplicates and Paste notes the bytes of the whole call with the copies past the end taken out (104 left some
+  out). The same rule run on the prototype's own model (node, the sl-model.js duplicateNotes with and without the
+  copies that fit): 400 of 400 the same, 378 of them leaving copies out.
+- P4 (`selectionToolsOwnEditsKeepTheDrawers`): Pattern at 30 %, then More: the notes swing 0.60 (the bytes of
+  `model::scaleLane`), the drawer keeps 0.30, the lane menu's Pattern item puts 30 % back; Random at 50 %, then Less:
+  the notes 0.25, the drawer 0.50, the Random item puts 50 % back; Undo, a mode change on the same lane and another
+  selection each read the note's 0.60; in the editor the Tone arrow's "Pattern: ..." after More puts 30 % back, one step
+  "Pattern (Tone)". The prototype's panels give the same for More and Less (the review's node script on
+  sl-ui-panels.js: the drawer keeps 0.3 and 0.5, and the menu items put 0.3 and 0.5 back).
+- P5 (`ghostSlideLinks`): Nearest's ghost has one link, from A's end (beat 1) to B's start (beat 2, C4's row), and 23
+  pixels (Linux) and 26 (Windows) change within 6 px of its middle; Disconnect's cross changes 52 pixels around it.
+- R5T-1 (`ghostsGoWithTheirClip`): Ramp up's ghost after Swell stays through the editor's tick and goes with Undo, Redo,
+  Escape and a state load; Reverse's goes with a mode change.
+- R5T-3 (`selectionScanCost`): with 4096 notes selected the selection in time order takes 0.74 ms a call on Linux and
+  0.58 ms on Windows (target 2 ms, gate 10 ms), the bar's sync, ids and anyGen 2.03 and 1.59 ms (target 6, gate 30);
+  a slider press and two moves on one step make 1 input.
+- P6 and R5T-2 (`selectionBarInTheEditor`): Flip the selection on every third note selects exactly the others; the
+  Walk release is exactly one undo step (one Undo gives the clip after the Walk click, two the clip before it).
+- The pictures (run 44722901249's artifact, 90), compared byte for byte with main's (run 44706556922): 88 the same and 2
+  new, `m5_ghost_connect_dark` (Nearest's dashed link from C3's end to C4's start with its dot, the ghost of C3's slide,
+  "Each note slides into the closest pitch among the next notes" in the hint bar) and `m5_ghost_disconnect_light` (the
+  slide made, its link line and chain mark, the ghost's cross half way along it, "Remove the slides between the
+  selected notes"). Nothing cut, overlapping or off-palette, but C3 sat at the roll's bottom edge, half behind the
+  scroll bar: the pictures set their scroll before the bar and its drawer took their room. Fixed for the next run.
