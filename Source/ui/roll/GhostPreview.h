@@ -76,10 +76,10 @@ namespace sl::ui::roll
 
     //==============================================================================================
     /** The mouse hooks of the controls that preview (sl-ui-panels.js ghostOn and hintOn): on entering a control its
-        preview is drawn and its text goes to the hint bar; on leaving, both go; a press takes the preview away first
-        (sl-ui-panels.js button: clearGhost, then the click). Each hook is a juce::MouseListener on its control; one
-        that outlives its control is left alone, and the hooks of a control that goes take its preview and hint with
-        them (a drawer rebuilt under the mouse). */
+        preview is drawn (not while it is greyed: a click on it does nothing) and its text goes to the hint bar; on
+        leaving, both go; a press takes the preview away first (sl-ui-panels.js button: clearGhost, then the click).
+        Each hook is a juce::MouseListener on its control; one that outlives its control is left alone, and the hooks
+        of a control that goes take its preview and hint with them (a drawer rebuilt under the mouse). */
     class HoverHooks
     {
     public:

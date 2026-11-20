@@ -359,9 +359,15 @@ SL_TEST ("ui", ghostsOwnersAndDrawer)
     hooks.press (b);
     const bool pressed = ! t.ghosts.isShown() && hint.isNotEmpty();
     hooks.exit (b);
-    check (on && pressed && hint.isEmpty() && t.rig.steps == 1,
+    const bool off = hint.isEmpty() && ! t.ghosts.isShown();
+    // a greyed button draws no preview (a click on it does nothing), and still shows its text
+    b.setEnabled (false);
+    hooks.enter (b);
+    const bool greyed = ! t.ghosts.isShown() && hint == "Rises to the middle, then falls";
+    hooks.exit (b);
+    check (on && pressed && off && greyed && t.rig.steps == 1,
            fmt ("a hooked button: on it, its tooltip in the hint bar and its ghost (%d); a press takes the ghost away first (%d); off it, the "
-                "hint goes (%d)", (int) on, (int) pressed, (int) hint.isEmpty()));
+                "hint goes (%d); greyed, its text and no ghost (%d)", (int) on, (int) pressed, (int) off, (int) greyed));
 }
 
 //==================================================================================================

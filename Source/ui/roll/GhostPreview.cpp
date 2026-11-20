@@ -161,7 +161,10 @@ namespace sl::ui::roll
 
     void HoverHooks::entered (Hook& h)
     {
-        if (ghosts != nullptr && h.make)
+        // a greyed control can do nothing now, so it draws no preview (its text still says what it does), as a greyed
+        // menu item draws none
+        const auto* c = h.target.getComponent();
+        if (ghosts != nullptr && h.make && c != nullptr && c->isEnabled())
             ghosts->hover (h.key, h.make);
         const auto t = h.hintText();
         if (t.isNotEmpty() && hint)
