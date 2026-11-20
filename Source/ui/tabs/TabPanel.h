@@ -8,6 +8,7 @@
 #include "params/ParamIds.h"
 #include "ui/Controls.h"
 
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -48,6 +49,10 @@ namespace sl::ui
         /** The ids of every parameter a control on the panel is bound to, in the order they were added. */
         const juce::StringArray& getBoundIds() const noexcept { return boundIds; }
 
+        /** Called when an item's width changed (a text that grew), so the pane around the panel can take the panel's
+            new height. */
+        std::function<void()> onLayoutChange;
+
         static constexpr int padX = 8, padY = 6, gap = 6, rowGap = 6;
 
     protected:
@@ -61,6 +66,25 @@ namespace sl::ui
         Caption& caption (const juce::String& text, Caption::Style style);
         void separator();
         void newRow() { breakNext = true; }
+
+        /** Any component as an item of the flow, width x height (the M5 tabs' own buttons, slider and texts). */
+        template <class C>
+        C& add (std::unique_ptr<C> c, int width, int height)
+        {
+            auto& ref = *c;
+            addItem (std::move (c), width, height);
+            return ref;
+        }
+
+        /** A thin line between groups in a row of buttons (shell.html .sep), as tall as a button: it keeps the row a
+            button's height, where separator () is a knob's. */
+        void shortSeparator();
+
+        /** A parameter one of the panel's own controls is bound to (getBoundIds). */
+        void bound (params::P p) { boundIds.add (idOf (p)); }
+
+        /** An item takes another width: the panel lays itself out again and calls onLayoutChange. */
+        void setItemWidth (const juce::Component& item, int width);
 
         const Theme& theme;
         juce::AudioProcessorValueTreeState& state;

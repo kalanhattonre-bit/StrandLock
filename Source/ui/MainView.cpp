@@ -7,8 +7,10 @@
 #include "params/ParamIds.h"
 #include "ui/Logo.h"
 #include "ui/roll/LaneMenu.h"
+#include "ui/tabs/CopyPasteTab.h"
 #include "ui/tabs/MacrosTab.h"
 #include "ui/tabs/SampleTab.h"
+#include "ui/tabs/SlidesTab.h"
 #include "ui/tabs/SoundTab.h"
 
 #include <cmath>
@@ -23,8 +25,10 @@ namespace sl::ui
         constexpr int kHintHeight = 30;
         constexpr int kPaneScrollBar = 8;
         constexpr int kMinScrollingPane = 32 + 2 * 2 * kPaneScrollBar;   // LookAndFeel_V2: minimum thumb = 2 x thickness
+        constexpr int kComingHeight = 32;   // a tab that is not built yet: its one line
         constexpr int kBarPadX = 8, kItemHeight = 26, kGap = 5, kModeGap = 4;
         constexpr int kHistoryButtonWidth = 30, kGridBoxWidth = 70;
+        constexpr int kZoomGap = 10;   // between the zoom buttons and Hide / Show in the tab row
         constexpr double kClearArmMs = 2500.0;   // sl-ui.js Clear all: the second click within 2.5 s
 
         const char* const kTabNames[] = { "Sample", "Macros", "Note settings", "Slides", "Copy / Paste", "Mod wheels", "Sound", "Diagnostics" };
@@ -35,12 +39,15 @@ namespace sl::ui
             nullptr,
             nullptr,
             "Settings for the selected notes (engine, motion, the knobs per note) arrive in M6.",
-            "Slides between notes, Auto slide and Slide time arrive in M5.",
-            "Copying lanes from one note and pasting them onto others arrives in M5.",
+            nullptr,
+            nullptr,
             "The two mod wheels, MIDI Learn and Let go arrive in M8.",
             nullptr,
             nullptr,
         };
+
+        // Decision 6: a click on a tab while the window is too short for its controls
+        constexpr const char* kTooShort = "This window is too short to show the tab. Make the window taller and the tab opens by itself.";
 
         constexpr const char* kTryThis = "play C3 on your keyboard, then open the Diagnostics tab.";
 
@@ -282,24 +289,46 @@ namespace sl::ui
         roll.getTools().onShowLane = [this] (core::LaneId lane) { showLane (lane); };
         addAndMakeVisible (inspector);
 
-        // Tabs and panes.
+        // Tabs and panes. While the window is too short for the open tab (decision 6), a click on a tab or Show says so.
         tabStrip.onClick = [this] (int index)
         {
-            if (index == openTabIndex && ! folded)
+            if (index == openTabIndex && ! folded && ! autoFolded)
                 setFolded (true);
             else
                 openTab (index);
+            tooShortToast();
         };
         addAndMakeVisible (tabStrip);
         foldButton = std::make_unique<FoldButton> (t);
         foldButton->setTooltip ("Fold the panel away to give the roll more room (or click the open tab)");
-        foldButton->onClick = [this] { setFolded (! folded); };
+        foldButton->onClick = [this]
+        {
+            if (! (autoFolded && ! folded))
+                setFolded (! folded);
+            tooShortToast();
+        };
         addAndMakeVisible (*foldButton);
+
+        // The roll's zoom buttons (the view owns them) at the right end of the tab row: at the right end of the ruler
+        // they hid its last bar numbers (M4 review UI4-6, decision 6).
+        for (int i = 0; i < 4; ++i)
+            addAndMakeVisible (roll.getZoomButton (i));
 
         auto& apvts = processor.getApvts();
         panels[sampleTab] = std::make_unique<SampleTab> (t, apvts);
         panels[macrosTab] = std::make_unique<MacrosTab> (t, apvts);
         panels[soundTab] = std::make_unique<SoundTab> (t, apvts);
+        {
+            // M5 S3: the Slides and Copy / Paste tabs act on the roll's notes
+            auto slidesPanel = std::make_unique<SlidesTab> (t, apvts, roll, processor);
+            auto copyPanel = std::make_unique<CopyPasteTab> (t, apvts, roll, processor);
+            slides = slidesPanel.get();
+            copyPaste = copyPanel.get();
+            slides->onLayoutChange = [this] { resized(); };
+            copyPaste->onLayoutChange = [this] { resized(); };
+            panels[slidesTab] = std::move (slidesPanel);
+            panels[copyTab] = std::move (copyPanel);
+        }
         for (int i = 0; i < numTabs; ++i)
             if (kComing[i] != nullptr)
                 panels[(std::size_t) i] = std::make_unique<ComingPanel> (t, kComing[i]);
@@ -386,6 +415,10 @@ namespace sl::ui
 
     MainView::~MainView()
     {
+        if (slides != nullptr)
+            slides->onLayoutChange = nullptr;
+        if (copyPaste != nullptr)
+            copyPaste->onLayoutChange = nullptr;
         roll.onToast = nullptr;
         roll.onToastFor = nullptr;
         roll.onEdit = nullptr;
@@ -470,6 +503,17 @@ namespace sl::ui
         return dynamic_cast<TabPanel*> (panels[(std::size_t) tab].get());
     }
 
+    juce::Button& MainView::getFoldButton() noexcept
+    {
+        return *foldButton;
+    }
+
+    void MainView::tooShortToast()
+    {
+        if (autoFolded)
+            showToast (kTooShort, 3200);
+    }
+
     void MainView::paintModes()
     {
         buildButton.setToggleState (mode == 1, juce::dontSendNotification);
@@ -541,6 +585,12 @@ namespace sl::ui
         // settles here, on the editor's timer, once the mouse has left the roll)
         selectionBar.sync();
         updateBarHeight();
+
+        // the Slides and Copy / Paste tabs (M5 S3): the primary note's slide, what Copy holds
+        if (slides != nullptr)
+            slides->sync();
+        if (copyPaste != nullptr)
+            copyPaste->sync();
 
         // Undo and Redo (sl-ui.js historyChanged): enabled when there is a step, the step's name in the tooltip
         const auto undoLabel = processor.undoLabel(), redoLabel = processor.redoLabel();
@@ -832,8 +882,37 @@ namespace sl::ui
         const int barWidth = selRowArea.getWidth() - 2 * kBarPadX;
         selectionBar.setBounds (selRowArea.getX() + kBarPadX, selRowArea.getY() + kSelRowHeight, barWidth, barHeight);
 
+        // row 3 is not there while an open drawer has taken it on a short window (decision 6)
+        inspector.setVisible (! inspectorFolded);
+        if (inspectorFolded)
+            return;
         const auto row3 = selRowArea.withTrimmedTop (kSelRowHeight + barHeight).withTrimmedBottom (1).reduced (kBarPadX, 0);
         inspector.setBounds (row3.getX(), row3.getY(), row3.getWidth(), row3.getHeight() - 3);
+    }
+
+    int MainView::paneHeightFor (int width, int room) const
+    {
+        // Plan 7.7 decision 6 (M4 review UI4-7): the pane shows whole rows of controls, never a row cut through, and the
+        // roll keeps rollFloor under it. The whole panel when it fits in 2/5 of the room; else it scrolls, showing whole
+        // rows (at least kMinScrollingPane, so its scroll bar has a thumb): up to the first row end past 2/5 of the room,
+        // or the last one before it (M0's rule). 0 when not even one row fits: the tabs fold until the window is taller.
+        const auto* tp = dynamic_cast<const TabPanel*> (panels[(std::size_t) openTabIndex].get());
+        if (tp == nullptr)
+            return room - kComingHeight >= rollFloor ? kComingHeight : 0;
+        const int most = juce::jmax (80, room * 2 / 5);
+        const auto whole = tp->rowEnds (width);
+        if (! whole.empty() && whole.back() <= most && room - whole.back() >= rollFloor)
+            return whole.back();
+        int pick = 0;
+        for (const int e : tp->rowEnds (width - paneViewport.getScrollBarThickness()))
+        {
+            if (e < kMinScrollingPane || room - e < rollFloor)
+                continue;
+            pick = e;
+            if (e >= most)
+                break;
+        }
+        return pick;
     }
 
     void MainView::resized()
@@ -911,22 +990,61 @@ namespace sl::ui
             if (want > barHeight || ! rollHeld())
                 barHeight = want;
         }
-        selRowArea = area.removeFromTop (kSelRowHeight + barHeight + kInspectorRowHeight);
+
+        // Plan 7.7 decision 6: the pane and the roll share what the bars leave. An open tab shows whole rows of its
+        // controls above the roll's floor, or the tabs fold while the window is too short for that (the person's fold
+        // stays as it is); with the tabs folded and a drawer open, a window too short for the roll's floor gives the
+        // inspector's line to the roll.
+        const int stripHeight = WaveStrip::heightFor (getHeight());
+        const bool diag = openTabIndex == diagTab && ! folded;
+        const int shared = area.getHeight() - kSelRowHeight - barHeight - kInspectorRowHeight - kTabsHeight - kHintHeight - stripHeight;
+        int paneHeight = 0;
+        autoFolded = false;
+        if (! folded && ! diag)
+        {
+            paneHeight = paneHeightFor (area.getWidth(), shared);
+            autoFolded = paneHeight == 0;
+        }
+        const bool drawerShown = barHeight > roll::SelectionBar::lineHeight;
+        inspectorFolded = ! diag && paneHeight == 0 && drawerShown && shared < rollFloor;
+
+        selRowArea = area.removeFromTop (kSelRowHeight + barHeight + (inspectorFolded ? 0 : kInspectorRowHeight));
         layoutSelectionRow();
 
+        // The tab row: the tabs, the roll's zoom buttons, Hide / Show. The tabs show folded while the pane is.
         tabsArea = area.removeFromTop (kTabsHeight);
-        tabStrip.setBounds (tabsArea.withTrimmedLeft (6).withTrimmedRight (70).withTrimmedBottom (1));
         foldButton->setBounds (tabsArea.getRight() - 64, tabsArea.getY() + 4, 56, kTabsHeight - 8);
+        {
+            const int zoomWidth = 4 * roll::RollView::zoomButtonWidth + 3 * 2;
+            int x = foldButton->getX() - kZoomGap - zoomWidth;
+            tabStrip.setBounds (tabsArea.withTrimmedLeft (6).withRight (x - 8).withTrimmedBottom (1));
+            for (int i = 0; i < 4; ++i)
+            {
+                auto& b = roll.getZoomButton (i);
+                b.setBounds (x, tabsArea.getY() + 4, roll::RollView::zoomButtonWidth, kTabsHeight - 8);
+                b.setVisible (! diag);
+                x += roll::RollView::zoomButtonWidth + 2;
+            }
+        }
+        const bool foldedNow = folded || autoFolded;
+        tabStrip.setFolded (foldedNow);
+        foldButton->setToggleState (foldedNow, juce::dontSendNotification);
+        {
+            const juce::String tip = autoFolded ? juce::String ("The window is too short for this tab: make it taller to open it")
+                                   : folded     ? "Show the " + juce::String (kTabNames[openTabIndex]) + " panel again"
+                                                : juce::String ("Fold the panel away to give the roll more room (or click the open tab)");
+            if (foldButton->getTooltip() != tip)
+                foldButton->setTooltip (tip);
+        }
 
         hintArea = area.removeFromBottom (kHintHeight);
         hintBar.setBounds (hintArea);
-        strip.setBounds (area.removeFromBottom (WaveStrip::heightFor (getHeight())));
+        strip.setBounds (area.removeFromBottom (stripHeight));
 
         // What is left holds the pane and the roll, or the Diagnostics page.
-        const bool diag = openTabIndex == diagTab && ! folded;
         diagViewport.setVisible (diag);
         roll.setVisible (! diag);
-        paneViewport.setVisible (! diag && ! folded);
+        paneViewport.setVisible (paneHeight > 0);
         if (diag)
         {
             paneArea = area;
@@ -935,39 +1053,9 @@ namespace sl::ui
         }
         else
         {
-            int paneHeight = 0;
-            if (! folded)
-            {
-                paneHeight = 32;
-                if (auto* tp = dynamic_cast<TabPanel*> (panels[(std::size_t) openTabIndex].get()))
-                {
-                    // The pane takes up to 2/5 of the room, cut between two rows of controls, never through one:
-                    // the first row end past that share while the roll keeps 110 px, else the last one before it.
-                    const int most = juce::jmax (80, area.getHeight() * 2 / 5);
-                    auto ends = tp->rowEnds (area.getWidth());
-                    paneHeight = ends.empty() ? 32 : ends.back();
-                    if (paneHeight > most)
-                    {
-                        ends = tp->rowEnds (area.getWidth() - paneViewport.getScrollBarThickness());
-                        int up = 0, down = ends.empty() ? most : ends.front();
-                        for (int e : ends)
-                        {
-                            if (e >= most && up == 0)
-                                up = e;
-                            if (e <= most)
-                                down = e;
-                        }
-                        paneHeight = up > 0 && area.getHeight() - up >= 110 ? up : down;
-                        // It scrolls: JUCE draws no thumb in a scroll bar shorter than 32 px plus twice its
-                        // thickness, so a pane cut to one row (the state banner at 900 x 560) would hide that
-                        // there is more (fix pass R2-7).
-                        paneHeight = juce::jmax (paneHeight, kMinScrollingPane);
-                    }
-                }
-            }
             paneArea = area.removeFromTop (paneHeight);
             paneViewport.setBounds (paneArea);
-            if (! folded)
+            if (paneHeight > 0)
                 layoutPane();
             roll.setBounds (area);
         }

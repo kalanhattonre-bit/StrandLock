@@ -269,6 +269,12 @@ namespace sl::ui::roll
         return (int) std::ceil (captionWidth() + 4.0f + (float) trackWidth + 6.0f + valueWidth());
     }
 
+    int ToolSlider::preferredWidthFor (const juce::String& valueText) const
+    {
+        const float textWidth = std::max (48.0f, Theme::textWidth (Theme::px (11.5f), valueText) + 4.0f);
+        return std::max (preferredWidth(), (int) std::ceil (captionWidth() + 4.0f + (float) trackWidth + 6.0f + textWidth));
+    }
+
     juce::Rectangle<float> ToolSlider::trackArea() const
     {
         return { captionWidth() + 4.0f, 0.0f, (float) trackWidth, (float) getHeight() };
@@ -304,8 +310,18 @@ namespace sl::ui::roll
             onChange (value);
     }
 
-    void ToolSlider::mouseDown (const juce::MouseEvent& e) { dragTo (e.position.x); }
-    void ToolSlider::mouseDrag (const juce::MouseEvent& e) { dragTo (e.position.x); }
+    void ToolSlider::mouseDown (const juce::MouseEvent& e)
+    {
+        if (isEnabled())   // JUCE hands a disabled component its mouse too
+            dragTo (e.position.x);
+    }
+
+    void ToolSlider::mouseDrag (const juce::MouseEvent& e)
+    {
+        if (isEnabled())
+            dragTo (e.position.x);
+    }
+
     void ToolSlider::mouseUp (const juce::MouseEvent&) { release(); }
 
     void ToolSlider::paint (juce::Graphics& g)

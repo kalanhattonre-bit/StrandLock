@@ -681,6 +681,15 @@ namespace sl::ui
         return true;
     }
 
+    void ChoiceBox::setLabels (const juce::StringArray& labels)
+    {
+        // the same items (ids 1..n, the parameter's order) with other words; the selection stays the parameter's
+        const juce::ScopedValueSetter<bool> hold (syncing, true);
+        box.clear (juce::dontSendNotification);
+        box.addItemList (labels, 1);
+        box.setSelectedItemIndex (juce::roundToInt (binding.plain()), juce::dontSendNotification);
+    }
+
     float ChoiceBox::captionWidth() const
     {
         return caption.isEmpty() ? 0.0f : std::ceil (Theme::textWidth (labelFont(), caption.toUpperCase())) + 8.0f;

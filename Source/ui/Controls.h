@@ -256,6 +256,9 @@ namespace sl::ui
         juce::ComboBox& getBox() noexcept { return box; }
         juce::RangedAudioParameter& getParameter() noexcept { return binding.parameter(); }
 
+        /** Other words for the choices, in the parameter's order (the Slides tab's "Legato (touching notes)"). */
+        void setLabels (const juce::StringArray& labels);
+
         /** Called after the user picked another item and the parameter took it (the strip makes an undo step). */
         std::function<void()> onUserChange;
 

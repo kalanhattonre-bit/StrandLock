@@ -188,8 +188,29 @@ namespace sl::ui::roll
         void pasteLanes();
         bool hasLaneClipboard() const noexcept { return clipboard.has_value(); }
 
-        /** The lanes Copy lanes copies (every lane by default; the Copy / Paste tab, M5, changes it). */
+        /** What Copy lanes holds: the lanes it copied (nothing until something is copied). */
+        const std::optional<model::LaneClipboard>& laneClipboard() const noexcept { return clipboard; }
+
+        /** The lanes Copy lanes copies (every lane by default; the Copy / Paste tab, M5, changes it and keeps it in
+            UIST). */
         std::array<bool, core::kNumLanes> copyMask;
+
+        /** Copy notes (the Copy / Paste tab, M5 S3; the prototype pastes only lanes): the selected notes as they are
+            now, or a toast with nothing selected. */
+        void copyNotes();
+
+        /** Paste notes: copies of the copied notes, the earliest where the selected notes end (with nothing selected,
+            where the copied notes ended), through model::pasteNotes (links inside the group kept). As Duplicate,
+            copies that would start at or past the clip's end are left out and the rest end at it; the pasted notes are
+            selected; one undo step "Paste notes". Past 4096 notes it is refused with a toast and the clip unchanged
+            (7.7 decision 5). */
+        void pasteNotes();
+
+        /** The same with the earliest copy at a beat of its own (the right-click menu's Paste notes here). */
+        void pasteNotesAt (double beat);
+
+        /** What Copy notes holds (empty until something is copied). */
+        const std::vector<model::NotePtr>& noteClipboard() const noexcept { return copiedNotes; }
 
         /** The selected notes' ids in time order (sl-ui.js getSelection): what every selection tool acts on. */
         std::vector<std::string> selectionInTimeOrder() const;
@@ -274,6 +295,12 @@ namespace sl::ui::roll
         bool linkArm = false;
         std::optional<Readout> shown;
         std::optional<model::LaneClipboard> clipboard;
+        std::vector<model::NotePtr> copiedNotes;   // Copy notes (immutable versions: nothing copies them twice)
+
+        /** Duplicate's and Paste notes' second half (sl-ui.js duplicateSel): the copies a model call made, less those
+            that start at or past the clip's end, the rest cut to end at it, as one undo step called label. Returns the
+            copies kept (in order), or nothing when the document refused it (with its toast). */
+        std::optional<std::vector<std::string>> placeCopies (const model::EditResult& made, const std::string& label);
 
         // The open menu's actions (MenuItem::action indexes them), its ghosts (MenuItem::hover) and where it opened.
         std::vector<std::function<void()>> menuActions;

@@ -118,10 +118,14 @@ namespace sl::ui::roll
         juce::String getValueText() const;
         int preferredWidth() const;
 
+        /** The width it takes when its value reads as this text (the longest it can show, so its place never moves). */
+        int preferredWidthFor (const juce::String& valueText) const;
+
         /** The value the track gives at x (this component's pixels), on the slider's steps. */
         double valueAt (float x) const;
 
-        /** As the mouse does: a press at x (onInput), then the release (onChange). */
+        /** As the mouse does: a press at x (onInput), then the release (onChange). The mouse does nothing while it is
+            disabled (an HTML range input that is disabled). */
         void dragTo (float x);
         void release();
 

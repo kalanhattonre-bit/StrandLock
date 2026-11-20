@@ -13,6 +13,7 @@
 #include <cmath>
 #include <limits>
 #include <map>
+#include <unordered_map>
 #include <utility>
 
 namespace sl::ui::roll
@@ -48,6 +49,12 @@ namespace sl::ui::roll
                 if (n->id == id)
                     return n.get();
             return nullptr;
+        }
+
+        /** "1 note", "3 notes". */
+        std::string notesText (std::size_t n)
+        {
+            return std::to_string (n) + (n == 1 ? " note" : " notes");
         }
 
         /** sl-ui.js fmtBeats: '1 beat', '1.5 beats' (to 3 decimals). */
@@ -1189,31 +1196,113 @@ namespace sl::ui::roll
             toast ("Select notes first, then drag a box around their nodes");
     }
 
+    std::optional<std::vector<std::string>> RollGestures::placeCopies (const model::EditResult& made, const std::string& label)
+    {
+        // sl-ui.js duplicateSel: the copies that start before the clip's end stay, each cut to end at it
+        const double T = total();
+        std::unordered_map<std::string, const model::Note*> byId;
+        for (const auto& n : made.clip.notes)
+            byId.emplace (n->id, n.get());
+        std::vector<std::string> keep, gone;
+        for (const auto& id : made.ids)
+        {
+            const auto it = byId.find (id);
+            (it != byId.end() && it->second->s < T ? keep : gone).push_back (id);
+        }
+        model::Clip next = model::removeNotes (made.clip, gone);
+        next = model::editNotes (next, keep, [T] (model::Note& n, const model::Note&) { n.l = std::min (n.l, T - n.s); });
+
+        // one document edit, one undo step; a cap the document holds (the size, the snapshot budget) refuses it whole
+        model::EditResult proposed;
+        proposed.clip = std::move (next);
+        const auto out = host.doc.apply (std::move (proposed));
+        geo.setClip (clip());
+        if (out.refused)
+        {
+            toast (out.message);
+            return std::nullopt;
+        }
+        if (host.commit)
+            host.commit (label);
+        return keep;
+    }
+
     void RollGestures::duplicateSelection()
     {
         sync();
         const auto ids = selectionInTimeOrder();
         if (ids.empty())
             return;
-        auto r = model::duplicateNotes (*clip(), ids);
+        const auto r = model::duplicateNotes (*clip(), ids);
         if (r.refused)
         {
             toast (doc::ClipDocument::refusalText (r, false, 0));
             return;
         }
-        const double T = total();
-        std::vector<std::string> keep, gone;
-        for (const auto& id : r.ids)
-        {
-            const model::Note* n = noteIn (r.clip, id);
-            (n != nullptr && n->s < T ? keep : gone).push_back (id);
-        }
-        model::Clip next = model::removeNotes (r.clip, gone);
-        next = model::editNotes (next, keep, [T] (model::Note& n, const model::Note&) { n.l = std::min (n.l, T - n.s); });
-        setClipLabelled (std::move (next), "Duplicate");
-        host.doc.setSelection (keep, keep.empty() ? std::string() : keep.front());
-        if (keep.empty())
+        const auto keep = placeCopies (r, "Duplicate");
+        if (! keep)
+            return;
+        host.doc.setSelection (*keep, keep->empty() ? std::string() : keep->front());
+        if (keep->empty())
             toast ("No room after the selection: add bars first");
+    }
+
+    void RollGestures::copyNotes()
+    {
+        sync();
+        const auto ids = selectionInTimeOrder();
+        if (ids.empty())
+        {
+            toast ("Select the notes to copy first");
+            return;
+        }
+        copiedNotes = model::timeOrder (model::selected (*clip(), ids));
+        toast ("Copied " + notesText (copiedNotes.size()));
+    }
+
+    void RollGestures::pasteNotes()
+    {
+        if (copiedNotes.empty())
+        {
+            toast ("Copy some notes first");
+            return;
+        }
+        sync();
+        // where the selected notes end (as Duplicate puts its copies), else where the copied notes ended
+        const auto sel = model::selected (*clip(), selectionInTimeOrder());
+        const std::vector<model::NotePtr>* from = sel.empty() ? &copiedNotes : &sel;
+        double end = from->front()->s + from->front()->l;
+        for (const auto& n : *from)
+            end = std::max (end, n->s + n->l);
+        pasteNotesAt (end);
+    }
+
+    void RollGestures::pasteNotesAt (double beat)
+    {
+        if (copiedNotes.empty())
+        {
+            toast ("Copy some notes first");
+            return;
+        }
+        sync();
+        const auto r = model::pasteNotes (*clip(), copiedNotes, beat);
+        if (r.refused)
+        {
+            toast (doc::ClipDocument::refusalText (r, false, 0));
+            return;
+        }
+        const auto keep = placeCopies (r, "Paste notes");
+        if (! keep)
+            return;
+        if (keep->empty())
+        {
+            toast ("No room there: add bars first");
+            return;
+        }
+        host.doc.setSelection (*keep, keep->front());
+        toast (keep->size() == r.ids.size() ? "Pasted " + notesText (keep->size())
+                                            : "Pasted " + std::to_string (keep->size()) + " of " + notesText (r.ids.size())
+                                                  + ": the rest would start after the clip's end");
     }
 
     void RollGestures::deleteSelection()
@@ -1472,6 +1561,14 @@ namespace sl::ui::roll
                     host.commit ("Add note");
                 host.doc.setSelection ({ id }, id);
             }));
+            // M5 S3: the copied notes, the earliest on the grid line at or before the click (as New note here)
+            if (! copiedNotes.empty())
+                items.push_back (item ("Paste notes here", [this, x]
+                {
+                    const double bw = geo.beatWidth();
+                    const double s = set.snap > 0.0 ? std::floor (x / bw / set.snap) * set.snap : x / bw;
+                    pasteNotesAt (std::max (0.0, s));
+                }));
         }
         if (items.empty())
             items.push_back (header ("Select a note first"));

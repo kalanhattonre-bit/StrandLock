@@ -378,3 +378,19 @@ The drawers, the lane-button menus and the hover ghosts (plan 7.7 S2). Branch `m
   drawer on Pitch ("±1 semitone", "steps"), the Formant lane menu under its arrow with Ramp up's dashed ghost, and
   Swell's ghost with its sentence over the hint bar. Nothing cut, overlapping or off-palette; at 900 x 560 the
   Pattern drawer scrolls in its 62 px with its scroll bar showing (decision 6).
+
+## S3
+
+The Copy / Paste and Slides tabs, decision 6 (M4's layout leftovers), the M5 pictures and the checklist (plan 7.7 S3).
+Branch `m5-select`, from S2's a84a8b4 (main).
+
+### Progress
+
+- Done (first push): `ui/tabs/CopyPasteTab`, `ui/tabs/SlidesTab`, the gestures' Copy notes and Paste notes (and the
+  right-click menu's Paste notes here), the selection tools' slide time, Auto and Jump, decision 6 in `MainView` (a new
+  instance folded, whole rows or folded, the inspector's line on a short window with a drawer, the zoom buttons in the
+  tab row), `Tests/ui/test_copy_paste.cpp` with the M5 table's pictures, and the tests the changes touch
+  (`test_editor`, `test_controls`).
+- In progress: CI on the first push.
+- Next: the pictures looked at, the Cubase checklist's M5 section, the notes' decisions and figures, the M5 summary,
+  then the merge to main.

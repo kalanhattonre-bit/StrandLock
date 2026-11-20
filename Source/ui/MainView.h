@@ -9,6 +9,11 @@
 // pane, the piano roll (ui/roll/RollView, M4), the waveform strip with the loaded sound (ui/strip/WaveStrip), and the
 // hint bar (ui/HintBar). The Diagnostics tab takes the pane and the roll's room.
 //
+// The roll's room (plan 7.7 decision 6, M5 S3): a new instance opens with the tabs folded; an open tab shows whole rows
+// of its controls above the roll's floor, or the tabs fold while the window is too short for that; on such a window an
+// open drawer takes the inspector's line. The roll's zoom buttons sit at the right end of the tab row, so the ruler's bar
+// numbers run the whole width.
+//
 // The editor scales this component as one piece (the UI Scale) and owns the theme, the Keys switch and the
 // drops; this view only shows them and reports clicks through its callbacks. With Keys on, the editor hands
 // every key to handleKey: the KeyRouter's shortcuts (M4, 7.6 decision 3) act on the roll.
@@ -36,6 +41,8 @@ class StrandLockProcessor;
 namespace sl::ui
 {
     class TabPanel;
+    class CopyPasteTab;
+    class SlidesTab;
 
     /** The top bar's Undo and Redo buttons: a curved arrow (shell.html's undo and redo signs), drawn as a path. */
     class HistoryButton final : public FlatButton
@@ -97,8 +104,24 @@ namespace sl::ui
         enum Tab { sampleTab, macrosTab, noteTab, slidesTab, copyTab, modsTab, soundTab, diagTab, numTabs };
         void openTab (int tab);
         int getOpenTab() const noexcept { return openTabIndex; }
+
+        /** The person's fold (Hide / Show, a click on the open tab), kept in UIST. A new instance starts folded (plan 7.7
+            decision 6: the prototype's first open on a laptop window), so the roll has the room. */
         void setFolded (bool shouldFold);
         bool isFolded() const noexcept { return folded; }
+
+        /** True while the window is too short for a whole row of the open tab's controls above the roll's floor: the
+            tabs show folded rather than cut a row (decision 6, M4 review UI4-7), the person's fold stays as it is, and
+            the tab opens again by itself when the window is taller. A click on a tab or Show then says so. */
+        bool isAutoFolded() const noexcept { return autoFolded; }
+
+        /** True while an open drawer has taken the inspector's line, on a window too short for the roll's floor with
+            the tabs folded (decision 6, the 900 x 560 window with a drawer open). */
+        bool isInspectorFolded() const noexcept { return inspectorFolded; }
+
+        /** The least the roll keeps (its ruler and scroll bar with it) under an open tab, or before a drawer takes the
+            inspector's line. */
+        static constexpr int rollFloor = 110;
 
         /** Mode 1 .. 8; for mode 8 also the Sample sub-lane (0 Travel .. 3 Refresh). */
         void setMode (int mode, int subLane = -1);
@@ -120,6 +143,9 @@ namespace sl::ui
         juce::ComboBox& getGridBox() noexcept { return gridBox; }
         juce::ComboBox& getUiScaleBox() noexcept { return uiScaleBox; }
         TabStrip& getTabStrip() noexcept { return tabStrip; }
+        juce::Button& getFoldButton() noexcept;
+        CopyPasteTab& getCopyPasteTab() noexcept { return *copyPaste; }
+        SlidesTab& getSlidesTab() noexcept { return *slides; }
         DiagnosticsPage& getDiagnosticsPage() noexcept { return *diagPage; }
         WaveStrip& getStrip() noexcept { return strip; }
         roll::RollView& getRoll() noexcept { return roll; }
@@ -139,6 +165,7 @@ namespace sl::ui
         juce::Rectangle<int> getRollArea() const noexcept { return roll.getBounds(); }
         juce::Rectangle<int> getStripArea() const noexcept { return strip.getBounds(); }
         juce::Rectangle<int> getPaneArea() const noexcept { return paneArea; }
+        juce::Rectangle<int> getTabsArea() const noexcept { return tabsArea; }
         juce::Viewport& getPaneViewport() noexcept { return paneViewport; }
         juce::Rectangle<int> getLogoArea() const noexcept { return logoArea; }
         juce::Rectangle<int> getWordmarkArea() const noexcept { return wordmarkArea; }
@@ -160,6 +187,8 @@ namespace sl::ui
         void saveUiState();
         void layoutPane();
         void layoutSelectionRow();
+        int paneHeightFor (int width, int room) const;   // decision 6: whole rows above the roll's floor, or 0 (fold)
+        void tooShortToast();
         void showLane (core::LaneId lane); // the selection bar's Lane picks a mode
 
         /** The selection bar's room follows what it wants (its line while notes are selected or a drawer is open, the
@@ -195,6 +224,8 @@ namespace sl::ui
         TabStrip tabStrip;
         std::unique_ptr<FoldButton> foldButton;
         std::array<std::unique_ptr<juce::Component>, numTabs> panels;   // none for diagTab (the page has its own viewport)
+        CopyPasteTab* copyPaste = nullptr;   // panels[copyTab] (M5 S3)
+        SlidesTab* slides = nullptr;         // panels[slidesTab] (M5 S3)
         juce::Component paneContent;   // every panel, so a theme switch and the focus rules reach the hidden ones too
         juce::Viewport paneViewport, diagViewport;
         std::unique_ptr<DiagnosticsPage> diagPage;
@@ -210,6 +241,8 @@ namespace sl::ui
 
         int openTabIndex = sampleTab;
         bool folded = false;
+        bool autoFolded = false;        // the window is too short for the open tab (resized)
+        bool inspectorFolded = false;   // an open drawer took the inspector's line (resized)
         int mode = 1, subLane = 0;
         bool keysOn = false;
         juce::String bannerText;

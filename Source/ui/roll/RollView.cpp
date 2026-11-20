@@ -1238,6 +1238,20 @@ namespace sl::ui::roll
         changed();
     }
 
+    void RollView::copyNotes()
+    {
+        gestures->copyNotes();
+        changed();
+    }
+
+    void RollView::pasteNotes()
+    {
+        if (gestures->isDragging())
+            return;
+        gestures->pasteNotes();
+        changed();
+    }
+
     void RollView::toggleFreehand()
     {
         gestures->toggleFreehand();
@@ -1327,13 +1341,17 @@ namespace sl::ui::roll
     void RollView::resized()
     {
         const int W = getWidth(), H = getHeight();
-        // the ruler, with the zoom buttons at its right end (above the vertical scroll bar)
-        const int zoomBox = 4 * zoomButtonWidth + 3 * 2 + 2 * 4;
+        // the ruler, with the zoom buttons at its right end (above the vertical scroll bar) while they are this view's;
+        // in the editor MainView holds them in the tab row and the ruler runs the whole width (M5 S3, UI4-6)
+        const bool ownZoom = zoomButtons[0]->getParentComponent() == this;
+        const int zoomBox = ownZoom ? 4 * zoomButtonWidth + 3 * 2 + 2 * 4 : 0;
         const int zoomX = std::max (pianoWidth, W - zoomBox);
         ruler.setBounds (pianoWidth, 0, std::max (0, zoomX - pianoWidth), rulerHeight);
         int x = zoomX + 4;
         for (auto& b : zoomButtons)
         {
+            if (! ownZoom)
+                break;
             b->setBounds (x, (rulerHeight - zoomButtonHeight) / 2, zoomButtonWidth, zoomButtonHeight);
             x += zoomButtonWidth + 2;
         }

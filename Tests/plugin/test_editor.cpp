@@ -312,11 +312,18 @@ SL_TEST ("ui", editorLayout)
     check (view.getLogoArea().getWidth() == 22 && view.getWordmarkArea().getX() > view.getLogoArea().getRight(),
            "the 22 px logo, then the wordmark to its right");
 
-    // The bars, top to bottom, and the room the roll keeps.
+    // The bars, top to bottom, and the room the roll keeps. A new instance opens with the tabs folded (plan 7.7
+    // decision 6), so the roll has the room; the Sample tab opened takes its share and the roll keeps 150 px.
     const auto top = view.getTopBarArea(), pane = view.getPaneArea(), roll = view.getRollArea(), strip = view.getStripArea();
     check (top.getY() < pane.getY() && pane.getBottom() <= roll.getY() && roll.getBottom() <= strip.getY() && strip.getBottom() < 680,
            fmt ("top bar %d, pane %d-%d, roll %d-%d, strip %d-%d", top.getY(), pane.getY(), pane.getBottom(), roll.getY(), roll.getBottom(), strip.getY(), strip.getBottom()));
-    check (roll.getHeight() >= 150 && pane.getHeight() >= 80, fmt ("the roll keeps %d px, the pane %d px", roll.getHeight(), pane.getHeight()));
+    check (view.isFolded() && pane.getHeight() == 0 && roll.getHeight() >= 300 && proc.getUiState().folded == 1,
+           fmt ("a new instance: the tabs folded (UIST %d), the roll %d px", (int) proc.getUiState().folded, roll.getHeight()));
+    view.openTab (MainView::sampleTab);
+    const auto paneOpen = view.getPaneArea(), rollOpen = view.getRollArea();
+    check (rollOpen.getHeight() >= 150 && paneOpen.getHeight() >= 80 && ! view.isFolded() && proc.getUiState().folded == 0,
+           fmt ("the Sample tab opened: the roll keeps %d px, the pane %d px (UIST folded %d)", rollOpen.getHeight(), paneOpen.getHeight(),
+                (int) proc.getUiState().folded));
 
     // The mode bar: 1 Build lit, 2-8 in their lane colours.
     check (view.getMode() == 1 && view.getModeButton (1).getToggleState() && ! view.getModeButton (2).getToggleState(),
@@ -352,7 +359,7 @@ SL_TEST ("ui", editorLayout)
 
 SL_TEST ("ui", editorTabsBoundToParameters)
 {
-    section ("Editor: the Macros, Sample and Sound tabs are plain controls bound to their parameters");
+    section ("Editor: the Macros, Sample, Sound and Slides tabs are plain controls bound to their parameters");
 
     StrandLockProcessor proc;
     resetUserSettings (proc);
@@ -371,11 +378,16 @@ SL_TEST ("ui", editorTabsBoundToParameters)
     check (idsOf (macros->getBoundIds()) == wantMacros && macros->getBoundIds().size() == 13 && macros->getKnobs().size() == 13,
            fmt ("Macros: the 8 macros and the 5 offsets, as 13 knobs (%d)", (int) macros->getKnobs().size()));
 
-    // Every parameter has a control, except the host's bypass and the two Slides settings (M5's tab).
+    // Every parameter has a control, except the host's bypass: from M5 the Slides tab holds Auto slide and Slide time
+    // (plan 7.7 decision 4).
+    auto* slides = view.getTabPanel (MainView::slidesTab);
+    check (slides != nullptr && idsOf (slides->getBoundIds()) == std::set<juce::String> { "glideMode", "glideTime" },
+           fmt ("Slides: Auto slide and Slide time (%d bound)", slides != nullptr ? slides->getBoundIds().size() : -1));
     std::multiset<juce::String> all;
-    for (auto* tab : { macros, sample, sound })
-        for (const auto& id : tab->getBoundIds())
-            all.insert (id);
+    for (auto* tab : { macros, sample, sound, slides })
+        if (tab != nullptr)
+            for (const auto& id : tab->getBoundIds())
+                all.insert (id);
     int twice = 0, unknown = 0;
     for (const auto& id : all)
     {
@@ -386,8 +398,8 @@ SL_TEST ("ui", editorTabsBoundToParameters)
     for (const auto& spec : params::kParams)
         if (all.count (spec.id) == 0)
             without.insert (spec.id);
-    check (twice == 0 && unknown == 0 && without == std::set<juce::String> { "bypass", "glideMode", "glideTime" },
-           fmt ("every parameter but bypass, Auto slide and Slide time has exactly one control (%d without, %d twice, %d unknown)",
+    check (twice == 0 && unknown == 0 && without == std::set<juce::String> { "bypass" },
+           fmt ("every parameter but bypass has exactly one control (%d without, %d twice, %d unknown)",
                 (int) without.size(), twice, unknown));
 
     // Turning each knob moves its own parameter, end to end.
@@ -607,17 +619,28 @@ SL_TEST ("ui", editorStateBanner)
     check (proc.getStateBanner().isNotEmpty() && editor.getView().getBannerText() == proc.getStateBanner(),
            fmt ("the banner reads \"%s\"", editor.getView().getBannerText().substring (0, 60).toRawUTF8()));
 
-    // At 900 x 560 the banner leaves the Sample tab's pane little room: the rest of its controls scroll, and the
-    // scroll bar must be long enough for JUCE to draw its thumb (fix pass R2-7).
+    // At 900 x 560 the banner leaves the Sample tab no room for a whole row of knobs above the roll's floor: the tabs
+    // show folded rather than cut the row (plan 7.7 decision 6), and the person's choice stays (the tab open in UIST).
+    auto& view = editor.getView();
+    view.openTab (MainView::sampleTab);
     editor.setLogicalSize (900, 560);
     editor.refreshNow();
-    auto& pane = editor.getView().getPaneViewport();
+    check (view.isAutoFolded() && ! view.isFolded() && view.getPaneArea().getHeight() == 0 && ! view.getPaneViewport().isVisible()
+               && proc.getUiState().folded == 0 && view.getTabStrip().getSelected() == MainView::sampleTab,
+           fmt ("900 x 560 with the banner: the tabs show folded (the pane %d px) and the Sample tab stays open in UIST (folded %d)",
+                view.getPaneArea().getHeight(), (int) proc.getUiState().folded));
+
+    // A little taller, the pane shows whole rows and scrolls, and its scroll bar is long enough for JUCE to draw its
+    // thumb (fix pass R2-7).
+    editor.setLogicalSize (900, 640);
+    editor.refreshNow();
+    auto& pane = view.getPaneViewport();
     auto& bar = pane.getVerticalScrollBar();
     const auto* content = pane.getViewedComponent();
     const int contentHeight = content != nullptr ? content->getHeight() : 0;
     const int shortest = 32 + bar.getLookAndFeel().getMinimumScrollbarThumbSize (bar);
-    check (contentHeight > pane.getHeight() && bar.isVisible() && bar.getHeight() >= shortest,
-           fmt ("900 x 560 with the banner: the pane is %d px of %d px of controls; its scroll bar is %d px (a thumb needs %d)", pane.getHeight(),
+    check (! view.isAutoFolded() && contentHeight > pane.getHeight() && bar.isVisible() && bar.getHeight() >= shortest,
+           fmt ("900 x 640 with the banner: the pane is %d px of %d px of controls; its scroll bar is %d px (a thumb needs %d)", pane.getHeight(),
                 contentHeight, bar.getHeight(), shortest));
 
     StrandLockProcessor clean;

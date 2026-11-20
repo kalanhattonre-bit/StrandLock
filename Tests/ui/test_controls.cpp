@@ -68,12 +68,13 @@ SL_TEST ("ui", controlsFollowTheTimerNotAttachments)
     StrandLockEditor editor (proc);
     auto& view = editor.getView();
 
-    // Every control bound to a parameter is in the timer's list: the three tabs' and the strip's At the end.
+    // Every control bound to a parameter is in the timer's list: the four tabs' (M5's Slides tab: Auto slide and Slide
+    // time) and the strip's At the end.
     int bound = 0;
-    for (int tab : { MainView::macrosTab, MainView::sampleTab, MainView::soundTab })
+    for (int tab : { MainView::macrosTab, MainView::sampleTab, MainView::soundTab, MainView::slidesTab })
         if (auto* panel = view.getTabPanel (tab))
             bound += panel->getBoundIds().size();
-    check (bound == 13 + 25 + 9 && (int) view.getSyncedControls().size() == bound + 1,
+    check (bound == 13 + 25 + 9 + 2 && (int) view.getSyncedControls().size() == bound + 1,
            fmt ("the timer moves %d controls: the tabs' %d and the strip's At the end", (int) view.getSyncedControls().size(), bound));
     check (view.syncControls() == 0, "with nothing changed, the timer moves nothing");
 

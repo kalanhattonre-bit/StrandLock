@@ -265,6 +265,20 @@ namespace sl::ui::roll
         void legato();
 
         //==========================================================================================
+        // Slides (the Slides tab, M5 S3: sl-ui.js wirePanels' Selected notes slider, Auto and Jump, no slide)
+
+        /** The selected notes' own slide time in beats (model::updateNotes glide), live as Walk's sliders are: every move
+            is rebuilt from the clip the drag started from, shown and played with no undo step; final (the release) is one
+            step "Slide time (notes)". Nothing with no note selected. */
+        void slideTime (double beats, bool final);
+
+        /** Auto: the selected notes follow Slide time again (glide null, curve 0), one step "Slide: auto". */
+        void slideAuto();
+
+        /** Jump, no slide: glide 0 (the next note still plays on the same voice), one step "Slide: jump". */
+        void slideJump();
+
+        //==========================================================================================
         // Shapes (Y2)
 
         /** sl-ui-panels.js travelKind: the selected notes' Travel kind (Speed with nothing selected), or nothing when

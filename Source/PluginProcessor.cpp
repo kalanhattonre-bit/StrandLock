@@ -78,6 +78,11 @@ StrandLockProcessor::StrandLockProcessor()
     resetHistory();
     sampleManager->loadStarter (sounds::kDefaultStarter, 1, doc::LoadOrigin::startup);
 
+    // A new instance opens with the tool tabs folded, so the roll has the room (plan 7.7 decision 6: the prototype folds
+    // them on a first open in a window under 900 px high, and a new window here is 680). A project keeps the fold it
+    // was saved with (UIST).
+    uiState.folded = 1;
+
     // Frees the versions the audio thread no longer reads, 10 times a second (plan 1.3).
     startTimerHz (kCollectHz);
 }

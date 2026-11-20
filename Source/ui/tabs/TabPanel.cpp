@@ -84,6 +84,28 @@ namespace sl::ui
         addItem (std::make_unique<Separator> (theme), 9, Knob::preferredHeight);
     }
 
+    void TabPanel::shortSeparator()
+    {
+        addItem (std::make_unique<Separator> (theme), 9, kControlHeight);
+    }
+
+    void TabPanel::setItemWidth (const juce::Component& item, int width)
+    {
+        for (auto& it : items)
+        {
+            if (it.component != &item)
+                continue;
+            if (it.width != width)
+            {
+                it.width = width;
+                resized();
+                if (onLayoutChange)
+                    onLayoutChange();
+            }
+            return;
+        }
+    }
+
     int TabPanel::heightFor (int width) const
     {
         const auto area = juce::Rectangle<int> (0, 0, juce::jmax (1, width), 100000).reduced (padX, padY);

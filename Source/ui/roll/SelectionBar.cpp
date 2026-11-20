@@ -636,6 +636,53 @@ namespace sl::ui::roll
     }
 
     //==============================================================================================
+    // Slides (the Slides tab, M5 S3).
+
+    void SelectionTools::slideTime (double beats, bool final)
+    {
+        // sl-ui.js gSel: 'input' rebuilds from the clip the press found (g0) with no undo step, 'change' commits
+        // "Slide time (notes)"; nothing while no note is selected
+        const auto sel = ids();
+        if (sel.empty())
+            return;
+        liveRun ("slide", "Slide time (notes)", [sel, beats] (const model::Clip& base)
+        {
+            model::NotePatch patch;
+            patch.glide = std::optional<double> (beats);
+            return model::updateNotes (base, sel, patch);
+        }, final);
+    }
+
+    void SelectionTools::slideAuto()
+    {
+        // sl-ui.js gAuto: glide null (the instrument's Slide time) and a straight curve
+        const auto sel = ids();
+        if (sel.empty())
+        {
+            toast ("Select notes first");
+            return;
+        }
+        model::NotePatch patch;
+        patch.glide.emplace();   // an empty inner value: null
+        patch.gc = 0.0;
+        act (model::updateNotes (*host.doc.current(), sel, patch), "Slide: auto");
+    }
+
+    void SelectionTools::slideJump()
+    {
+        // sl-ui.js gOff: glide 0, a jump on the same voice
+        const auto sel = ids();
+        if (sel.empty())
+        {
+            toast ("Select notes first");
+            return;
+        }
+        model::NotePatch patch;
+        patch.glide = std::optional<double> (0.0);
+        act (model::updateNotes (*host.doc.current(), sel, patch), "Slide: jump");
+    }
+
+    //==============================================================================================
     // Shapes (Y2).
 
     std::optional<model::TravelKind> SelectionTools::travelKind() const

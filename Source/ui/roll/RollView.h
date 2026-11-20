@@ -134,6 +134,8 @@ namespace sl::ui::roll
         void clearAll();           // every note goes, one undo step
         void copyLanes();
         void pasteLanes();
+        void copyNotes();          // the Copy / Paste tab (M5 S3)
+        void pasteNotes();
         void toggleFreehand();
         void armLink();            // Slide into...
         void setMulti (bool on);
@@ -218,7 +220,9 @@ namespace sl::ui::roll
         PianoStrip& getPiano() noexcept { return piano; }
         juce::ScrollBar& getScrollBar (bool vertical) noexcept { return vertical ? vbar : hbar; }
 
-        /** 0 H-, 1 H+, 2 V-, 3 V+. */
+        /** 0 H-, 1 H+, 2 V-, 3 V+. The view owns them; it places them at the right end of the ruler while they are its
+            children. MainView takes them into the tab row (M5 S3, plan 7.7 decision 6: in the ruler they hid its last bar
+            numbers), and the ruler then runs the whole width. */
         FlatButton& getZoomButton (int index) noexcept { return *zoomButtons[(std::size_t) juce::jlimit (0, 3, index)]; }
 
         /** The playhead in beats while Cubase plays. */
