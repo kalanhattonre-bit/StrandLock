@@ -436,8 +436,8 @@ SL_TEST ("ui", stripClickSetsStart)
         const auto before2 = proc.getDocument().current();
         const float x2 = strip.xOf (0.7);
         const double p2 = std::min (1.0, std::max (0.0, strip.posOf (x2)));
-        const auto params = proc.getInstState();
-        const double rs = params.regionStartExact, re = params.regionEndExact;
+        const auto exact = proc.getInstState();
+        const double rs = exact.regionStartExact, re = exact.regionEndExact;
         pressStrip (strip, x2, 50000, 50);
         model::SamplePatch patch2;
         model::StartPatch sp2;

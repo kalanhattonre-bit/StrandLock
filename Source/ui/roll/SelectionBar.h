@@ -211,7 +211,7 @@ namespace sl::ui::roll
             sl-ui-panels.js liveRun, which those sliders share with the bar): every move rebuilds the result from the clip
             the session started from (make), shown and played with no undo step; final (the release) is one step called
             label. key names the session ("ns:pos"); another selection, an act or another session ends it. */
-        void live (const std::string& key, const std::string& label, const std::function<model::Clip (const model::Clip&)>& make, bool final)
+        void liveSession (const std::string& key, const std::string& label, const std::function<model::Clip (const model::Clip&)>& make, bool final)
         {
             liveRun (key, label, make, final);
         }

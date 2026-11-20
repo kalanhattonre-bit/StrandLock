@@ -660,7 +660,7 @@ namespace sl::ui
         const auto ids = tools.ids();
         if (ids.empty())
             return;
-        tools.live (key, label, [ids, patch] (const model::Clip& base) { return model::setNoteSample (base, ids, patch); }, final);
+        tools.liveSession (key, label, [ids, patch] (const model::Clip& base) { return model::setNoteSample (base, ids, patch); }, final);
         edited();
     }
 
