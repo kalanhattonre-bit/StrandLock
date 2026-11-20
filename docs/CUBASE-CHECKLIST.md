@@ -6,8 +6,10 @@ steps below (The checklist) still apply. The M2 build plays the real sound engin
 **M2: the first real sound**. The M3 build adds the grain engines (Voice, Cloud and Lock): its steps are in
 **M3: the grain engines**. The M4 build adds the piano roll, where you see, draw and change the notes: its steps
 are in **M4: the piano roll**. The M5 build adds the selection tools (selecting with a box, the tools for the
-selected notes, the Copy / Paste and Slides tabs): its steps are in **M5: selection tools** at the end. Please go
-through them and send back your answers and the text from the **Copy report** button.
+selected notes, the Copy / Paste and Slides tabs): its steps are in **M5: selection tools**. The M6 build finishes
+the Sample side (Sample mode, the live playheads on the waveform, the whole Sample tab with its recipes, Dice and
+Preview, the Macros and Note settings tabs): its steps are in **M6: the Sample tab** at the end. Please go through
+them and send back your answers and the text from the **Copy report** button.
 
 ## Getting the test build
 
@@ -498,3 +500,112 @@ What is new, and what moved:
     the **Copy / Paste** lane buttons as you left them?
 
 13. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.
+
+## M6: the Sample tab
+
+From this build on the Sample side of StrandLock is complete: Sample mode on the piano roll, the playheads moving on
+the waveform, every control on the Sample tab (with the recipes, Dice and Preview), the Macros tab with its offsets,
+and the Note settings tab. The steps above still apply; this part is about the new things. Please go through it and
+send back your answers and the text from **Copy report**. A screenshot helps whenever something looks wrong.
+
+What is new, and where it is:
+- **Sample mode (8).** Click **8 Sample** on the mode bar. The four chips after it, **Travel**, **Heads**, **Grain**
+  and **Refresh**, pick which Sample line of the notes you draw. Every note shows small chevrons (>) along it that
+  point the way its heads move through the sound (pointing left: backwards; small bars instead: held still), and a
+  faint picture of the part of the sound it plays. A small dot at a note's start means the note has settings of its
+  own (Note settings). These show in the other modes too, fainter.
+- **The waveform strip** shows the playheads while notes sound: a numbered line for each head, with a small arrow for
+  the way it moves, and dots for the grains.
+- **The Sample tab**, first row: **ENGINE** (**Tape**, **Voice**, **Cloud**), **Lock**, **MOTION** (**▶ Forward**,
+  **◀ Backward**, **⇄ Bounce**, **↔ Mirror**, **❄ Freeze**, **⁙ Scatter**), **JUMP EVERY**, **↻ Re-roll** and
+  **Preview** (in a window 1100 wide or narrower the last ones sit on a second line). Second row, the knobs:
+  **SPEED**, **HEADS**, **SPREAD**, **GRAIN**, **SPRAY**, **DRIFT**, **PITCH**, then **REFRESH TIME** and **SKIP**, then
+  **REGION START**, **REGION END** and **LOOP FADE**. Third row: **REFRESH** (**Smooth**, **Free**, **Synced**),
+  **EVERY**, **Lock to the beat**, **Tape**, **Each grain backwards**, **HEAD TUNE** (**Same**, **Detune**,
+  **Octaves**, **Fifths**) and **AT THE END** (**Loop**, **Hold**, **Stop**). Under a thin line: **RECIPES** with eight
+  buttons, **1 Straight** to **8 Octave shimmer**, and under them **Dice**, a line of text, and **Unpin all** (only
+  while something is pinned). The one **GRAIN** knob follows the engine: cycles on Voice, milliseconds on Cloud,
+  waves on Cloud with Lock.
+- **Faded controls.** A control that does nothing with the settings you have now is drawn faded. Hold the mouse over
+  it: the line of help at the bottom (the hint bar) says why, and so does its tooltip.
+- **Pins.** The small pin next to **ENGINE**, **Lock**, **MOTION**, **JUMP EVERY**, **SPEED**, **HEADS**, **SPREAD**,
+  **GRAIN**, **SPRAY**, **DRIFT**, **REFRESH**, **Tape**, **Each grain backwards** and **HEAD TUNE** tells **Dice** to
+  leave that setting alone. A pin that is on is purple.
+- **The Macros tab:** **MACROS** with eight knobs (**SPEED**, **SPREAD**, **HEADS**, **REFRESH**, **GRAIN**, **SPRAY**,
+  **TONE**, **FORMANT**) and **Centre all**; **WHOLE-CLIP OFFSETS** with five knobs (**VOLUME**, **VIBRATO**, **TONE**,
+  **FORMANT**, **HOLLOW**) and **Reset all**.
+- **Try this:** the right end of the hint bar suggests one thing to try in the mode you are in.
+
+1. **Install the new build** the same way as before (Getting the test build, at the top). Add StrandLock to a new
+   Instrument track and click **Show** to open the tabs.
+
+2. **Sample mode.** Click **8 Sample**. Do the notes show chevrons and the faint picture of the sound? Click
+   **Travel**, then select a note: its Travel line has round nodes. Drag the line down below the middle: the chevrons
+   turn round (the note plays backwards); drag it to the middle: they turn into bars (the heads hold still). Press
+   Play: do you hear it? Now click **Heads** and draw the line up on a note (more heads), then **Grain** (longer or
+   shorter grains, on Voice or Cloud) and **Refresh**. Does each one change what you hear? Does **Try this** at the
+   right of the hint bar suggest something sensible for each chip?
+
+3. **The playheads on the waveform.** Press Play in Cubase. On the waveform strip, numbered lines move along the
+   sound: one for each head of each note, with an arrow for its way. On **Cloud**, dots show the grains. Do they move
+   in time with what you hear? Set **HEADS** to 3 and **MOTION** to **↔ Mirror**: do you see heads going both ways?
+
+4. **Clicking the waveform to set where notes start.** Select three notes. Click once (a short click) on the waveform
+   inside the Region. A message says something like "Start set for 3 notes at 40% of the Region", and small markers
+   show the spot on the strip. Press Play: do those three notes now start at that spot? Hold the mouse down on the
+   waveform instead: you hear that spot while you hold. A click outside the Region changes nothing and says why.
+
+5. **Every control on the Sample tab.** Let the clip play (or hold a note) and try each control on **Tape**, on
+   **Voice**, on **Cloud**, and on **Cloud** with **Lock** on. Clicking **Lock** while the engine is Tape or Voice
+   switches to Cloud with Lock (a message says so). For the knobs: drag up or down (hold Shift for fine steps),
+   double-click to put the default back, or click the value under the knob and type one (for example, with Lock on,
+   type 4.3 into **GRAIN**: it stays 4.3). After each change click **Undo** once: does each change undo in one step?
+   Hold the mouse over each control: does the hint bar say what it does?
+
+6. **What the faded controls mean.** On the default settings (**Voice**, **HEADS** at 1, **REFRESH** on **Smooth**,
+   **▶ Forward**) several controls are faded: **SPREAD** and **HEAD TUNE** (one head), **SPRAY** (Voice), **REFRESH
+   TIME**, **SKIP**, **EVERY** and **Lock to the beat** (Smooth), **JUMP EVERY** (not Scatter), **Lock** (Cloud only) and
+   **↻ Re-roll** (nothing random is in use). Hold the mouse over
+   each faded one: the hint bar says why it does nothing now. Then change what it names (for example turn **HEADS** to
+   2): it comes back. On **Tape**, **GRAIN** shows a dash and **❄ Freeze** is faded. Is every faded control really
+   doing nothing, and every bright one doing something?
+
+7. **The Macros tab.** Open **Macros**. Let the clip play and turn each macro knob: every note changes at once, and
+   the text under the knob says what it does now (for example "2x faster"). **Centre all** puts them back. Then turn
+   each of the **WHOLE-CLIP OFFSETS**: they add to every note's Volume, Vibrato, Tone, Formant or Hollow line. **Reset
+   all** puts them back. In Cubase, are Quick Controls 1 to 8 still the eight macros?
+
+8. **Recipes.** Back on the **Sample** tab, hold the mouse over **4 Tape scratch** without clicking: dashed lines on
+   the roll show what it would do to the notes, and the hint bar says what it does. Click it: the Sample tab changes,
+   and the notes' Travel lines get a pattern. Try all eight, first with no note selected, then with a few notes
+   selected (the part that changes lines then touches only those). Click **Undo** after each: does one click undo the
+   whole recipe? Do the eight sound different?
+
+9. **Dice and pins.** Click **Dice** a few times: each roll sets new Sample settings, and a message says what it
+   rolled. **Undo** steps back. Click the small pin next to **ENGINE**: it turns purple and the text after **Dice**
+   says "Pinned: Engine". Roll again: does the engine stay? Pin two or three more settings and roll. **Unpin all**
+   lets them all go. Pin something again, then close the StrandLock window and open it, and open another project with
+   StrandLock: are your pins still there? (They are yours, not the project's.)
+
+10. **Note settings and "mixed".** Select a note and open **Note settings**. Give it its own **ENGINE** (for example
+    **Tape**) or **MOTION**: a dot appears at the note's start on the roll, and that note plays its own setting while
+    the others follow the Sample tab. Select a few notes with different settings: the groups where they differ show a
+    small **mixed** tag and no button lit. **Follow** puts a setting back on the Sample tab's, and **Follow the Sample
+    tab for all** does that for every setting. Click **Undo** after each: one step?
+
+11. **Preview with Cubase stopped.** Stop Cubase. On the **Sample** tab click **Preview** (at the end of the first
+    row, or on the line under it). StrandLock plays its own clip at Cubase's tempo from where Cubase's cursor is, and
+    the button now says **Stop preview**. Click in Cubase's ruler to move the cursor: does Preview jump there? Turn a
+    knob while it plays: do you hear it? Press Play in Cubase: Preview stops, and a message says "Cubase is playing,
+    so Preview stopped". Now turn on Cubase's option **Studio > Studio Setup > VST Plug-ins > "Suspend VST 3 plug-in
+    processing when no audio signals are received"**, stop Cubase and click **Preview** again. If Cubase pauses
+    StrandLock, a box at the top of the Sample tab says so within a second and names that option. What happens on
+    your computer with the option on, and with it off?
+
+12. **Play it back.** Make a short phrase with a recipe, a Dice roll, a note with its own settings and a Start set on
+    the waveform. Press Play in Cubase. Does it play what you see, the same on every loop?
+
+13. **Save and reopen.** Save the project, close it and open it again. Are the Sample tab, the Macros tab, the notes'
+    own settings and their Starts as you left them?
+
+14. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.

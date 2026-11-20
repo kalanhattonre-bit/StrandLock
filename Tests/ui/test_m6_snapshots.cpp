@@ -177,9 +177,10 @@ namespace
         settings.setKeysDefault (false);
         settings.setDicePins (subject == Subject::sampleTab ? std::vector<std::string> { "engine", "grain" } : std::vector<std::string> {});
 
+        // the Sample tab whole needs a window 1200 high (a pane shows the whole tab only within 2/5 of the room, MainView)
         const bool tall = subject == Subject::sampleTab || subject == Subject::macrosTab || subject == Subject::noteSettings;
         out.logicalWidth = 1100;
-        out.logicalHeight = tall ? 900 : 680;
+        out.logicalHeight = subject == Subject::sampleTab ? 1200 : tall ? 900 : 680;
         {
             StrandLockEditor editor (proc);
             editor.setLogicalSize (out.logicalWidth, out.logicalHeight);
@@ -203,6 +204,7 @@ namespace
                     view.setMode (8, 0);
                     view.getRoll().edited();
                     editor.refreshNow();
+                    out.image = editor.createComponentSnapshot (editor.getLocalBounds(), true, 1.0f);   // the drawing simulates the notes
                     const int made = view.getRoll().getDecor().simulationsMade();
                     out.shows = view.getMode() == 8 && view.getSubLane() == 0 && view.getModeButton (8).getToggleState() && made > 0;
                     out.what = fmt ("mode %d on Travel, its button lit, %d note simulations drawn as chevrons and thumbnails", view.getMode(), made);

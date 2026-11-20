@@ -22,6 +22,7 @@
 #include "core/Inst.h"
 #include "core/JsonLite.h"
 #include "model/ClipCodec.h"
+#include "model/History.h"
 #include "model/Presets.h"
 #include "model/Recipes.h"
 #include "model/ModelFixture.h"
@@ -275,7 +276,7 @@ SL_TEST ("ui", recipesThroughTheSampleTab)
 
     Rig rig;
     auto& tab = rig.tab();
-    int cases = 0, clipsExact = 0, instsWithin = 0, oneStep = 0, undone = 0, toasts = 0, notesChanged = 0, unchanged = 0;
+    int cases = 0, clipsExact = 0, clipsBitForBit = 0, instsWithin = 0, oneStep = 0, undone = 0, toasts = 0, notesChanged = 0, unchanged = 0;
     std::string firstFail;
     const JsonValue& all = doc["cases"];
     for (std::size_t ci = 0; ci < all.size(); ++ci)
@@ -339,7 +340,9 @@ SL_TEST ("ui", recipesThroughTheSampleTab)
             }
             else if (const auto it = madeById.find (got.id); it != madeById.end())
             {
-                clipOk = modelfx::notesClose (got, it->second, 0.0, 0.0, exact, why) && exact;
+                // the fixture's own tolerance (plan 5.3, model/presets.json: exact, node values within 1e-12): glibc's pow
+                // rounds a few Strand Demo nodes 1 ulp from V8's, in the clip preset itself (model/presetsFixture counts them)
+                clipOk = modelfx::notesClose (got, it->second, 1e-12, 0.0, exact, why);
             }
             else
             {
@@ -348,6 +351,7 @@ SL_TEST ("ui", recipesThroughTheSampleTab)
             }
         }
         clipsExact += clipOk ? 1 : 0;
+        clipsBitForBit += clipOk && exact ? 1 : 0;
         notesChanged += after != before ? 1 : 0;
 
         std::string whyInst;
@@ -380,8 +384,8 @@ SL_TEST ("ui", recipesThroughTheSampleTab)
     }
     note (fmt ("%d recipe cases: %d changed the notes (recipes 7 and 8 never do), %d changed nothing at all", cases, notesChanged, unchanged));
     check (cases == 16 && clipsExact == cases && instsWithin == cases,
-           fmt ("%d of %d clips exactly the fixture's (bit for bit), %d of %d instruments within (double)(float) %s", clipsExact, cases, instsWithin, cases,
-                firstFail.c_str()));
+           fmt ("%d of %d clips the fixture's exactly (node values within 1e-12, %d of them bit for bit), %d of %d instruments within "
+                "(double)(float) %s", clipsExact, cases, clipsBitForBit, instsWithin, cases, firstFail.c_str()));
     check (oneStep == cases && toasts == cases && undone == cases && notesChanged > 0 && unchanged < cases,
            fmt ("%d of %d made one undo step with the prototype's label (none when nothing changed) and its toast; Undo brought back the clip's bytes "
                 "and every parameter %d times", oneStep, cases, undone));
@@ -408,20 +412,29 @@ SL_TEST ("ui", recipeHoverDrawsAndChangesNothing)
     const auto clip = rig.proc.getDocument().current();
     const auto label = rig.proc.undoLabel();
     const auto published = rig.proc.getSnapshotPublisher().stats().submitted;
-    int drawn = 0, hinted = 0;
+    int drawn = 0, hinted = 0, differ = 0, sameAsModel = 0;
     for (int n = 1; n <= 8; ++n)
     {
         auto& button = tab.getRecipe (n);
         const bool entered = hooks != nullptr && hooks->enter (button);
+        // the would-be clip goes to the roll (sl-ui-sample.js A.setGhost (applyRecipe (...).clip)), and the roll draws
+        // dashed only the notes that differ: recipes 1 to 6 change the notes' Sample lines, 7 and 8 never do
         const auto& ghost = roll.getGhosts();
-        // recipes 1 to 6 change the notes' Sample lines (the dashed notes), 7 and 8 the Sample tab only
-        const bool expectGhost = ! model::recipes()[(std::size_t) n - 1].notes.empty();
-        drawn += entered && ghost.isShown() == expectGhost ? 1 : 0;
+        drawn += entered && ghost.isShown() ? 1 : 0;
+        if (ghost.getClip() != nullptr)
+        {
+            differ += model::sameClip (*ghost.getClip(), *clip) ? 0 : 1;
+            const auto direct = model::applyRecipe (*clip, rig.proc.readInst(), n, model::Ids::all());
+            sameAsModel += direct.has_value() && model::encodeClip (direct->clip) == model::encodeClip (*ghost.getClip()) ? 1 : 0;
+        }
         hinted += rig.hint.startsWith ("Recipe " + juce::String (n) + " ") && rig.hint.endsWith ("; the dashed lines preview the notes.") ? 1 : 0;
         if (hooks != nullptr)
             hooks->exit (button);
     }
-    check (drawn == 8 && hinted == 8, fmt ("8 recipes: %d drew their notes as the prototype does (1 to 6 dashed, 7 and 8 none), %d said what they do", drawn, hinted));
+    note (fmt ("%d of the 8 would-be clips differ from Strand Demo's notes", differ));
+    check (drawn == 8 && sameAsModel == 8 && hinted == 8,
+           fmt ("8 recipes: %d handed the roll their would-be notes, %d of them the bytes of model::applyRecipe on every note, %d said what they do",
+                drawn, sameAsModel, hinted));
     rig.proc.waitForSnapshot();
     check (rig.proc.getDocument().current() == clip && rig.proc.undoLabel() == label && rig.proc.getSnapshotPublisher().stats().submitted == published,
            "the hovers changed no note, pushed no undo step and published no snapshot");
