@@ -691,14 +691,16 @@ namespace
         proc.editClip ("Start", clip);
         proc.getDocument().setSelection ({ "A", "B" }, std::string ("A"));
         view.setMode (1);
-        const auto& geo = roll.getGeometry();
-        roll.setScroll (0.0, geo.cy (66.0) - geo.viewHeight() / 2.0);
         roll.edited();
         bar.getDrawerButton (ToolSettings::Drawer::connect).onClick();
         r.editor->refreshNow();
         auto* connect = dynamic_cast<ui::roll::ConnectDrawer*> (bar.getOpenDrawer());
         if (connect == nullptr)
             return out;
+        // both notes in the middle of the roll, now that the bar and its drawer have taken their room
+        const auto& geo = roll.getGeometry();
+        roll.setScroll (0.0, geo.cy (66.0) - geo.viewHeight() / 2.0);
+        r.editor->refreshNow();
         const auto toEditor = [&roll, &geo] (double x, double y)
         {
             const auto v = geo.toView (x, y);
