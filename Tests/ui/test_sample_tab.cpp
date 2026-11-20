@@ -350,13 +350,17 @@ SL_TEST ("ui", sampleTabKnobsMatchFixture)
         }
         r.lastWasSample = static_cast<int> (k->getId()) < 9;
 
-        // the knob at its start: the setting's own value (typing), or the case's (a drag, a double-click)
+        // the knob at its start: the setting's own value (typing), or the case's (a drag, a double-click). The history
+        // takes the start as a step of its own: the prototype's harness counts each case's pushes from a fresh start,
+        // and the history leaves out a step equal to its newest (so typing 4.3 after the last case's 0.5 left 5 there
+        // would push nothing)
         auto& param = r.proc.getParam (k->getSpec().param);
         const auto inst = core::instFromJson (insts[ctx]);
         if (fn == "knobType")
             params::applyPatch (r.proc.getApvts(), fullPatch (inst));
         else
             params::setPlainValue (param, params::index (k->getSpec().param), (float) fixture::num (in[2]));
+        r.record();
         r.settle();
 
         const int stepsBefore = r.steps();

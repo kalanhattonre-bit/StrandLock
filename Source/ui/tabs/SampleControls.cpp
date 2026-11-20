@@ -184,8 +184,7 @@ namespace sl::ui
         hover = std::make_unique<HoverWatch> (*this, [this] (bool over) { hoverChanged (over); });
         setTitle (spec.label);
         setSpec (spec, nullptr);
-        shown = value();
-        label->setText (readout(), juce::dontSendNotification);
+        showValue();
     }
 
     SampleKnob::~SampleKnob()
@@ -226,10 +225,7 @@ namespace sl::ui
             label->setTooltip (title);
         }
         if (paramChanged && ! drag.has_value() && ! isTyping())
-        {
-            shown = value();
-            label->setText (readout(), juce::dontSendNotification);
-        }
+            showValue();
         refreshLook();
         repaint();
     }
@@ -242,11 +238,22 @@ namespace sl::ui
         return (double) p;
     }
 
-    juce::String SampleKnob::readout() const
+    juce::String SampleKnob::textFor (double v) const
     {
         if (spec.off)
             return juce::String::fromUTF8 ("\xe2\x80\x94");   // the em dash
-        return str (rules::knobText (spec, value()));
+        return str (rules::knobText (spec, v));
+    }
+
+    void SampleKnob::showValue()
+    {
+        shown = value();
+        label->setText (textFor (shown), juce::dontSendNotification);
+    }
+
+    juce::String SampleKnob::readout() const
+    {
+        return label->getText();
     }
 
     juce::String SampleKnob::hintText() const
@@ -265,7 +272,7 @@ namespace sl::ui
         if (drag.has_value() || isTyping())
             return false;
         const double v = value();
-        const auto text = readout();
+        const auto text = textFor (v);
         if (juce::exactlyEqual (v, shown) && text == label->getText())
             return false;
         shown = v;
@@ -298,8 +305,7 @@ namespace sl::ui
             b.setPlain ((float) v);
         else
             b.setAsCompleteGesture ((float) v);
-        shown = value();
-        label->setText (readout(), juce::dontSendNotification);
+        showValue();
         repaint();
     }
 
@@ -355,19 +361,20 @@ namespace sl::ui
 
     void SampleKnob::typed (const juce::String& text)
     {
+        // the label holds the typed text now: whatever happens, it shows a value again
         const auto parsed = rules::knobParse (spec, text.toStdString());
         if (! parsed || ! std::isfinite (*parsed))
         {
             if (actions.toast)
                 actions.toast (str (rules::typingHelp (spec)), 2400);
-            label->setText (readout(), juce::dontSendNotification);
+            showValue();
             return;
         }
         const auto& ps = params::spec (spec.param);
         const double v = juce::jlimit ((double) ps.min, (double) ps.max, rules::typedValue (spec, *parsed));   // normalizeInst's clamp
         if (juce::exactlyEqual (v, value()))
         {
-            label->setText (readout(), juce::dontSendNotification);
+            showValue();
             return;
         }
         write (v, false);

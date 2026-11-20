@@ -75,9 +75,12 @@ namespace sl::ui
 
         bool syncToParameter() override;
 
-        /** The value it shows: the exact value it set itself while its parameter still holds that value's float, else
-            the parameter's own. */
+        /** Its parameter's value now: the exact value the knob set itself while the parameter still holds that value's
+            float, else the parameter's own. */
         double value() const;
+
+        /** The text under the dial now. A change from the host shows here on the editor's timer (syncToParameter),
+            never while the knob is dragged or typed in. */
         juce::String readout() const;
         bool isFaded() const noexcept { return faded; }
         bool isOff() const noexcept { return spec.off; }
@@ -126,6 +129,8 @@ namespace sl::ui
         class ValueLabel;
 
         ParamBinding& binding() const;
+        juce::String textFor (double v) const;
+        void showValue();
         void write (double v, bool inGesture);
         void typed (const juce::String& text);
         void refreshLook();
