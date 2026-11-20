@@ -367,6 +367,19 @@ namespace sl::ui::roll
         return static_cast<core::RateId> (base * 3 + juce::jlimit (0, 2, kinds.getSelected()));
     }
 
+    void RatePicker::setRate (core::RateId r)
+    {
+        const int base = static_cast<int> (r) / 3;
+        int shown = 0;
+        for (int i = 0; i < (int) bases.size(); ++i)
+            if (bases[(std::size_t) i] == base)
+                shown = i;
+        if (baseBox.getSelectedId() != shown + 1)
+            baseBox.setSelectedId (shown + 1, juce::dontSendNotification);
+        if (kinds.getSelected() != static_cast<int> (r) % 3)
+            kinds.setSelected (static_cast<int> (r) % 3);
+    }
+
     void RatePicker::fire()
     {
         if (onPick)
@@ -390,8 +403,19 @@ namespace sl::ui::roll
 
     //==============================================================================================
     Drawer::Drawer (const Theme& t, SelectionTools& st, RollView& rv)
-        : theme (t), tools (st), roll (rv)
+        : theme (t), tools (st), roll (rv), hooks (&rv.getGhosts(), [&rv] (const juce::String& text) { rv.showHint (text); })
     {
+    }
+
+    Drawer::~Drawer() = default;
+
+    FlatButton* Drawer::findButton (const juce::String& text) noexcept
+    {
+        for (auto& c : owned)
+            if (auto* b = dynamic_cast<FlatButton*> (c.get()))
+                if (b->getButtonText() == text)
+                    return b;
+        return nullptr;
     }
 
     void Drawer::resized()
@@ -409,7 +433,7 @@ namespace sl::ui::roll
         roll.edited();
     }
 
-    FlatButton& Drawer::addButton (const juce::String& text, const juce::String& tip, std::function<void()> click)
+    FlatButton& Drawer::addButton (const juce::String& text, const juce::String& tip, std::function<void()> click, GhostPreview::Make ghost)
     {
         auto b = std::make_unique<FlatButton> (theme, text);
         b->setTooltip (tip);
@@ -417,6 +441,7 @@ namespace sl::ui::roll
         auto& ref = *b;
         addAndMakeVisible (ref);
         owned.push_back (std::move (b));
+        hooks.add (ref, std::move (ghost));   // its tooltip in the hint bar, and its ghost
         return ref;
     }
 
@@ -431,13 +456,18 @@ namespace sl::ui::roll
     {
         addAndMakeVisible (caption);
         buttons.push_back (&addButton ("Nearest", "Each note slides into the closest pitch among the next notes",
-                                       [this] { tools.connect (model::ConnectMode::nearest); edited(); }));
+                                       [this] { tools.connect (model::ConnectMode::nearest); edited(); },
+                                       [this] { return tools.previewConnect (model::ConnectMode::nearest); }));
         buttons.push_back (&addButton ("Furthest", "Each note slides into the widest jump among the next notes",
-                                       [this] { tools.connect (model::ConnectMode::furthest); edited(); }));
+                                       [this] { tools.connect (model::ConnectMode::furthest); edited(); },
+                                       [this] { return tools.previewConnect (model::ConnectMode::furthest); }));
         buttons.push_back (&addButton ("Random", "Each note slides into any of the next notes",
-                                       [this] { tools.connect (model::ConnectMode::random); edited(); }));
-        buttons.push_back (&addButton ("Re-roll", "A new random set of slides", [this] { tools.connectReroll(); edited(); }));
-        buttons.push_back (&addButton ("Disconnect", "Remove the slides between the selected notes", [this] { tools.disconnect(); edited(); }));
+                                       [this] { tools.connect (model::ConnectMode::random); edited(); },
+                                       [this] { return tools.previewConnect (model::ConnectMode::random); }));
+        buttons.push_back (&addButton ("Re-roll", "A new random set of slides", [this] { tools.connectReroll(); edited(); },
+                                       [this] { return tools.previewConnect (model::ConnectMode::random, true); }));
+        buttons.push_back (&addButton ("Disconnect", "Remove the slides between the selected notes", [this] { tools.disconnect(); edited(); },
+                                       [this] { return tools.previewDisconnect(); }));
         addAndMakeVisible (note);
         addChildComponent (warning);
         sync();
@@ -526,10 +556,14 @@ namespace sl::ui::roll
         toolButton ("Chop" + kEllipsis, "Split each selected note into repeats at a rate", Tool::chop);
         separator();
         addAndMakeVisible (laneCaption);
-        buttons.push_back (&addButton ("Reverse", "Play the lane's line backwards in time", [this] { tools.reverse(); edited(); }));
-        buttons.push_back (&addButton ("Flip", "Turn the lane's line upside down", [this] { tools.flip(); edited(); }));
-        buttons.push_back (&addButton ("More", "Make the lane's line move twice as far from its middle", [this] { tools.more(); edited(); }));
-        buttons.push_back (&addButton ("Less", "Make the lane's line move half as far from its middle", [this] { tools.less(); edited(); }));
+        buttons.push_back (&addButton ("Reverse", "Play the lane's line backwards in time", [this] { tools.reverse(); edited(); },
+                                       [this] { return tools.previewLaneTool (0); }));
+        buttons.push_back (&addButton ("Flip", "Turn the lane's line upside down", [this] { tools.flip(); edited(); },
+                                       [this] { return tools.previewLaneTool (1); }));
+        buttons.push_back (&addButton ("More", "Make the lane's line move twice as far from its middle", [this] { tools.more(); edited(); },
+                                       [this] { return tools.previewLaneTool (2); }));
+        buttons.push_back (&addButton ("Less", "Make the lane's line move half as far from its middle", [this] { tools.less(); edited(); },
+                                       [this] { return tools.previewLaneTool (3); }));
         separator();
         {
             auto similar = std::make_unique<ArrowButton> (theme, "Select similar");
@@ -537,11 +571,13 @@ namespace sl::ui::roll
             similar->onClick = [this] { openSimilar(); };
             addAndMakeVisible (*similar);
             buttons.push_back (similar.get());
+            hooks.add (*similar, {});
             owned.push_back (std::move (similar));
         }
         toolButton ("Humanize" + kEllipsis, "Nudge timing, velocity, Volume and Tone by small amounts (they stay the same until you Re-roll)", Tool::humanize);
         toolButton ("Strum" + kEllipsis, "Spread the starts of each chord", Tool::strum);
-        buttons.push_back (&addButton ("Legato", "Stretch each note to reach the next one (ready for Connect)", [this] { tools.legato(); edited(); }));
+        buttons.push_back (&addButton ("Legato", "Stretch each note to reach the next one (ready for Connect)", [this] { tools.legato(); edited(); },
+                                       [this] { return tools.previewLegato(); }));
         showPanel();
     }
 
@@ -563,7 +599,7 @@ namespace sl::ui::roll
         {
             if (panel != nullptr)
                 removeChildComponent (panel.get());
-            panel = makeToolPanel (want, theme, tools, [this] { edited(); });
+            panel = makeToolPanel (want, theme, tools, roll, [this] { edited(); });
             panelTool = want;
             if (panel != nullptr)
             {
@@ -665,10 +701,12 @@ namespace sl::ui::roll
     //==============================================================================================
     // The tool panels.
 
-    ToolPanel::ToolPanel (const Theme& t, SelectionTools& st, std::function<void()> e)
-        : theme (t), tools (st), edited (std::move (e))
+    ToolPanel::ToolPanel (const Theme& t, SelectionTools& st, RollView& rv, std::function<void()> e)
+        : theme (t), tools (st), edited (std::move (e)), hooks (&rv.getGhosts(), [&rv] (const juce::String& text) { rv.showHint (text); })
     {
     }
+
+    ToolPanel::~ToolPanel() = default;
 
     void ToolPanel::paint (juce::Graphics& g)
     {
@@ -745,7 +783,7 @@ namespace sl::ui::roll
         class WalkPanel final : public ToolPanel
         {
         public:
-            WalkPanel (const Theme& t, SelectionTools& st, std::function<void()> e) : ToolPanel (t, st, std::move (e))
+            WalkPanel (const Theme& t, SelectionTools& st, RollView& rv, std::function<void()> e) : ToolPanel (t, st, rv, std::move (e))
             {
                 own (owned, *this, std::make_unique<Caption> (theme, "Walk", Caption::Style::label));
                 field = &own (owned, *this, std::make_unique<juce::ComboBox> ("Walk field"));
@@ -779,7 +817,7 @@ namespace sl::ui::roll
                 go->setToggleState (true, juce::dontSendNotification);
                 go->setTooltip ("Spread it across the selected notes (one undo step); then the sliders change it live");
                 go->onClick = [this] { tools.walk (true, true); after(); };
-                own (owned, *this, std::move (go));
+                hooks.add (own (owned, *this, std::move (go)), [this] { return tools.previewWalk(); });
                 note = std::make_unique<NoteText> (theme, false);
                 addAndMakeVisible (*note);
                 sync();
@@ -849,7 +887,7 @@ namespace sl::ui::roll
         class ChopPanel final : public ToolPanel
         {
         public:
-            ChopPanel (const Theme& t, SelectionTools& st, std::function<void()> e) : ToolPanel (t, st, std::move (e))
+            ChopPanel (const Theme& t, SelectionTools& st, RollView& rv, std::function<void()> e) : ToolPanel (t, st, rv, std::move (e))
             {
                 own (owned, *this, std::make_unique<Caption> (theme, "Chop", Caption::Style::label));
                 auto& rate = own (owned, *this, std::make_unique<RatePicker> (theme, "Rate", tools.settings().chop.rate, std::vector<int> { 2, 3, 4, 5, 6 }));
@@ -860,6 +898,8 @@ namespace sl::ui::roll
                 step.getButton (0).setTooltip ("Every repeat starts where the note started");
                 step.getButton (1).setTooltip ("Each repeat starts a little further into the Region");
                 step.onPick = [this] (int i) { tools.settings().chop.step = i == 1; sync(); };
+                hooks.add (step.getButton (0), {});
+                hooks.add (step.getButton (1), {});
                 auto go = std::make_unique<FlatButton> (theme, "Chop");
                 go->setToggleState (true, juce::dontSendNotification);
                 go->setTooltip ("Split the selected notes (one undo step)");
@@ -870,6 +910,7 @@ namespace sl::ui::roll
                         edited();
                 };
                 button = &own (owned, *this, std::move (go));
+                hooks.add (*button, [this] { return tools.previewChop(); });
                 note = std::make_unique<NoteText> (theme, false);
                 addAndMakeVisible (*note);
                 sync();
@@ -914,7 +955,7 @@ namespace sl::ui::roll
         class HumanizePanel final : public ToolPanel
         {
         public:
-            HumanizePanel (const Theme& t, SelectionTools& st, std::function<void()> e) : ToolPanel (t, st, std::move (e))
+            HumanizePanel (const Theme& t, SelectionTools& st, RollView& rv, std::function<void()> e) : ToolPanel (t, st, rv, std::move (e))
             {
                 own (owned, *this, std::make_unique<Caption> (theme, "Humanize", Caption::Style::label));
                 auto& H = tools.settings().hum;
@@ -935,11 +976,11 @@ namespace sl::ui::roll
                 go->setToggleState (true, juce::dontSendNotification);
                 go->setTooltip ("Nudge the selected notes (one undo step); then the sliders change it live");
                 go->onClick = [this] { tools.humanize (true, true); after(); };
-                own (owned, *this, std::move (go));
+                hooks.add (own (owned, *this, std::move (go)), [this] { return tools.previewHumanize(); });
                 auto reroll = std::make_unique<FlatButton> (theme, "Re-roll");
                 reroll->setTooltip ("A different set of nudges (one undo step)");
                 reroll->onClick = [this] { tools.humanizeReroll(); after(); };
-                own (owned, *this, std::move (reroll));
+                hooks.add (own (owned, *this, std::move (reroll)), {});
                 note = std::make_unique<NoteText> (theme, false);
                 note->setText ("The nudges stay the same every time you play, until you Re-roll.");
                 addAndMakeVisible (*note);
@@ -986,7 +1027,7 @@ namespace sl::ui::roll
         class StrumPanel final : public ToolPanel
         {
         public:
-            StrumPanel (const Theme& t, SelectionTools& st, std::function<void()> e) : ToolPanel (t, st, std::move (e))
+            StrumPanel (const Theme& t, SelectionTools& st, RollView& rv, std::function<void()> e) : ToolPanel (t, st, rv, std::move (e))
             {
                 own (owned, *this, std::make_unique<Caption> (theme, "Strum", Caption::Style::label));
                 auto& gap = own (owned, *this, std::make_unique<RatePicker> (theme, "Gap", tools.settings().strumRate, std::vector<int> { 3, 4, 5, 6 }));
@@ -1003,7 +1044,8 @@ namespace sl::ui::roll
                         if (edited)
                             edited();
                     };
-                    own (owned, *this, std::move (b));
+                    hooks.add (own (owned, *this, std::move (b)),
+                               [this, up] { return tools.previewStrum (up ? model::StrumDir::up : model::StrumDir::down); });
                 }
                 note = std::make_unique<NoteText> (theme, false);
                 note->setText ("Up starts from the lowest note, Down from the highest. Notes that start together count as a chord.");
@@ -1026,16 +1068,396 @@ namespace sl::ui::roll
         };
     }
 
-    std::unique_ptr<ToolPanel> makeToolPanel (ToolSettings::Tool tool, const Theme& t, SelectionTools& st, std::function<void()> edited)
+    std::unique_ptr<ToolPanel> makeToolPanel (ToolSettings::Tool tool, const Theme& t, SelectionTools& st, RollView& rv, std::function<void()> edited)
     {
         switch (tool)
         {
-            case ToolSettings::Tool::walk:     return std::make_unique<WalkPanel> (t, st, std::move (edited));
-            case ToolSettings::Tool::chop:     return std::make_unique<ChopPanel> (t, st, std::move (edited));
-            case ToolSettings::Tool::humanize: return std::make_unique<HumanizePanel> (t, st, std::move (edited));
-            case ToolSettings::Tool::strum:    return std::make_unique<StrumPanel> (t, st, std::move (edited));
+            case ToolSettings::Tool::walk:     return std::make_unique<WalkPanel> (t, st, rv, std::move (edited));
+            case ToolSettings::Tool::chop:     return std::make_unique<ChopPanel> (t, st, rv, std::move (edited));
+            case ToolSettings::Tool::humanize: return std::make_unique<HumanizePanel> (t, st, rv, std::move (edited));
+            case ToolSettings::Tool::strum:    return std::make_unique<StrumPanel> (t, st, rv, std::move (edited));
             case ToolSettings::Tool::none:     break;
         }
         return nullptr;
+    }
+
+    //==============================================================================================
+    // Shapes (Y2)
+
+    ShapesDrawer::ShapesDrawer (const Theme& t, SelectionTools& st, RollView& rv)
+        : Drawer (t, st, rv),
+          lane (st.lane()),
+          caption (t, "Shape " + laneNameOf (lane), Caption::Style::label),
+          scopeButtons (t, juce::StringArray ("Each note", "Across"), st.scope() == model::ShapeScope::across ? 1 : 0),
+          note (t, false)
+    {
+        // sl-ui-panels.js DRAWERS.shapes: "Shape Tone", Each note / Across (shared by every shape tool), the shapes
+        addAndMakeVisible (caption);
+        scopeButtons.getButton (0).setTooltip ("The shape fits every selected note");
+        scopeButtons.getButton (1).setTooltip ("One long shape across the whole selection (each note gets its slice)");
+        scopeButtons.onPick = [this] (int i)
+        {
+            roll.setScope (i == 1 ? model::ShapeScope::across : model::ShapeScope::each);
+            sync();
+        };
+        addAndMakeVisible (scopeButtons);
+        hooks.add (scopeButtons.getButton (0), {});
+        hooks.add (scopeButtons.getButton (1), {});
+        keys = tools.shapeKeys (lane);
+        for (const auto k : keys)
+            shapeButtons.push_back (&addButton (model::shapeName (k), shapeTitle (k), [this, k] { tools.applyShape (k); edited(); },
+                                                [this, k] { return tools.previewShape (k); }));
+        addChildComponent (note);
+        sync();
+    }
+
+    FlatButton* ShapesDrawer::findShape (model::ShapeKey key) noexcept
+    {
+        for (std::size_t i = 0; i < keys.size(); ++i)
+            if (keys[i] == key)
+                return shapeButtons[i];
+        return nullptr;
+    }
+
+    void ShapesDrawer::sync()
+    {
+        scopeButtons.setSelected (tools.scope() == model::ShapeScope::across ? 1 : 0);
+        // on Travel: what the line means for these notes
+        juce::String text;
+        if (lane == core::LaneId::travel)
+        {
+            const auto kind = tools.travelKind();
+            if (! kind)
+                text = "Some notes use Speed, some Path: each shape changes only the notes of its kind.";
+            else if (*kind == model::TravelKind::path)
+                text = "These notes use Path: the line is where in the Region each note is.";
+            else
+                text = "These notes use Speed: above the middle line plays forwards, below plays backwards.";
+        }
+        note.setText (text);
+        const bool show = text.isNotEmpty();
+        if (note.isVisible() != show)
+        {
+            note.setVisible (show);
+            if (onHeightChange)
+                onHeightChange();
+        }
+        resized();
+    }
+
+    std::vector<FlowItem> ShapesDrawer::items (int width)
+    {
+        std::vector<FlowItem> out;
+        out.push_back ({ &caption, caption.preferredWidth(), kItemHeight, true });
+        out.push_back ({ &scopeButtons, scopeButtons.preferredWidth(), kItemHeight, false });
+        bool first = true;
+        for (auto* b : shapeButtons)
+        {
+            out.push_back ({ b, buttonWidth (*b), kItemHeight, first });
+            first = false;
+        }
+        if (note.isVisible())
+            out.push_back ({ &note, juce::jmin (width, note.naturalWidth()), note.heightFor (width), true });
+        return out;
+    }
+
+    int ShapesDrawer::heightFor (int width)
+    {
+        const bool place = width == getWidth();
+        return layoutItems (items (width), width, place);
+    }
+
+    //==============================================================================================
+    // Pattern (Y3) and Random (Y4)
+
+    GenDrawer::GenDrawer (const Theme& t, SelectionTools& st, RollView& rv, model::GenKind k)
+        : Drawer (t, st, rv),
+          kind (k),
+          lane (st.lane()),
+          caption (t, (k == model::GenKind::pattern ? "Pattern on " : "Random on ") + laneNameOf (lane), Caption::Style::label),
+          note (t, false)
+    {
+        const bool pattern = kind == model::GenKind::pattern;
+        const auto& S = tools.settings();
+        const auto ln = laneNameOf (lane);
+        addAndMakeVisible (caption);
+
+        // Pattern: the shape chips, each with the ghost of the pattern in that shape
+        if (pattern)
+        {
+            juce::StringArray names;
+            for (int i = 0; i < (int) std::size (model::kGenShapeCodes); ++i)
+                names.add (genShapeName (static_cast<model::GenShape> (i)));
+            auto seg = std::make_unique<SegButtons> (theme, names, static_cast<int> (S.pat.shape));
+            for (int i = 0; i < names.size(); ++i)
+            {
+                const auto shape = static_cast<model::GenShape> (i);
+                hooks.add (seg->getButton (i), [this, shape] { return tools.previewGen (model::GenKind::pattern, shape); });
+            }
+            seg->onPick = [this] (int i)
+            {
+                tools.settings().pat.shape = static_cast<model::GenShape> (i);
+                changed (true, "shape");
+            };
+            shapes = seg.get();
+            addAndMakeVisible (*seg);
+            owned.push_back (std::move (seg));
+        }
+
+        // the rate (1 bar .. 1/64, straight, triplet or dotted)
+        {
+            auto rp = std::make_unique<RatePicker> (theme, "Rate", pattern ? S.pat.rate : S.rnd.rate, std::vector<int> { 0, 1, 2, 3, 4, 5, 6 });
+            rp->getBaseBox().setTooltip (pattern ? "How often it repeats: 1 bar down to 1/64" : "A new random value starts on this grid");
+            rp->onPick = [this] (core::RateId r)
+            {
+                auto& set = tools.settings();
+                if (kind == model::GenKind::pattern)
+                    set.pat.rate = r;
+                else
+                    set.rnd.rate = r;
+                changed (true, "rate");
+            };
+            rate = rp.get();
+            addAndMakeVisible (*rp);
+            owned.push_back (std::move (rp));
+        }
+
+        const core::LaneId L = lane;
+        auto depthFmt = [L] (double v) { return str (depthText (L, v)); };
+        if (pattern)
+        {
+            const juce::String tip = juce::String ("How far the pattern swings") + (L == core::LaneId::pitch ? " (full = 2 semitones each way)" : "");
+            addSlider ("Depth at start", 0.0, 1.0, 0.01, S.pat.d0, depthFmt, tip, [this] (double v, bool final)
+            {
+                tools.settings().pat.d0 = v;
+                changed (final, "depth");
+            });
+            addSlider ("Depth at end", 0.0, 1.0, 0.01, S.pat.d1, depthFmt, tip, [this] (double v, bool final)
+            {
+                tools.settings().pat.d1 = v;
+                changed (final, "depth");
+            });
+            warp = &addSlider ("Speed up / slow down", -0.9, 3.0, 0.05, S.pat.warp, [] (double v) { return str (warpText (v)); },
+                               "The pattern speeds up or slows down across each note (only with Lock to the beat off)", [this] (double v, bool final)
+            {
+                tools.settings().pat.warp = v;
+                changed (final, "speed-up");
+            });
+        }
+        else
+        {
+            addSlider ("Amount", 0.0, 1.0, 0.01, S.rnd.amount, depthFmt, "How far the random may move", [this] (double v, bool final)
+            {
+                tools.settings().rnd.amount = v;
+                changed (final, "amount");
+            });
+            addSlider ("Smooth", 0.0, 1.0, 0.01, S.rnd.smooth, [] (double v) { return str (smoothText (v)); },
+                       "Left: jumps in steps. Right: moves smoothly from one value to the next.", [this] (double v, bool final)
+            {
+                tools.settings().rnd.smooth = v;
+                changed (final, "smooth");
+            });
+        }
+
+        // Same or Different per note (Pattern: for a random shape only)
+        {
+            const auto now = pattern ? S.pat.perNote : S.rnd.perNote;
+            auto seg = std::make_unique<SegButtons> (theme, juce::StringArray ("Same for every note", "Different per note"), now == model::PerNote::different ? 1 : 0);
+            if (! pattern)
+            {
+                seg->getButton (0).setTooltip ("A chord moves together");
+                seg->getButton (1).setTooltip ("Every note gets its own random line");
+            }
+            hooks.add (seg->getButton (0), {});
+            hooks.add (seg->getButton (1), {});
+            seg->onPick = [this] (int i)
+            {
+                auto& set = tools.settings();
+                const auto v = i == 1 ? model::PerNote::different : model::PerNote::same;
+                if (kind == model::GenKind::pattern)
+                    set.pat.perNote = v;
+                else
+                    set.rnd.perNote = v;
+                changed (true, "per note");
+            };
+            perNote = seg.get();
+            addChildComponent (*seg);
+            owned.push_back (std::move (seg));
+        }
+
+        // Lock to the beat: a switch, lit while on
+        lock = &addButton ("Lock to the beat",
+                           pattern ? "On: every note's pattern stays in step with the bar. Off: it starts again at each note."
+                                   : "On: the random steps sit on the song grid. Off: they count from each note's start.",
+                           [this]
+                           {
+                               auto& set = tools.settings();
+                               bool& on = kind == model::GenKind::pattern ? set.pat.lockToBeat : set.rnd.lockToBeat;
+                               on = ! on;
+                               changed (true, on ? "locked to the beat" : "unlocked");
+                           });
+
+        apply = &addButton ("Apply", {}, [this]
+        {
+            tools.applyGen (kind);
+            sync();
+            edited();
+        }, [this] { return tools.previewGen (kind); });
+        reroll = &addButton ("Re-roll",
+                             pattern ? "New random values (they stay the same until you re-roll again)"
+                                     : "New random values (they stay the same on every loop until you re-roll again)",
+                             [this]
+                             {
+                                 tools.rerollGen();
+                                 edited();
+                             },
+                             [this] { return tools.previewReroll(); });
+        removeButton = &addButton ("Remove", "Take the pattern or random off the " + ln + " lane (your drawing stays)", [this]
+        {
+            tools.removeGen();
+            edited();
+        }, [this] { return tools.previewRemove(); });
+        bakeButton = &addButton ("Turn into nodes", "Turn it into ordinary nodes you can move by hand", [this]
+        {
+            tools.bake();
+            edited();
+        }, [this] { return tools.previewBake(); });
+        addAndMakeVisible (note);
+
+        // Pattern's per-note choice and Re-roll show for a random shape only
+        shownRandomShape = ! pattern || isRandomShape (S.pat.shape);
+        perNote->setVisible (shownRandomShape);
+        reroll->setVisible (shownRandomShape);
+        sync();
+    }
+
+    ToolSlider& GenDrawer::addSlider (const juce::String& captionText, double min, double max, double step, double value,
+                                      std::function<juce::String (double)> fmt, const juce::String& tip, std::function<void (double, bool)> moved)
+    {
+        auto slider = std::make_unique<ToolSlider> (theme, captionText, min, max, step, value, std::move (fmt));
+        slider->setName (captionText);
+        slider->onInput = [moved] (double v) { moved (v, false); };
+        slider->onChange = [moved] (double v) { moved (v, true); };
+        auto& ref = *slider;
+        addAndMakeVisible (ref);
+        owned.push_back (std::move (slider));
+        hooks.add (ref, {}, [tip] { return tip; });
+        sliders.push_back (&ref);
+        return ref;
+    }
+
+    ToolSlider* GenDrawer::findSlider (const juce::String& captionText) noexcept
+    {
+        for (auto* s : sliders)
+            if (s->getName() == captionText)
+                return s;
+        return nullptr;
+    }
+
+    void GenDrawer::changed (bool final, const std::string& what)
+    {
+        // sl-ui-panels.js genChanged: live once applied, else a ghost of Apply's result
+        tools.genChanged (kind, final, what);
+        sync();
+        edited();
+    }
+
+    void GenDrawer::sync()
+    {
+        const bool pattern = kind == model::GenKind::pattern;
+        const auto& S = tools.settings();
+        const bool editing = tools.isEditing (kind);
+        const int k = (int) tools.ids().size();
+        const auto ln = laneNameOf (lane);
+        if (pattern)
+        {
+            shapes->setSelected (static_cast<int> (S.pat.shape));
+            rate->setRate (S.pat.rate);
+            sliders[0]->setValue (S.pat.d0);
+            sliders[1]->setValue (S.pat.d1);
+            warp->setValue (S.pat.warp);
+            warp->setAlpha (S.pat.lockToBeat ? 0.5f : 1.0f);   // .slp-faded: the speed-up works only unlocked
+            lock->setToggleState (S.pat.lockToBeat, juce::dontSendNotification);
+            perNote->setSelected (S.pat.perNote == model::PerNote::different ? 1 : 0);
+            const bool rnd = isRandomShape (S.pat.shape);
+            if (rnd != shownRandomShape)
+            {
+                shownRandomShape = rnd;
+                perNote->setVisible (rnd);
+                reroll->setVisible (rnd);
+                if (onHeightChange)
+                    onHeightChange();
+            }
+            reroll->setEnabled (tools.anyGen (lane, true));
+        }
+        else
+        {
+            rate->setRate (S.rnd.rate);
+            sliders[0]->setValue (S.rnd.amount);
+            sliders[1]->setValue (S.rnd.smooth);
+            lock->setToggleState (S.rnd.lockToBeat, juce::dontSendNotification);
+            perNote->setSelected (S.rnd.perNote == model::PerNote::different ? 1 : 0);
+            reroll->setEnabled (tools.anyGen (lane));
+        }
+        const bool has = tools.anyGen (lane);
+        removeButton->setEnabled (has);
+        bakeButton->setEnabled (has);
+        // Apply is lit until the notes have this generator; from then on the controls change it live
+        apply->setToggleState (! editing, juce::dontSendNotification);
+        apply->setTooltip ("Put this " + juce::String (pattern ? "pattern" : "random") + " on the " + ln + " lane of the " + str (nNotes (k))
+                           + " (one undo step)");
+        const juce::String word = pattern ? "pattern" : "random";
+        note.setText (editing ? "Moving these changes the " + word + " on the " + str (nNotes (k)) + " straight away: each change is one undo step."
+                      : pattern ? juce::String ("Choose the settings (the dashed line shows the result), then Apply.")
+                                : juce::String ("Choose the settings (the dashed line shows the result), then Apply. Random plays the same on every loop "
+                                                "until you Re-roll."));
+        for (auto* s : sliders)
+            s->repaint();
+        resized();
+    }
+
+    std::vector<FlowItem> GenDrawer::items (int width)
+    {
+        std::vector<FlowItem> out;
+        auto add = [&out] (juce::Component* c, int w, bool newRow) { out.push_back ({ c, w, kItemHeight, newRow }); };
+        auto slider = [&add] (ToolSlider* s, bool newRow) { add (s, s->preferredWidth(), newRow); };
+        add (&caption, caption.preferredWidth(), true);
+        if (kind == model::GenKind::pattern)
+        {
+            // Pattern on Tone [shapes] / Rate, Depth at start, Depth at end / Lock to the beat, Speed up, [per note],
+            // Apply, [Re-roll], Remove, Turn into nodes
+            add (shapes, shapes->preferredWidth(), false);
+            add (rate, rate->preferredWidth(), true);
+            slider (sliders[0], false);
+            slider (sliders[1], false);
+            add (lock, buttonWidth (*lock), true);
+            slider (warp, false);
+            if (perNote->isVisible())
+                add (perNote, perNote->preferredWidth(), false);
+            add (apply, buttonWidth (*apply), false);
+            if (reroll->isVisible())
+                add (reroll, buttonWidth (*reroll), false);
+        }
+        else
+        {
+            // Random on Tone, Rate / Amount, Smooth, per note, Lock to the beat / Apply, Re-roll, Remove, Turn into nodes
+            add (rate, rate->preferredWidth(), false);
+            slider (sliders[0], true);
+            slider (sliders[1], false);
+            add (perNote, perNote->preferredWidth(), false);
+            add (lock, buttonWidth (*lock), false);
+            add (apply, buttonWidth (*apply), true);
+            add (reroll, buttonWidth (*reroll), false);
+        }
+        add (removeButton, buttonWidth (*removeButton), false);
+        add (bakeButton, buttonWidth (*bakeButton), false);
+        out.push_back ({ &note, juce::jmin (width, note.naturalWidth()), note.heightFor (width), true });
+        return out;
+    }
+
+    int GenDrawer::heightFor (int width)
+    {
+        const bool place = width == getWidth();
+        return layoutItems (items (width), width, place);
     }
 }

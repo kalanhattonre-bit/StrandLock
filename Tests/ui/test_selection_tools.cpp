@@ -16,7 +16,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
-#include "RollRig.h"
+#include "ToolRig.h"
 
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
@@ -58,40 +58,6 @@ namespace
     using ui::ThemeId;
     using ui::roll::SelectionTools;
     using ui::roll::ToolSettings;
-
-    /** A roll with no window (RollRig) and the bar's SelectionTools on the same document and undo history. */
-    struct ToolRig
-    {
-        RollRig rig;
-        std::vector<std::pair<std::string, int>> toasts;
-        std::unique_ptr<SelectionTools> tools;
-
-        explicit ToolRig (const model::Clip& clip) : rig (clip)
-        {
-            ui::roll::ToolHost host { rig.doc,
-                                      [this] (const std::string& label)
-                                      {
-                                          const bool pushed = rig.history.push (label, rig.doc.current(), rig.doc.nonParam(), {});
-                                          if (pushed)
-                                          {
-                                              ++rig.steps;
-                                              rig.labels.push_back (label);
-                                          }
-                                          return pushed;
-                                      },
-                                      [this] (const std::string& text, int ms) { toasts.emplace_back (text, ms); } };
-            tools = std::make_unique<SelectionTools> (std::move (host), rig.gestures());
-        }
-
-        ToolSettings& settings() { return tools->settings(); }
-        void select (const std::vector<std::string>& ids, const std::string& primary = {})
-        {
-            rig.doc.setSelection (ids, primary.empty() ? std::optional<std::string>() : std::optional<std::string> (primary));
-        }
-        std::vector<std::uint8_t> bytes() const { return model::encodeClip (*rig.doc.current()); }
-        std::string lastToast() const { return toasts.empty() ? std::string() : toasts.back().first; }
-        std::string lastLabel() const { return rig.labels.empty() ? std::string() : rig.labels.back(); }
-    };
 
     std::vector<std::string> allIds (const model::Clip& c)
     {
@@ -706,7 +672,7 @@ SL_TEST ("ui", selectionToolsToastsAndLanes)
 SL_TEST ("ui", selectionBarInTheEditor)
 {
     section ("The selection bar in the editor: nothing selected it says how; Connect and Tools open their drawers, whose buttons run the actions "
-             "(one undo step each); Walk's panel, Chop's panel, Select similar's menu, the Lane list; shapes arrive in S2");
+             "(one undo step each); Walk's panel, Chop's panel, Select similar's menu, the Lane list, the Shapes drawer");
 
     StrandLockProcessor proc;
     {
@@ -806,14 +772,14 @@ SL_TEST ("ui", selectionBarInTheEditor)
         check (wanters == 0 && ! editor.isKeysOn(), fmt ("with Keys off no control of the bar, its drawer or its tool panel wants the keyboard (%d do)",
                                                           wanters));
 
-        // the Lane list picks a mode; the S2 drawers say they arrive later
+        // the Lane list picks a mode; Shapes opens its drawer for that lane (S2)
         bar.getLaneBox().setSelectedId (core::laneIndex (core::LaneId::hollow) + 1, juce::sendNotificationSync);
         const bool laneMode = view.getMode() == 7 && roll.getTools().lane() == core::LaneId::hollow;
         bar.getDrawerButton (ToolSettings::Drawer::shapes).onClick();
-        const bool later = view.isToastShown() && view.getToastText().contains ("arrive in the next build")
-                           && bar.getOpenDrawer() != nullptr && dynamic_cast<ui::roll::ToolsDrawer*> (bar.getOpenDrawer()) != nullptr;
-        check (laneMode && later, fmt ("the Lane list's Hollow shows mode 7 (%d); Shapes says it arrives in the next build and keeps Tools open",
-                                       view.getMode()));
+        auto* shapes = dynamic_cast<ui::roll::ShapesDrawer*> (bar.getOpenDrawer());
+        const bool shapesOpen = shapes != nullptr && shapes->getShapeButtons().size() == 8 && bar.getDrawerButton (ToolSettings::Drawer::shapes).getToggleState();
+        check (laneMode && shapesOpen, fmt ("the Lane list's Hollow shows mode 7 (%d); Shapes opens its drawer with Hollow's 8 shapes (%d)",
+                                            view.getMode(), shapes != nullptr ? (int) shapes->getShapeButtons().size() : -1));
     }
 }
 

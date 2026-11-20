@@ -1,11 +1,14 @@
 #include "SelectionBar.h"
 
 #include "Drawers.h"
+#include "InspectorText.h"
 #include "RollPainter.h"
 #include "RollView.h"
 
 #include "core/JsCompat.h"
 #include "core/Travel.h"
+#include "model/NoteSettings.h"
+#include "model/Recipes.h"
 
 #include <algorithm>
 #include <cmath>
@@ -120,6 +123,69 @@ namespace sl::ui::roll
         return std::to_string (k) + (k == 1 ? " note" : " notes");
     }
 
+    const char* genShapeName (model::GenShape s) noexcept
+    {
+        // sl-ui-panels.js GEN_NAMES
+        switch (s)
+        {
+            case model::GenShape::squiggle:     return "Squiggle";
+            case model::GenShape::triangle:     return "Triangle";
+            case model::GenShape::sawup:        return "Saw up";
+            case model::GenShape::sawdown:      return "Saw down";
+            case model::GenShape::square:       return "Square";
+            case model::GenShape::randsteps:    return "Random steps";
+            case model::GenShape::smoothrandom: return "Smooth random";
+        }
+        return "Squiggle";
+    }
+
+    const char* shapeTitle (model::ShapeKey k) noexcept
+    {
+        // sl-ui-panels.js SHAPE_TITLES
+        switch (k)
+        {
+            case model::ShapeKey::up:              return "Rises from the start of the note to the end";
+            case model::ShapeKey::down:            return "Falls from the start to the end";
+            case model::ShapeKey::swell:           return "Rises to the middle, then falls";
+            case model::ShapeKey::dip:             return "Falls to the middle, then rises";
+            case model::ShapeKey::squiggle:        return "A few smooth waves";
+            case model::ShapeKey::random:          return "A few random steps (each click makes a new one)";
+            case model::ShapeKey::decay:           return "Starts high and falls away quickly";
+            case model::ShapeKey::reset:           return "Back to the flat starting line (a pattern or random on top stays)";
+            case model::ShapeKey::tapestop:        return "Slows down to a stop, like a tape machine switched off";
+            case model::ShapeKey::tapestart:       return "Starts stopped and speeds up to normal";
+            case model::ShapeKey::reversehalf:     return "Plays forwards, then backwards from the middle";
+            case model::ShapeKey::rewind:          return "Plays, then rewinds fast and stops";
+            case model::ShapeKey::playthrough:     return "Plays the Region from its start to its end across the note";
+            case model::ShapeKey::playthroughback: return "Plays the Region from its end to its start";
+            case model::ShapeKey::fit:             return "Plays through the Region at exactly normal speed (1x) at this tempo";
+        }
+        return "";
+    }
+
+    std::string depthText (core::LaneId lane, double v)
+    {
+        // sl-ui-panels.js depthText: on Pitch a depth of 1 swings 2 semitones each way
+        if (lane == core::LaneId::pitch)
+            return plainUnits ("\xc2\xb1" + fmtNum (v * 2.0, 2) + " st");
+        return core::jsNumberToString (core::jsRound (v * 100.0)) + "%";
+    }
+
+    std::string warpText (double v)
+    {
+        return std::abs (v) < 0.03 ? "even" : v > 0.0 ? "speeds up" : "slows down";
+    }
+
+    std::string smoothText (double v)
+    {
+        return v < 0.02 ? "steps" : v > 0.98 ? "smooth" : core::jsNumberToString (core::jsRound (v * 100.0)) + "%";
+    }
+
+    bool isRandomShape (model::GenShape s) noexcept
+    {
+        return s == model::GenShape::randsteps || s == model::GenShape::smoothrandom;
+    }
+
     //==============================================================================================
     SelectionTools::SelectionTools (ToolHost h, RollGestures& g)
         : host (std::move (h)), gestures (g)
@@ -193,13 +259,22 @@ namespace sl::ui::roll
         showLane (L);
     }
 
+    void SelectionTools::openDrawer (ToolSettings::Drawer d)
+    {
+        // sl-ui-panels.js openDrawer: the lane drawers show their lane on the roll, and read the primary note's
+        // generator into their settings
+        using D = ToolSettings::Drawer;
+        set.drawer = d;
+        if (d == D::shapes || d == D::pattern || d == D::random)
+        {
+            showLane (lane());
+            loadGenValues();
+        }
+    }
+
     void SelectionTools::toggleDrawer (ToolSettings::Drawer d)
     {
-        using D = ToolSettings::Drawer;
-        set.drawer = set.drawer == d ? D::none : d;
-        // the lane drawers show their lane on the roll (S2)
-        if (set.drawer == D::shapes || set.drawer == D::pattern || set.drawer == D::random)
-            showLane (lane());
+        openDrawer (set.drawer == d ? ToolSettings::Drawer::none : d);
     }
 
     void SelectionTools::toggleTool (ToolSettings::Tool t)
@@ -228,6 +303,19 @@ namespace sl::ui::roll
             else if (host.doc.current() != live->last)
                 live.reset();                       // A.on ('clip'): Undo, a drag on the roll: the session is gone
         }
+
+        // another clip, selection, primary note or lane: the drawers' settings read the primary note's generator
+        // again (sl-ui-panels.js loadGenValues on 'selection', 'clip' and 'mode')
+        const auto cur = host.doc.current();
+        const int ln = core::laneIndex (lane());
+        if (cur != seenClip || st.selected != seenSelection || st.primary != seenPrimary || ln != seenLane)
+        {
+            seenClip = cur;
+            seenSelection = st.selected;
+            seenPrimary = st.primary;
+            seenLane = ln;
+            loadGenValues();
+        }
     }
 
     //==============================================================================================
@@ -244,6 +332,8 @@ namespace sl::ui::roll
     {
         // one model call, one undo step (7.7 decision 1); a cap refuses it with the clip unchanged and a toast
         endLive();
+        if (ghosts != nullptr)
+            ghosts->clear();
         const auto out = host.doc.apply (std::move (result));
         gestures.sync();
         if (out.refused)
@@ -267,10 +357,23 @@ namespace sl::ui::roll
     {
         if (! live)
             return false;
-        return (tool == ToolSettings::Tool::walk && live->key == LiveKey::walk) || (tool == ToolSettings::Tool::humanize && live->key == LiveKey::hum);
+        return (tool == ToolSettings::Tool::walk && live->key == "walk") || (tool == ToolSettings::Tool::humanize && live->key == "hum");
     }
 
-    void SelectionTools::liveRun (LiveKey key, const std::string& label, const std::function<model::Clip (const model::Clip&)>& make, bool final)
+    bool SelectionTools::isLiveGen() const noexcept
+    {
+        return live && live->key.rfind ("gen:", 0) == 0;
+    }
+
+    void SelectionTools::ghost (std::optional<model::Clip> clip) const
+    {
+        // a slider before its session: what it would do, drawn, owned by the drawer (sl-ui-panels.js ghost (...,
+        // D.drawer)); it goes when the mouse leaves the drawer
+        if (ghosts != nullptr)
+            ghosts->show (GhostPreview::drawerOwner(), std::move (clip));
+    }
+
+    void SelectionTools::liveRun (const std::string& key, const std::string& label, const std::function<model::Clip (const model::Clip&)>& make, bool final)
     {
         // one slider session: every move rebuilds the result from the same base clip (shown and played, no undo
         // step); the release (final) is one undo step. A click starts a session and is one step too.
@@ -287,6 +390,8 @@ namespace sl::ui::roll
         }
         model::Clip next = make (*live->base);
         live->label = label;
+        if (ghosts != nullptr)
+            ghosts->clear();
         const auto out = host.doc.apply (std::move (next));
         gestures.sync();
         if (out.refused)
@@ -357,9 +462,11 @@ namespace sl::ui::roll
     {
         if (ids().empty())
             return;
-        // without a session a slider only sets its value: S2's ghost shows what Walk would do
+        // without a session a slider move draws what Walk would do (sl-ui-panels.js walkRun)
         if (click || isLive (ToolSettings::Tool::walk))
-            liveRun (LiveKey::walk, "Walk " + walkName (set.walk.field), [this] (const model::Clip& base) { return walkClip (base); }, final);
+            liveRun ("walk", "Walk " + walkName (set.walk.field), [this] (const model::Clip& base) { return walkClip (base); }, final);
+        else
+            ghost (walkClip (*host.doc.current()));
     }
 
     void SelectionTools::setWalkField (model::WalkField field)
@@ -465,7 +572,9 @@ namespace sl::ui::roll
         if (ids().empty())
             return;
         if (click || isLive (ToolSettings::Tool::humanize))
-            liveRun (LiveKey::hum, label, [this] (const model::Clip& base) { return humanizeClip (base); }, final);
+            liveRun ("hum", label, [this] (const model::Clip& base) { return humanizeClip (base); }, final);
+        else
+            ghost (humanizeClip (*host.doc.current()));
     }
 
     void SelectionTools::humanize (bool final, bool click)
@@ -527,6 +636,376 @@ namespace sl::ui::roll
     }
 
     //==============================================================================================
+    // Shapes (Y2).
+
+    std::optional<model::TravelKind> SelectionTools::travelKind() const
+    {
+        // sl-ui-panels.js travelKind: getMixed (...).travel, Speed with nothing selected
+        const auto mx = model::getMixed (*host.doc.current(), ids());
+        if (! mx)
+            return model::TravelKind::speed;
+        if (mx->travel.mixed)
+            return std::nullopt;
+        return mx->travel.value;
+    }
+
+    std::vector<model::ShapeKey> SelectionTools::shapeKeys (core::LaneId L) const
+    {
+        // sl-ui-panels.js shapeKeys: on Travel the notes' kind's shapes, both kinds' when they are mixed
+        if (L != core::LaneId::travel)
+            return model::shapeKeysFor (L);
+        const auto kind = travelKind();
+        if (kind)
+            return model::shapeKeysFor (L, *kind);
+        auto keys = model::shapeKeysFor (L, model::TravelKind::speed);
+        for (const auto k : model::shapeKeysFor (L, model::TravelKind::path))
+            if (model::shapeKeyKind (k) == model::TravelKind::path)
+                keys.push_back (k);
+        return keys;
+    }
+
+    model::ShapeOpts SelectionTools::shapeOpts() const
+    {
+        // sl-ui-panels.js shapeOpts: { seed: S.shapeSeed, bpm, sampleSeconds, inst }
+        model::ShapeOpts o;
+        o.seed = set.shapeSeed;
+        const auto& rs = gestures.settings();
+        o.bpm = rs.bpm;
+        o.sampleSeconds = rs.sampleSeconds;
+        o.inst = rs.inst;
+        return o;
+    }
+
+    model::ShapeScope SelectionTools::scope() const noexcept
+    {
+        return gestures.settings().scope;
+    }
+
+    void SelectionTools::setScope (model::ShapeScope s) noexcept
+    {
+        gestures.settings().scope = s;
+    }
+
+    std::optional<model::Clip> SelectionTools::shapeClip (model::ShapeKey key, core::LaneId L, const std::vector<std::string>& sel) const
+    {
+        if (sel.empty())
+            return std::nullopt;
+        return model::applyShape (*host.doc.current(), sel, L, key, scope(), shapeOpts());
+    }
+
+    void SelectionTools::applyShape (model::ShapeKey key)
+    {
+        // sl-ui-panels.js DRAWERS.shapes' click: the roll shows the lane, one step, and a Random moves the seed on
+        const auto sel = ids();
+        if (sel.empty())
+            return;
+        const auto L = lane();
+        if (host.doc.rollState().activeLane() != L)
+            showLane (L);
+        if (auto r = shapeClip (key, L, sel))
+            act (std::move (*r), std::string (model::shapeName (key)) + " (" + laneName (L) + ")");
+        if (key == model::ShapeKey::random)
+            set.shapeSeed += 1.0;
+    }
+
+    //==============================================================================================
+    // Pattern (Y3) and Random (Y4).
+
+    model::Gen SelectionTools::drawerGen (model::GenKind kind, std::optional<model::GenShape> shape) const
+    {
+        // sl-ui-panels.js genOf: { kind } with the drawer's settings (and a chip's shape), through makeGen
+        model::GenPatch p;
+        if (kind == model::GenKind::pattern)
+        {
+            p.shape = shape.value_or (set.pat.shape);
+            p.rate = set.pat.rate;
+            p.d0 = set.pat.d0;
+            p.d1 = set.pat.d1;
+            p.warp = set.pat.warp;
+            p.lockToBeat = set.pat.lockToBeat;
+            p.perNote = set.pat.perNote;
+        }
+        else
+        {
+            if (shape)
+                p.shape = *shape;
+            p.rate = set.rnd.rate;
+            p.amount = set.rnd.amount;
+            p.smooth = set.rnd.smooth;
+            p.perNote = set.rnd.perNote;
+            p.lockToBeat = set.rnd.lockToBeat;
+        }
+        return model::makeGen (kind, p);
+    }
+
+    model::Clip SelectionTools::putGen (const model::Clip& base, const std::vector<std::string>& sel, core::LaneId L, model::GenKind kind,
+                                        std::optional<model::GenShape> shape) const
+    {
+        // sl-ui-panels.js putGen: each note keeps its own seed and key (and its invert when it had the same kind)
+        const model::Gen g = drawerGen (kind, shape);
+        return model::editNotes (base, sel, [&g, L] (model::Note& n, const model::Note&)
+        {
+            model::Gen next = g;
+            if (const auto& old = n.genOf (L))
+            {
+                next.seed = old->seed;
+                next.key = old->key;
+                next.invert = old->kind == g.kind ? old->invert : false;
+            }
+            n.genOf (L) = model::normalizeGen (std::move (next));
+        });
+    }
+
+    std::optional<model::Gen> SelectionTools::primaryGen (core::LaneId L) const
+    {
+        const auto P = primaryNote();
+        if (P == nullptr || ! P->genOf (L))
+            return std::nullopt;
+        return P->genOf (L);
+    }
+
+    bool SelectionTools::anyGen (core::LaneId L, bool randomish) const
+    {
+        // sl-ui-panels.js anyGen (L, isRandomish): a selected note's generator on the lane (a random one, or a
+        // pattern of a random shape)
+        const auto c = host.doc.current();
+        const auto order = gestures.selectionInTimeOrder();
+        const std::unordered_set<std::string> sel (order.begin(), order.end());
+        for (const auto& n : c->notes)
+        {
+            if (sel.count (n->id) == 0)
+                continue;
+            const auto& g = n->genOf (L);
+            if (g && (! randomish || g->kind == model::GenKind::random || isRandomShape (g->shape)))
+                return true;
+        }
+        return false;
+    }
+
+    bool SelectionTools::isEditing (model::GenKind kind) const
+    {
+        const auto g = primaryGen (lane());
+        return g.has_value() && g->kind == kind;
+    }
+
+    void SelectionTools::genChanged (model::GenKind kind, bool final, const std::string& what)
+    {
+        // sl-ui-panels.js genChanged: live while the primary note has this generator, else a ghost until Apply
+        const auto sel = ids();
+        if (sel.empty())
+            return;
+        const auto L = lane();
+        if (isEditing (kind))
+        {
+            const std::string word = kind == model::GenKind::pattern ? "Pattern" : "Random";
+            liveRun (std::string ("gen:") + model::code (kind) + ":" + core::laneInfo (L).code, word + (what.empty() ? "" : " " + what) + " (" + laneName (L) + ")",
+                     [this, L, kind] (const model::Clip& base) { return putGen (base, ids(), L, kind); }, final);
+        }
+        else
+        {
+            ghost (putGen (*host.doc.current(), sel, L, kind));
+        }
+    }
+
+    void SelectionTools::applyGen (model::GenKind kind)
+    {
+        // sl-ui-panels.js applyGen: the lane shown, one step; the controls change it live from then on
+        if (ids().empty())
+            return;
+        const auto L = lane();
+        if (host.doc.rollState().activeLane() != L)
+            showLane (L);
+        const std::string word = kind == model::GenKind::pattern ? "Pattern" : "Random";
+        liveRun (std::string ("gen:") + model::code (kind) + ":" + core::laneInfo (L).code, word + " (" + laneName (L) + ")",
+                 [this, L, kind] (const model::Clip& base) { return putGen (base, ids(), L, kind); }, true);
+    }
+
+    void SelectionTools::rerollGen()
+    {
+        const auto sel = ids();
+        if (sel.empty())
+            return;
+        const auto L = lane();
+        act (model::reroll (*host.doc.current(), sel, L), "Re-roll (" + laneName (L) + ")");
+    }
+
+    void SelectionTools::removeGen()
+    {
+        const auto sel = ids();
+        if (sel.empty())
+            return;
+        const auto L = lane();
+        act (model::clearGen (*host.doc.current(), sel, L), "Remove pattern (" + laneName (L) + ")");
+    }
+
+    void SelectionTools::bake()
+    {
+        // sl-ui-panels.js bake: Turn into nodes, or a toast when there is nothing to turn
+        const auto sel = ids();
+        if (sel.empty())
+            return;
+        const auto L = lane();
+        if (! anyGen (L))
+        {
+            toast ("No pattern or random on " + laneName (L) + " for the selected notes");
+            return;
+        }
+        if (host.doc.rollState().activeLane() != L)
+            showLane (L);
+        act (model::bakeGen (*host.doc.current(), sel, L), "Turn into nodes (" + laneName (L) + ")");
+    }
+
+    void SelectionTools::loadGenValues()
+    {
+        // sl-ui-panels.js loadGenValues: the primary note's generator on the lane is what the drawer shows
+        const auto g = primaryGen (lane());
+        if (! g)
+            return;
+        if (g->kind == model::GenKind::pattern)
+        {
+            set.pat.shape = g->shape;
+            set.pat.rate = g->rate;
+            set.pat.d0 = g->d0;
+            set.pat.d1 = g->d1;
+            set.pat.warp = g->warp;
+            set.pat.lockToBeat = g->lockToBeat;
+            set.pat.perNote = g->perNote;
+        }
+        else
+        {
+            set.rnd.rate = g->rate;
+            set.rnd.amount = g->amount;
+            set.rnd.smooth = g->smooth;
+            set.rnd.perNote = g->perNote;
+            set.rnd.lockToBeat = g->lockToBeat;
+        }
+    }
+
+    //==============================================================================================
+    // Ghosts (sl-ui-panels.js ghost functions): the same model calls as the clicks, made off to the side.
+
+    std::optional<model::Clip> SelectionTools::previewShape (model::ShapeKey key) const
+    {
+        return shapeClip (key, lane(), ids());
+    }
+
+    std::optional<model::Clip> SelectionTools::previewGen (model::GenKind kind, std::optional<model::GenShape> shape) const
+    {
+        const auto sel = ids();
+        if (sel.empty())
+            return std::nullopt;
+        return putGen (*host.doc.current(), sel, lane(), kind, shape);
+    }
+
+    std::optional<model::Clip> SelectionTools::previewReroll() const
+    {
+        const auto sel = ids();
+        if (sel.empty())
+            return std::nullopt;
+        return model::reroll (*host.doc.current(), sel, lane());
+    }
+
+    std::optional<model::Clip> SelectionTools::previewRemove() const
+    {
+        const auto sel = ids();
+        if (sel.empty() || ! anyGen (lane()))
+            return std::nullopt;
+        return model::clearGen (*host.doc.current(), sel, lane());
+    }
+
+    std::optional<model::Clip> SelectionTools::previewBake() const
+    {
+        const auto sel = ids();
+        if (sel.empty() || ! anyGen (lane()))
+            return std::nullopt;
+        return model::bakeGen (*host.doc.current(), sel, lane());
+    }
+
+    std::optional<model::Clip> SelectionTools::previewConnect (model::ConnectMode mode, bool reroll) const
+    {
+        const auto sel = ids();
+        if (sel.empty())
+            return std::nullopt;
+        return model::connect (*host.doc.current(), sel, mode, reroll ? set.connectSeed + 1.0 : set.connectSeed);
+    }
+
+    std::optional<model::Clip> SelectionTools::previewDisconnect() const
+    {
+        const auto sel = ids();
+        const auto c = host.doc.current();
+        if (sel.empty() || linksAmong (*c, sel) == 0)
+            return std::nullopt;
+        return model::disconnect (*c, sel);
+    }
+
+    std::optional<model::Clip> SelectionTools::previewWalk() const
+    {
+        if (ids().empty())
+            return std::nullopt;
+        return walkClip (*host.doc.current());
+    }
+
+    std::optional<model::Clip> SelectionTools::previewChop() const
+    {
+        if (ids().empty())
+            return std::nullopt;
+        auto r = chopPreview();
+        if (r.refused)
+            return std::nullopt;
+        return std::move (r.clip);
+    }
+
+    std::optional<model::Clip> SelectionTools::previewHumanize() const
+    {
+        if (ids().empty())
+            return std::nullopt;
+        return humanizeClip (*host.doc.current());
+    }
+
+    std::optional<model::Clip> SelectionTools::previewStrum (model::StrumDir dir) const
+    {
+        const auto sel = ids();
+        if (sel.empty())
+            return std::nullopt;
+        return model::strum (*host.doc.current(), sel, set.strumRate, dir);
+    }
+
+    std::optional<model::Clip> SelectionTools::previewLegato() const
+    {
+        const auto sel = ids();
+        if (sel.empty())
+            return std::nullopt;
+        return model::legato (*host.doc.current(), sel);
+    }
+
+    std::optional<model::Clip> SelectionTools::previewLaneTool (int which) const
+    {
+        const auto sel = ids();
+        if (sel.empty())
+            return std::nullopt;
+        const auto clipNow = host.doc.current();
+        const auto& c = *clipNow;
+        const auto L = lane();
+        switch (which)
+        {
+            case 0:  return model::reverseLane (c, sel, L);
+            case 1:  return model::flipLane (c, sel, L);
+            case 2:  return model::scaleLane (c, sel, L, 2.0);
+            default: return model::scaleLane (c, sel, L, 0.5);
+        }
+    }
+
+    std::optional<model::Clip> SelectionTools::previewRecipe (int n) const
+    {
+        // sl-ui-sample.js recipe hover: applyRecipe (clip, inst, n, the selection or every note).clip
+        const auto sel = ids();
+        auto r = model::applyRecipe (*host.doc.current(), gestures.settings().inst, n, sel.empty() ? model::Ids::all() : model::Ids (sel));
+        if (! r)
+            return std::nullopt;
+        return std::move (r->clip);
+    }
+
+    //==============================================================================================
     /** The bar's Lane: a list of the ten lanes with a 2 px border in the lane's colour (.slp-lanesel). */
     class SelectionBar::LaneBox final : public juce::ComboBox
     {
@@ -582,8 +1061,29 @@ namespace sl::ui::roll
             "Walk, Chop, Reverse, Flip, More, Less, Select similar, Humanize, Strum and Legato",
         };
         constexpr int kLaneBoxWidth = 150, kButtonHeight = 24, kGap = 4;
-        constexpr const char* kNotYet = "Shapes, Pattern, Random and Turn into nodes arrive in the next build";
+
+        bool isLaneDrawer (ToolSettings::Drawer d) noexcept
+        {
+            return d == ToolSettings::Drawer::shapes || d == ToolSettings::Drawer::pattern || d == ToolSettings::Drawer::random;
+        }
     }
+
+    /** The mouse leaving the open drawer's box (not one of its controls for another): its own preview goes. */
+    class SelectionBar::DrawerWatch final : public juce::MouseListener
+    {
+    public:
+        explicit DrawerWatch (SelectionBar& b) : bar (b) { bar.drawerView.addMouseListener (this, true); }
+        ~DrawerWatch() override { bar.drawerView.removeMouseListener (this); }
+
+        void mouseExit (const juce::MouseEvent& e) override
+        {
+            if (! bar.drawerView.getScreenBounds().contains (e.getScreenPosition()))
+                bar.drawerLeft();
+        }
+
+    private:
+        SelectionBar& bar;
+    };
 
     SelectionBar::SelectionBar (const Theme& t, RollView& rv)
         : theme (t),
@@ -606,29 +1106,40 @@ namespace sl::ui::roll
             auto b = std::make_unique<ArrowButton> (t, kDrawerNames[i]);
             b->setTooltip (kDrawerTips[i]);
             const auto d = kDrawers[i];
-            if (i < 3)
-                b->onClick = [this] { getTools().toast (kNotYet, 3000); };   // S2's drawers
-            else
-                b->onClick = [this, d] { openDrawer (d); };
+            b->onClick = [this, d] { openDrawer (d); };
             addChildComponent (*b);
             drawerButtons.push_back (std::move (b));
         }
         bakeButton = std::make_unique<FlatButton> (t, "Turn into nodes");
         bakeButton->setTooltip ("Turn the pattern or random on this lane into ordinary nodes you can move by hand");
-        bakeButton->onClick = [this] { getTools().toast (kNotYet, 3000); };
+        bakeButton->onClick = [this]
+        {
+            getTools().bake();
+            roll.edited();
+        };
         addChildComponent (*bakeButton);
+
+        // the buttons' texts in the hint bar while the mouse is on them, and Turn into nodes' ghost
+        hooks = std::make_unique<HoverHooks> (&roll.getGhosts(), [this] (const juce::String& text) { roll.showHint (text); });
+        for (auto& b : drawerButtons)
+            hooks->add (*b, {});
+        hooks->add (*bakeButton, [this] { return getTools().previewBake(); });
         lineGap = std::make_unique<LineSeparator> (t);
         addChildComponent (*lineGap);
 
         drawerView.setScrollBarsShown (true, false);
         drawerView.setScrollBarThickness (drawerScrollBar);
         addChildComponent (drawerView);
+        drawerWatch = std::make_unique<DrawerWatch> (*this);
         sync();
     }
 
     SelectionBar::~SelectionBar()
     {
+        drawerWatch.reset();
+        hooks.reset();
         drawerView.setViewedComponent (nullptr, false);
+        drawer.reset();
     }
 
     SelectionTools& SelectionBar::getTools() noexcept
@@ -656,6 +1167,36 @@ namespace sl::ui::roll
         sync();
     }
 
+    void SelectionBar::showDrawer (ToolSettings::Drawer d)
+    {
+        getTools().openDrawer (d);
+        rebuildDrawer();
+        sync();
+    }
+
+    void SelectionBar::drawerLeft()
+    {
+        roll.getGhosts().leave (GhostPreview::drawerOwner());
+    }
+
+    int SelectionBar::drawerKey() const
+    {
+        // a lane drawer is built for its lane (its captions, its depth's units), and Shapes on Travel for the notes'
+        // kind (its shapes); another lane or kind builds it again, as the prototype's renderDrawer does
+        auto& tools = roll.getTools();
+        const auto d = tools.settings().drawer;
+        if (! isLaneDrawer (d))
+            return -1;
+        const auto L = tools.lane();
+        int kind = 0;
+        if (d == ToolSettings::Drawer::shapes && L == core::LaneId::travel)
+        {
+            const auto k = tools.travelKind();
+            kind = ! k ? 3 : *k == model::TravelKind::path ? 2 : 1;
+        }
+        return core::laneIndex (L) * 4 + kind;
+    }
+
     void SelectionBar::rebuildDrawer()
     {
         // only from the bar's own buttons and sync: never while one of the drawer's own controls is calling out
@@ -663,7 +1204,14 @@ namespace sl::ui::roll
         drawerView.setViewedComponent (nullptr, false);
         drawer.reset();
         shownDrawer = tools.settings().drawer;
-        if (shownDrawer == ToolSettings::Drawer::connect)
+        shownKey = drawerKey();
+        if (shownDrawer == ToolSettings::Drawer::shapes)
+            drawer = std::make_unique<ShapesDrawer> (theme, tools, roll);
+        else if (shownDrawer == ToolSettings::Drawer::pattern)
+            drawer = std::make_unique<GenDrawer> (theme, tools, roll, model::GenKind::pattern);
+        else if (shownDrawer == ToolSettings::Drawer::random)
+            drawer = std::make_unique<GenDrawer> (theme, tools, roll, model::GenKind::random);
+        else if (shownDrawer == ToolSettings::Drawer::connect)
             drawer = std::make_unique<ConnectDrawer> (theme, tools, roll);
         else if (shownDrawer == ToolSettings::Drawer::tools)
             drawer = std::make_unique<ToolsDrawer> (theme, tools, roll);
@@ -709,6 +1257,7 @@ namespace sl::ui::roll
             changed = true;
         }
         laneBox->showLane (tools.lane());
+        bakeButton->setEnabled (tools.anyGen (tools.lane()));   // sl-ui-panels.js paintBar
         for (int i = 0; i < 5; ++i)
         {
             const bool open = st.drawer == kDrawers[i];
@@ -716,7 +1265,7 @@ namespace sl::ui::roll
             drawerButtons[(std::size_t) i]->setOpen (open);
         }
         bool rebuilt = false;
-        if (st.drawer != shownDrawer)
+        if (st.drawer != shownDrawer || (isLaneDrawer (st.drawer) && drawerKey() != shownKey))
         {
             rebuildDrawer();
             rebuilt = true;

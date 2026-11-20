@@ -1,30 +1,36 @@
 #pragma once
 
-// The selection bar (PLUGIN-PLAN 4 M5, 7.7 S1; sl-ui-panels.js buildBar, paintBar and the Connect and Tools drawers):
-// the line under the selection row that acts on the selected notes. It holds the Lane the lane tools change, the
-// drawer buttons (Shapes, Pattern, Random and Turn into nodes arrive in S2), Connect and Tools. Connect opens its
-// drawer: Nearest, Furthest, Random, Re-roll and Disconnect, with how many slides join the selected notes. Tools
-// opens its drawer: Walk..., Chop..., Reverse, Flip, More, Less (on the Lane), Select similar, Humanize..., Strum...
-// and Legato, and the panels of Walk, Chop, Humanize and Strum.
+// The selection bar (PLUGIN-PLAN 4 M5, 7.7 S1 and S2; sl-ui-panels.js buildBar, paintBar and DRAWERS): the line
+// under the selection row that acts on the selected notes. It holds the Lane the lane tools change, the drawer
+// buttons Shapes, Pattern and Random, Turn into nodes, Connect and Tools. Shapes (Y2) opens its drawer: Each note or
+// Across, and the lane's shapes. Pattern (Y3) and Random (Y4) open theirs: a generator's settings, Apply (then the
+// controls change it live), Re-roll, Remove and Turn into nodes. Connect opens its drawer: Nearest, Furthest, Random,
+// Re-roll and Disconnect, with how many slides join the selected notes. Tools opens its drawer: Walk..., Chop...,
+// Reverse, Flip, More, Less (on the Lane), Select similar, Humanize..., Strum... and Legato, and the panels of Walk,
+// Chop, Humanize and Strum. Hovering a control that changes notes draws what it would do as a ghost (GhostPreview).
 //
 // Two halves, as the roll's gestures are:
 // - SelectionTools: what each control does, with no JUCE in its decisions, so every action is testable without a
 //   window. Each action is one model call (model/Tools.h, through the selection in time order) and one undo step
-//   (7.7 decision 1). Walk's and Humanize's sliders change the clip live after their first click, as the prototype's
-//   do: every move is shown and sent to the engine with no undo step, the release is one step (decision 2). Random
-//   values stay put until Re-roll (decision 3: the seeds are the bar's, only Re-roll changes them).
+//   (7.7 decision 1). Walk's and Humanize's sliders change the clip live after their first click, and Pattern's and
+//   Random's after Apply, as the prototype's do: every move is shown and sent to the engine with no undo step, the
+//   release is one step (decision 2). Before that a move only draws a ghost of the result. Random values stay put
+//   until Re-roll (decision 3: the seeds are the bar's and the notes', only Re-roll changes them).
 // - SelectionBar: the JUCE line and its drawer, drawn as shell.html and sl-ui-panels.css draw them. With nothing
 //   selected and no drawer open it says how to select; an open drawer stays open, faded and asleep, while nothing is
 //   selected, so clearing the selection never moves the roll (the prototype keeps it the same way).
 //
 // Message thread only. Edits reach the engine through the ClipDocument (the SnapshotPublisher), never directly.
 
+#include "GhostPreview.h"
 #include "RollGestures.h"
 
 #include "core/Lanes.h"
 #include "core/Rates.h"
 #include "doc/ClipDocument.h"
 #include "model/Clip.h"
+#include "model/Generators.h"
+#include "model/Shapes.h"
 #include "model/Tools.h"
 #include "ui/Controls.h"
 #include "ui/Theme.h"
@@ -50,8 +56,8 @@ namespace sl::ui::roll
         std::function<void (const std::string& text, int ms)> toast;
     };
 
-    /** The bar's own settings (sl-ui-panels.js S, the parts the direct actions use; S2 adds Shapes', Pattern's and
-        Random's). They live as long as the editor window, as the prototype's do with its page. */
+    /** The bar's own settings (sl-ui-panels.js S). They live as long as the editor window, as the prototype's do with
+        its page. */
     struct ToolSettings
     {
         enum class Drawer { none, shapes, pattern, random, connect, tools };
@@ -84,6 +90,29 @@ namespace sl::ui::roll
 
         core::RateId strumRate = core::RateId::r1_64;
         double connectSeed = 1.0;
+
+        /** S.pat: the Pattern drawer's settings (a primary note's own pattern on the lane is read into them). */
+        struct Pattern
+        {
+            model::GenShape shape = model::GenShape::squiggle;
+            core::RateId rate = core::RateId::r1_16T;
+            double d0 = 0.3, d1 = 0.3, warp = 0.0;
+            bool lockToBeat = true;
+            model::PerNote perNote = model::PerNote::same;
+        };
+        Pattern pat;
+
+        /** S.rnd: the Random drawer's settings. */
+        struct Random
+        {
+            core::RateId rate = core::RateId::r1_16T;
+            double amount = 0.5, smooth = 0.0;
+            model::PerNote perNote = model::PerNote::same;
+            bool lockToBeat = true;
+        };
+        Random rnd;
+
+        double shapeSeed = 1.0;   // S.shapeSeed: the Random shape's seed; each Random click moves it on by one
     };
 
     /** How many links a clip holds among a set of notes (sl-ui-panels.js linksAmong), and how many of those go into a
@@ -102,6 +131,23 @@ namespace sl::ui::roll
 
     /** "1 note" / "3 notes" (sl-ui-panels.js nNotes). */
     std::string nNotes (int k);
+
+    /** sl-ui-panels.js GEN_NAMES: "Squiggle", "Saw up", "Random steps" ... */
+    const char* genShapeName (model::GenShape shape) noexcept;
+
+    /** sl-ui-panels.js SHAPE_TITLES: what a shape does, for its tooltip and the hint bar. */
+    const char* shapeTitle (model::ShapeKey key) noexcept;
+
+    /** sl-ui-panels.js depthText: "+-0.6 semitones" on Pitch (full depth = 2 semitones each way), else "30%". */
+    std::string depthText (core::LaneId lane, double v);
+
+    /** sl-ui-panels.js warpText ("even", "speeds up", "slows down") and smoothText ("steps", "smooth", "40%"). */
+    std::string warpText (double v);
+    std::string smoothText (double v);
+
+    /** A pattern shape whose values are random (Random steps, Smooth random): its drawer offers Re-roll and Same or
+        Different per note. */
+    bool isRandomShape (model::GenShape shape) noexcept;
 
     //==============================================================================================
     class SelectionTools
@@ -130,15 +176,32 @@ namespace sl::ui::roll
         /** Picks the lane in the bar's Lane list: it becomes the Lane, and the roll shows its mode (showLane). */
         void pickLane (core::LaneId lane);
 
-        /** Shows a lane's mode on the roll (sl-ui-panels.js showLane: mode 8 with the sub-lane, or the lane's mode).
-            MainView sets it so its mode bar follows; unset, the gestures change the mode directly. */
+        /** Shows a lane's mode on the roll (sl-ui-panels.js showLane: mode 8 with the sub-lane, or the lane's mode),
+            through onShowLane when it is set. The lane menu shows its lane this way. */
+        void showLane (core::LaneId lane);
+
+        /** What showLane calls: MainView sets it so its mode bar follows; unset, the gestures change the mode directly. */
         std::function<void (core::LaneId lane)> onShowLane;
 
         /** Opens a drawer, or closes it when it is the open one (sl-ui-panels.js drawerBtn). */
         void toggleDrawer (ToolSettings::Drawer d);
 
+        /** Opens a drawer (sl-ui-panels.js openDrawer): the lane drawers show their lane on the roll and read the
+            primary note's generator into their settings. The lane menu's Pattern settings... and Random settings...
+            open theirs. */
+        void openDrawer (ToolSettings::Drawer d);
+
         /** Opens a tool's panel in the Tools drawer, or closes it when it is the open one (toolBtn). */
         void toggleTool (ToolSettings::Tool t);
+
+        /** Where the ghosts are drawn (the view's), or none. */
+        void setGhosts (GhostPreview* g) noexcept { ghosts = g; }
+        GhostPreview* getGhosts() const noexcept { return ghosts; }
+
+        /** One model call's result as one undo step called label (7.7 decision 1): the document applies it (its caps
+            can refuse it: then a toast, no step, the clip unchanged), and any preview goes. A result equal to the clip
+            pushes no step. False when refused. The lane menu's items act through it, as the prototype's do. */
+        bool act (model::Clip proposed, const std::string& label);
 
         /** What the document holds now, after the roll or Undo changed it: a live slider session the selection or the
             clip left behind ends (sl-ui-panels.js wire), and a lane mode's lane becomes the Lane. Call it on every
@@ -164,7 +227,7 @@ namespace sl::ui::roll
         /** Walk (model::walk with the bar's field, First and Last). click: the Walk button, one undo step "Walk Start"
             (Velocity, Tone ...), and the sliders change it live from then on. final false: a slider move of that
             session, shown and played with no undo step; final true: its release, one step. Without a session a slider
-            only sets the value (S2's ghost shows what Walk would do). */
+            move draws a ghost of what Walk would do (owned by the drawer). */
         void walk (bool final, bool click);
 
         /** The Walk field: First and Last take the field's defaults, and a live session ends. */
@@ -201,21 +264,115 @@ namespace sl::ui::roll
         /** Legato (model::legato): one step, or a toast saying why nothing would stretch. */
         void legato();
 
+        //==========================================================================================
+        // Shapes (Y2)
+
+        /** sl-ui-panels.js travelKind: the selected notes' Travel kind (Speed with nothing selected), or nothing when
+            some use Speed and some Path. */
+        std::optional<model::TravelKind> travelKind() const;
+
+        /** sl-ui-panels.js shapeKeys: a lane's shapes; on Travel the selected notes' kind's (both kinds when mixed). */
+        std::vector<model::ShapeKey> shapeKeys (core::LaneId lane) const;
+
+        /** sl-ui-panels.js shapeOpts: the Random shape's seed, the tempo, the sound's length and the instrument. */
+        model::ShapeOpts shapeOpts() const;
+
+        /** Each note or Across, shared by every shape tool (the roll's setting; the view keeps it in UIST). */
+        model::ShapeScope scope() const noexcept;
+        void setScope (model::ShapeScope s) noexcept;
+
+        /** What a shape would make on a lane of the notes in ids (the click, and its ghost): model::applyShape with
+            the scope and shapeOpts. Nothing for a key the lane does not have, or with no notes. */
+        std::optional<model::Clip> shapeClip (model::ShapeKey key, core::LaneId lane, const std::vector<std::string>& ids) const;
+
+        /** A shape on the Lane of the selected notes (the Shapes drawer): the roll shows the lane, one undo step
+            "Ramp up (Tone)"; a Random click moves the shape seed on by one, so the next one deals new values. */
+        void applyShape (model::ShapeKey key);
+
+        //==========================================================================================
+        // Pattern (Y3) and Random (Y4): a generator on the Lane
+
+        /** sl-ui-panels.js putGen: the drawer's pattern (or random) on a lane of every note in ids, each note keeping
+            its own seed and 'Different' key (and its invert when it had the same kind), so random stays put (Y7).
+            shape: the pattern shape a chip would pick (its ghost); nothing: the drawer's. */
+        model::Clip putGen (const model::Clip& base, const std::vector<std::string>& ids, core::LaneId lane, model::GenKind kind,
+                            std::optional<model::GenShape> shape = std::nullopt) const;
+
+        /** The generator the drawer would make (model::makeGen with the drawer's settings). */
+        model::Gen drawerGen (model::GenKind kind, std::optional<model::GenShape> shape = std::nullopt) const;
+
+        /** The primary note's generator on a lane (sl-ui-panels.js primaryGen), or nothing. */
+        std::optional<model::Gen> primaryGen (core::LaneId lane) const;
+
+        /** A selected note has a generator on the lane (randomish: a random one, or a pattern of a random shape). */
+        bool anyGen (core::LaneId lane, bool randomish = false) const;
+
+        /** The primary note has this kind of generator on the Lane: the drawer's controls change it live. */
+        bool isEditing (model::GenKind kind) const;
+
+        /** A drawer control changed (sl-ui-panels.js genChanged): while editing, a live session ("Pattern depth
+            (Tone)": a move is shown and played with no undo step, final is one step); else a ghost of what Apply would
+            do, owned by the drawer. */
+        void genChanged (model::GenKind kind, bool final, const std::string& what);
+
+        /** Apply (applyGen): the drawer's pattern or random on the Lane of the selected notes, one undo step "Pattern
+            (Tone)" / "Random (Tone)"; from then on the drawer's controls change it live. */
+        void applyGen (model::GenKind kind);
+
+        /** Re-roll: every selected note's generator on the Lane takes seed + 1 (model::reroll), one step "Re-roll
+            (Tone)". */
+        void rerollGen();
+
+        /** Remove: the generator off the Lane (model::clearGen), one step "Remove pattern (Tone)". */
+        void removeGen();
+
+        /** Turn into nodes (model::bakeGen): one step "Turn into nodes (Tone)", or a toast when no selected note has a
+            pattern or random on the Lane. */
+        void bake();
+
+        /** sl-ui-panels.js loadGenValues: the primary note's generator on the Lane, read into the drawer's settings. */
+        void loadGenValues();
+
+        //==========================================================================================
+        // Ghosts: what each control would do, made off to the side (never applied). Nothing when there is nothing
+        // to show (no notes selected, nothing to remove, a refused Chop).
+
+        std::optional<model::Clip> previewShape (model::ShapeKey key) const;
+        std::optional<model::Clip> previewGen (model::GenKind kind, std::optional<model::GenShape> shape = std::nullopt) const;
+        std::optional<model::Clip> previewReroll() const;
+        std::optional<model::Clip> previewRemove() const;
+        std::optional<model::Clip> previewBake() const;
+        std::optional<model::Clip> previewConnect (model::ConnectMode mode, bool reroll = false) const;
+        std::optional<model::Clip> previewDisconnect() const;
+        std::optional<model::Clip> previewWalk() const;
+        std::optional<model::Clip> previewChop() const;
+        std::optional<model::Clip> previewHumanize() const;
+        std::optional<model::Clip> previewStrum (model::StrumDir dir) const;
+        std::optional<model::Clip> previewLegato() const;
+
+        /** Reverse, Flip, More or Less on the Lane (0, 1, 2, 3). */
+        std::optional<model::Clip> previewLaneTool (int which) const;
+
+        /** A recipe's notes (sl-ui-sample.js: model::applyRecipe on the selected notes, or on every note with none
+            selected), for M6's recipe buttons. */
+        std::optional<model::Clip> previewRecipe (int n) const;
+
         /** Ends a live slider session (its last move becomes one undo step when it was not one yet). */
         void endLive();
 
         /** True while Walk's or Humanize's sliders change the clip live. */
         bool isLive (ToolSettings::Tool tool) const noexcept;
 
+        /** True while a Pattern or Random control changes the clip live (after Apply). */
+        bool isLiveGen() const noexcept;
+
         /** A short message in the toast, for ms milliseconds. */
         void toast (const std::string& text, int ms = 2400) const;
 
     private:
-        enum class LiveKey { walk, hum };
-
         struct Live
         {
-            LiveKey key = LiveKey::walk;
+            std::string key;                   // "walk", "hum", "gen:pattern:tone" (sl-ui-panels.js live.key)
             model::ClipPtr base;               // the clip the session started from
             std::vector<std::string> ids;      // the selection it acts on
             std::string label;
@@ -223,13 +380,12 @@ namespace sl::ui::roll
             bool dirty = false;                // the last step is not an undo step yet
         };
 
-        bool act (model::Clip proposed, const std::string& label);
         bool act (model::EditResult result, const std::string& label);
-        void liveRun (LiveKey key, const std::string& label, const std::function<model::Clip (const model::Clip&)>& make, bool final);
+        void liveRun (const std::string& key, const std::string& label, const std::function<model::Clip (const model::Clip&)>& make, bool final);
+        void ghost (std::optional<model::Clip> clip) const;
         void doConnect (model::ConnectMode mode, const std::string& label);
         void humRun (bool final, bool click, const std::string& label);
         void laneTool (const std::string& name, const std::function<model::Clip (const model::Clip&, core::LaneId)>& make);
-        void showLane (core::LaneId lane);
         model::Clip walkClip (const model::Clip& base) const;
         model::Clip humanizeClip (const model::Clip& base) const;
 
@@ -237,7 +393,14 @@ namespace sl::ui::roll
         RollGestures& gestures;
         ToolSettings set;
         std::optional<Live> live;
+        GhostPreview* ghosts = nullptr;
         int lastMode = 0, lastLane = -1;   // the mode and lane sync last saw (a change ends a live session)
+
+        // what sync last saw: another clip, selection, primary or lane reads the primary's generator again
+        model::ClipPtr seenClip;
+        std::vector<std::string> seenSelection;
+        std::string seenPrimary;
+        int seenLane = -1;
     };
 
     //==============================================================================================
@@ -260,6 +423,9 @@ namespace sl::ui::roll
 
         /** Called when the height the bar wants changed (a drawer opened or closed, a tool panel opened). */
         std::function<void()> onHeightChange;
+
+        /** Opens a drawer (the lane menu's Pattern settings... and Random settings...): it stays open when it is. */
+        void showDrawer (ToolSettings::Drawer d);
 
         static constexpr int lineHeight = 30;
         static constexpr int drawerPadX = 8, drawerPadY = 7, drawerMaxHeight = 320;
@@ -290,15 +456,23 @@ namespace sl::ui::roll
         /** The view that scrolls a drawer taller than its room. */
         juce::Viewport& getDrawerView() noexcept { return drawerView; }
 
+        /** The line's buttons' hover hooks (their ghosts and hints), for the tests. */
+        HoverHooks& getHooks() noexcept { return *hooks; }
+
+        /** The mouse left the open drawer: its own preview goes (sl-ui-panels.js D.drawer's mouseleave). */
+        void drawerLeft();
+
         void paint (juce::Graphics&) override;
         void resized() override;
 
     private:
         class LaneBox;
+        class DrawerWatch;
 
         void openDrawer (ToolSettings::Drawer d);
         void rebuildDrawer();
         void drawerHeightChanged();
+        int drawerKey() const;   // what a lane drawer is built for: the lane, and on Travel the notes' kind
 
         const Theme& theme;
         RollView& roll;
@@ -310,7 +484,10 @@ namespace sl::ui::roll
         std::unique_ptr<juce::Component> lineGap;                   // the line between Turn into nodes and Connect
         std::unique_ptr<Drawer> drawer;                             // the open drawer's contents, or none
         juce::Viewport drawerView;                                  // scrolls a drawer taller than the most it may take
+        std::unique_ptr<DrawerWatch> drawerWatch;                   // the mouse leaving the drawer
+        std::unique_ptr<HoverHooks> hooks;                          // the line's buttons: their ghosts and hints
         ToolSettings::Drawer shownDrawer = ToolSettings::Drawer::none;
+        int shownKey = -1;                                          // drawerKey () when the drawer was built
         juce::Rectangle<int> drawerArea;
         bool idle = true;
         int lastWantedHeight = -1;

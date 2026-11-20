@@ -13,6 +13,7 @@ namespace sl::ui
         const std::string kFilledDiamond = "\xe2\x97\x86";
         const std::string kHollowDiamond = "\xe2\x97\x87";
         const std::string kNodeDot = "\xe2\x97\x8f";
+        const std::string kSmallDown = "\xe2\x96\xbe";   // the lane button's menu arrow
 
         // sl-ui.js SUB_HINT: what each Sample lane's line does
         const char* subHint (core::LaneId lane) noexcept
@@ -83,7 +84,7 @@ namespace sl::ui
                 t = title + ": notes are locked, only " + name + " changes" + kDot + "click a note to select it" + kDot + "drag "
                   + kNodeDot + " nodes" + kDot + "double-click the line = add a node" + kDot + "double-click a node = delete" + kDot
                   + "drag the small " + kHollowDiamond + " in a segment = curve it (it fills in), double-click a filled " + kFilledDiamond
-                  + " = straighten" + kDot + "right-click = shapes for every selected note" + extra;
+                  + " = straighten" + kDot + kSmallDown + " on the lane button = shapes for every selected note" + extra;
             }
         }
         return juce::String::fromUTF8 (t.c_str());
@@ -101,8 +102,8 @@ namespace sl::ui
         if (newHint == hint)
             return;
         hint = newHint;
-        if (hover.isVisible())
-            showHover (isHintCut());
+        hintShown = hintShown && isHintCut();
+        updateHover();
         repaint();
     }
 
@@ -159,8 +160,8 @@ namespace sl::ui
 
     void HintBar::resized()
     {
-        if (hover.isVisible())
-            showHover (isHintCut());
+        hintShown = hintShown && isHintCut();
+        updateHover();
     }
 
     void HintBar::mouseEnter (const juce::MouseEvent&)
@@ -175,21 +176,38 @@ namespace sl::ui
 
     void HintBar::showHover (bool show)
     {
+        hintShown = show;
+        updateHover();
+    }
+
+    void HintBar::setHelp (const juce::String& text)
+    {
+        if (text == help)
+            return;
+        help = text;
+        updateHover();
+    }
+
+    void HintBar::updateHover()
+    {
+        // a control's text wins over the whole hint (sl-ui.js updateHint: the override covers the bar)
+        const bool show = help.isNotEmpty() || hintShown;
+        const juce::String& shown = help.isNotEmpty() ? help : hint;
         if (! show || getParentComponent() == nullptr || hover.getParentComponent() != getParentComponent())
         {
             hover.setVisible (false);
             return;
         }
-        // as wide as the bar, from its bottom edge up: tall enough for the whole hint, wrapped
+        // as wide as the bar, from its bottom edge up: tall enough for the whole text, wrapped
         const int innerWidth = juce::jmax (40, getWidth() - 2 * padX);
         juce::AttributedString text;
-        text.setText (hint);
+        text.setText (shown);
         text.setFont (hintFont());
         text.setWordWrap (juce::AttributedString::byWord);
         juce::TextLayout layout;
         layout.createLayout (text, (float) innerWidth);
         const int height = juce::jmax (getHeight() + 2, (int) std::ceil (layout.getHeight()) + 12);
-        hover.text = hint;
+        hover.text = shown;
         hover.setBounds (getX() - 1, getBottom() + 1 - height, getWidth() + 2, height);
         hover.setVisible (true);
         hover.toFront (false);

@@ -6,6 +6,7 @@
 #include "core/Version.h"
 #include "params/ParamIds.h"
 #include "ui/Logo.h"
+#include "ui/roll/LaneMenu.h"
 #include "ui/tabs/MacrosTab.h"
 #include "ui/tabs/SampleTab.h"
 #include "ui/tabs/SoundTab.h"
@@ -136,7 +137,7 @@ namespace sl::ui
             lane.setClickingTogglesState (false);
             arrow.setLaneColour (colour);
             arrow.setJoins (true, false);
-            arrow.setTooltip ("Shapes, patterns and random for the selected notes (M5)");
+            arrow.setTooltip ("Shapes, patterns and random for the selected notes");
             addAndMakeVisible (lane);
             addAndMakeVisible (arrow);
         }
@@ -325,6 +326,7 @@ namespace sl::ui
         roll.onToastFor = [this] (const juce::String& text, int ms) { showToast (text, ms); };
         roll.onEdit = [this] { syncRollControls(); };
         roll.onPress = [this] { inspector.finishEditing(); };
+        roll.onHint = [this] (const juce::String& text) { hintBar.setHelp (text); };   // a control's text while the mouse is on it
         inspector.onToast = [this] (const juce::String& text, int ms) { showToast (text, ms); };
         inspector.onEdit = [this]
         {
@@ -388,6 +390,7 @@ namespace sl::ui
         roll.onToastFor = nullptr;
         roll.onEdit = nullptr;
         roll.onPress = nullptr;
+        roll.onHint = nullptr;
         roll.getTools().onShowLane = nullptr;
         selectionBar.onHeightChange = nullptr;
         inspector.onToast = nullptr;
@@ -412,7 +415,17 @@ namespace sl::ui
             wrap->lane.setTooltip (m == 8 ? juce::String ("Sample: how each note moves through the sound")
                                           : "Draw " + juce::String (info.name) + " on the notes (notes stay put)");
             wrap->lane.onClick = [this, m] { setMode (m); };
-            wrap->arrow.onClick = [this] { showToast ("Shapes, patterns and random for the selected notes arrive in M5"); };
+            // sl-ui-panels.js hookLaneArrows: the lane's menu under its arrow (the Sample button's: the Sample lane shown)
+            auto* arrow = &wrap->arrow;
+            wrap->arrow.onClick = [this, m, arrow]
+            {
+                const auto lane = m == 8 ? processor.getDocument().rollState().subLane : core::kModes[m - 1].lanes[0];
+                roll::openLaneMenu (roll, lane, *arrow, [this] (roll::ToolSettings::Drawer d)
+                {
+                    selectionBar.showDrawer (d);
+                    syncRollControls();
+                });
+            };
             addAndMakeVisible (*wrap);
             modeItems.push_back ({ wrap.get(), wrap->preferredWidth(), kItemHeight, false });
             laneWraps.push_back (std::move (wrap));
@@ -443,6 +456,11 @@ namespace sl::ui
         if (modeNumber <= 1 || modeNumber > 8)
             return buildButton;
         return laneWraps[(std::size_t) (modeNumber - 2)]->lane;
+    }
+
+    FlatButton& MainView::getLaneArrow (int modeNumber) noexcept
+    {
+        return laneWraps[(std::size_t) (juce::jlimit (2, 8, modeNumber) - 2)]->arrow;
     }
 
     TabPanel* MainView::getTabPanel (int tab) const noexcept

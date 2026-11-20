@@ -409,6 +409,8 @@ namespace sl::ui::roll
             hoverIndex = index;
             hoverButton = button;
             repaint();
+            // the item's ghost (sl-ui.js mkMenuItem's hover), or none
+            view.menuHover (index, button);
         }
 
         void paintItem (juce::Graphics& g, const MenuItem& m, const Slot& s, juce::Rectangle<int> r) const
@@ -547,6 +549,9 @@ namespace sl::ui::roll
             zoomButtons[(std::size_t) i] = std::move (b);
         }
 
+        // the selection tools draw their ghosts here
+        tools->setGhosts (&ghosts);
+
         // a key pressed on the piano plays until the mouse lets go (sl-ui.js liveOn / liveOff)
         piano.onPress = [this] (int pitch) { processor.getCommandQueue().push (doc::UiCommand::auditionOn (pitch, kPianoVelocity)); };
         piano.onRelease = [this] (int pitch) { processor.getCommandQueue().push (doc::UiCommand::auditionOff (pitch)); };
@@ -564,6 +569,8 @@ namespace sl::ui::roll
         onToastFor = nullptr;
         onEdit = nullptr;
         onPress = nullptr;
+        onHint = nullptr;
+        tools->setGhosts (nullptr);
         if (gestures->isDragging())
             gestures->pointerUp();
         tools->endLive();
@@ -1019,16 +1026,19 @@ namespace sl::ui::roll
         menuItems.clear();
         ownMenu = false;
         ownMenuActions.clear();
+        ownMenuHovers.clear();
         if (menuPanel != nullptr)
             menuPanel->close();
+        ghosts.leave (GhostPreview::menuOwner());   // sl-ui.js closeMenu: setGhost (null)
     }
 
     void RollView::openMenuAt (const juce::Component& from, juce::Point<int> at, std::vector<MenuItem> items,
-                               std::vector<std::function<void()>> actions)
+                               std::vector<std::function<void()>> actions, std::vector<GhostPreview::Make> hovers)
     {
         closeMenu();
         menuItems = std::move (items);
         ownMenuActions = std::move (actions);
+        ownMenuHovers = std::move (hovers);
         ownMenu = true;
         if (! menusShown)
             return;
@@ -1062,8 +1072,47 @@ namespace sl::ui::roll
             menuPanel->pressedSomewhere (e);
     }
 
+    void RollView::menuHover (int index, int button)
+    {
+        // the item under the mouse (or one of a row's buttons): its ghost, made off to the side; none clears it
+        const MenuItem* m = index >= 0 && index < (int) menuItems.size() ? &menuItems[(std::size_t) index] : nullptr;
+        if (m != nullptr && m->kind == MenuItem::Kind::row)
+            m = button >= 0 && button < (int) m->row.size() ? &m->row[(std::size_t) button] : nullptr;
+        GhostPreview::Make make;
+        if (m != nullptr && ! m->disabled && m->hover >= 0)
+        {
+            if (ownMenu)
+            {
+                if (m->hover < (int) ownMenuHovers.size())
+                    make = ownMenuHovers[(std::size_t) m->hover];
+            }
+            else
+            {
+                const MenuItem item = *m;
+                make = [this, item] { return gestures->menuItemGhost (item); };
+            }
+        }
+        if (make)
+            ghosts.hover (GhostPreview::menuOwner(), make);
+        else
+            ghosts.leave (GhostPreview::menuOwner());
+    }
+
+    void RollView::showHint (const juce::String& text)
+    {
+        if (onHint)
+            onHint (text);
+    }
+
+    void RollView::setScope (model::ShapeScope scope)
+    {
+        gestures->settings().scope = scope;
+        saveScope();
+    }
+
     void RollView::chooseMenuItem (const MenuItem& item)
     {
+        ghosts.clear();   // sl-ui.js mkMenuItem: a click takes the ghost away first
         if (ownMenu)
         {
             // a caller's menu (Select similar): it closes, then the item's action runs (sl-ui.js mkMenuItem)

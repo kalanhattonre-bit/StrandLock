@@ -128,6 +128,7 @@ namespace sl::ui
         roll::Inspector& getInspector() noexcept { return inspector; }
         HintBar& getHintBar() noexcept { return hintBar; }
         FlatButton& getModeButton (int modeNumber) noexcept;
+        FlatButton& getLaneArrow (int modeNumber) noexcept;   // the menu arrow beside lane mode 2 .. 8's button
         TabPanel* getTabPanel (int tab) const noexcept;
         const juce::String& getTempoText() const noexcept { return tempoText; }
         const juce::String& getHintText() const noexcept { return hintBar.getHint(); }

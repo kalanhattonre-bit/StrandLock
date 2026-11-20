@@ -23,9 +23,11 @@
 // calls onEdit, so MainView shows the new selection, the inspector, the hint and the Undo buttons.
 //
 // The selection tools (M5): the view also owns the selection bar's SelectionTools, writing through the same document
-// and undo history as the gestures; the bar's controls call them, then edited (). The bar's Select similar list opens
-// in the same menu panel as the right-click menu (openMenuAt).
+// and undo history as the gestures; the bar's controls call them, then edited (). The bar's Select similar list and the
+// lane buttons' menus open in the same menu panel as the right-click menu (openMenuAt). The hover ghosts (GhostPreview)
+// are the view's too: what a control or a menu item would do, drawn dashed, never applied.
 
+#include "GhostPreview.h"
 #include "NoteLayerCache.h"
 #include "PianoStrip.h"
 #include "RollGeometry.h"
@@ -75,6 +77,18 @@ namespace sl::ui::roll
 
         /** A preview of another clip (M5's hover ghosts): its notes that differ are drawn dashed. Null: none. */
         void setGhost (model::ClipPtr ghostClip);
+
+        /** The hover ghosts: which preview is drawn and who owns it (the selection bar's controls, the menus). */
+        GhostPreview& getGhosts() noexcept { return ghosts; }
+
+        /** A control's text for the hint bar while the mouse is on it (empty: the mode's own hint), through onHint. */
+        void showHint (const juce::String& text);
+
+        /** Where showHint goes (MainView's hint bar). */
+        std::function<void (const juce::String&)> onHint;
+
+        /** Each note or Across for every shape tool (the menus, the Shapes drawer), kept in UIST. */
+        void setScope (model::ShapeScope scope);
 
         /** Where the roll's short messages go (MainView's toast). */
         std::function<void (const juce::String&)> onToast;
@@ -149,7 +163,11 @@ namespace sl::ui::roll
             A.openMenu): its top left at `at` in from's pixels; a click on an item runs actions[item.action] after the
             menu closes. */
         void openMenuAt (const juce::Component& from, juce::Point<int> at, std::vector<MenuItem> items,
-                         std::vector<std::function<void()>> actions);
+                         std::vector<std::function<void()>> actions, std::vector<GhostPreview::Make> hovers = {});
+
+        /** The mouse is on item index of the open menu (button: one of a row's buttons; -1: none, or no item): its
+            ghost is drawn, or the menu's ghost goes (the menu panel calls it; public for the tests). */
+        void menuHover (int index, int button = -1);
 
         /** False: a right press keeps the menu's items (getMenu) but shows no panel (the tests). */
         void setMenusShown (bool shouldShow) noexcept { menusShown = shouldShow; }
@@ -288,6 +306,7 @@ namespace sl::ui::roll
         PaintState state;
         model::ClipPtr ghost;
         std::unique_ptr<RollGeometry> ghostGeo;
+        GhostPreview ghosts { [this] (model::ClipPtr c) { setGhost (std::move (c)); } };
         ViewKey lastKey;
         bool haveKey = false;
         std::vector<juce::Rectangle<double>> overlay;   // roll pixels the overlay covered at the last refresh
@@ -301,6 +320,7 @@ namespace sl::ui::roll
         juce::Component::SafePointer<juce::Component> menuParent;
         bool ownMenu = false;                                // the open menu is a caller's (openMenuAt), not the gestures'
         std::vector<std::function<void()>> ownMenuActions;   // its items' actions
+        std::vector<GhostPreview::Make> ownMenuHovers;       // and their ghosts
 
         // auditions in flight: a note played by a gesture stops 220 ms later (sl-ui.js audition)
         struct PendingOff

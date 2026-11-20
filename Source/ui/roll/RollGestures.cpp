@@ -1298,6 +1298,13 @@ namespace sl::ui::roll
         return openMenu (x, y, menuNote);
     }
 
+    std::optional<model::Clip> RollGestures::menuItemGhost (const MenuItem& item) const
+    {
+        if (item.disabled || item.hover < 0 || item.hover >= (int) menuHovers.size())
+            return std::nullopt;
+        return menuHovers[(std::size_t) item.hover]();
+    }
+
     std::optional<std::vector<MenuItem>> RollGestures::runMenuItem (const MenuItem& item)
     {
         if (item.disabled || item.action < 0 || item.action >= (int) menuActions.size())
@@ -1349,18 +1356,25 @@ namespace sl::ui::roll
         const std::string laneName = core::laneInfo (lane).name;
         for (const auto key : model::shapeKeysFor (lane, kind))
         {
-            MenuItem it;
-            it.label = model::shapeName (key);
-            it.action = action ([this, lane, key, ids, seed, laneName]
+            // the shape with the menu's seed and the scope now, for the click and for its ghost (sl-ui.js shapeItems)
+            auto make = [this, lane, key, ids, seed]
             {
                 model::ShapeOpts opts;
                 opts.seed = seed;
                 opts.bpm = set.bpm;
                 opts.sampleSeconds = set.sampleSeconds;
                 opts.inst = set.inst;
-                if (auto r = model::applyShape (*clip(), ids, lane, key, set.scope, opts))
+                return model::applyShape (*clip(), ids, lane, key, set.scope, opts);
+            };
+            MenuItem it;
+            it.label = model::shapeName (key);
+            it.action = action ([this, make, key, laneName]
+            {
+                if (auto r = make())
                     setClipLabelled (std::move (*r), std::string (model::shapeName (key)) + " (" + laneName + ")");
             }, false);
+            menuHovers.push_back (make);
+            it.hover = (int) menuHovers.size() - 1;
             items.push_back (it);
         }
         return items;
@@ -1370,6 +1384,7 @@ namespace sl::ui::roll
     {
         menuActions.clear();
         menuReopens.clear();
+        menuHovers.clear();
         auto action = [this] (std::function<void()> fn)
         {
             menuActions.push_back (std::move (fn));

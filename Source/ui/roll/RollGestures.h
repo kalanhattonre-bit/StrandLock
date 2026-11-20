@@ -21,7 +21,8 @@
 // node moves every picked node together ("Move nodes"). A click on empty space clears the selection, as in the
 // prototype.
 //
-// Not here (later parts and milestones): hover ghosts and the lane-button menus (M5 S2); Sample mode's thumbnails (M6).
+// The right-click menu's shapes have hover ghosts (M5 S2): menuItemGhost makes the clip a shape would make, which the
+// view draws and never applies. The lane-button menus are LaneMenu's. Not here: Sample mode's thumbnails (M6).
 
 #include "BoxSelect.h"
 #include "RollGeometry.h"
@@ -101,6 +102,7 @@ namespace sl::ui::roll
         std::optional<core::LaneId> colour;   // a header in a lane's colour
         std::vector<MenuItem> row;   // Kind::row: its buttons, side by side
         int action = -1;             // what runMenuItem does (an index into the open menu's actions)
+        int hover = -1;              // its ghost while the mouse is on it (an index into the open menu's hovers), or none
     };
 
     class RollGestures
@@ -153,6 +155,10 @@ namespace sl::ui::roll
 
         std::vector<MenuItem> contextMenu (double x, double y, double timeMs);
         std::optional<std::vector<MenuItem>> runMenuItem (const MenuItem& item);
+
+        /** What an item of the open menu would make while the mouse is on it (sl-ui.js shapeItems' hover: the shape on
+            the selected notes), never applied; nothing for an item without a ghost. */
+        std::optional<model::Clip> menuItemGhost (const MenuItem& item) const;
 
         //==========================================================================================
         // Commands (the menu, the keys, the buttons). Each finished one is one undo step, none when it changes nothing.
@@ -269,9 +275,10 @@ namespace sl::ui::roll
         std::optional<Readout> shown;
         std::optional<model::LaneClipboard> clipboard;
 
-        // The open menu's actions (MenuItem::action indexes them) and where it opened.
+        // The open menu's actions (MenuItem::action indexes them), its ghosts (MenuItem::hover) and where it opened.
         std::vector<std::function<void()>> menuActions;
         std::vector<bool> menuReopens;
+        std::vector<std::function<std::optional<model::Clip>()>> menuHovers;
         double menuX = 0.0, menuY = 0.0, menuTime = 0.0;
         std::string menuNote;
     };
