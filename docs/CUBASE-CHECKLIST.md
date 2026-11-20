@@ -419,7 +419,9 @@ What is new, and what moved:
    move together. With three nodes ringed, the inspector's line says **3 NODES (VOLUME)** with one value box: click
    it, type -6 dB and press Enter: do all three move to that value? Click **Nodes** again to turn it off.
 
-4. **Connect.** In **1 Build**, select a few notes that follow each other, and open **Connect**. Try **Nearest**,
+4. **Connect.** In **1 Build**, select a few notes that follow each other, and open **Connect**. Hold the mouse over
+   **Nearest** without clicking: dashed lines with a dot at their end show the slides it would make. Over
+   **Disconnect** (once there are slides), a small cross sits on each slide it would take away. Try **Nearest**,
    **Furthest** and **Random**: each one makes slides between the selected notes (dashed lines join them), and a
    message says how many. **Re-roll** gives another random set; **Disconnect** removes them. Click **Undo** after
    each one: does each click undo exactly one change? Press Play: do the slides glide?
@@ -466,8 +468,9 @@ What is new, and what moved:
      click **Copy**: the text says what it holds. Select three other notes of different lengths and click **Paste**:
      do their lanes now look like the first note's, stretched or squeezed to each note's length? **Undo** puts them
      back.
-   - Click the **Pitch** lane button so it goes dark, then **Copy** and **Paste** again: only the other lanes are
-     pasted. Save, close the project and open it again: is **Pitch** still dark?
+   - Click the **Pitch** lane button so it goes dark. Select the first note again and click **Copy**. Then select two
+     notes you have not pasted onto yet and click **Paste**: does their Volume line change while their Pitch line stays
+     their own? Save, close the project and open it again: is **Pitch** still dark?
    - The rest of the second row (**NOTES**) is for whole notes: select a few notes and click **Copy notes**, then
      select another note and click **Paste notes**: the copies start where that note ends, and any slides between
      them come along.
@@ -487,7 +490,9 @@ What is new, and what moved:
 
 11. **A small window.** Drag the StrandLock window to its smallest size. Open the **Sample** tab: do the tabs stay
     folded rather than show half a row of knobs? Is there a message when you click the tab? Select some notes and
-    open **Tools**: is the roll still big enough to use? Make the window bigger again: does everything come back?
+    open **Tools**: is the roll still big enough to use? Click **Walk…**: the drawer may now show only the top half of
+    its second row, with a small scroll bar at its right edge. Can you scroll the drawer to reach Walk's sliders, or
+    would you rather the drawer took more room from the roll? Make the window bigger again: does everything come back?
 
 12. **Save and reopen.** Save the project, close it and open it again. Are your notes, shapes, patterns, slides and
     the **Copy / Paste** lane buttons as you left them?

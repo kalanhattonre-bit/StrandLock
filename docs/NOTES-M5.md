@@ -639,3 +639,114 @@ rather than cut a row on a short window, and the zoom buttons in the tab row.
 - **Handed to M6:** the recipe buttons' hover (`SelectionTools::previewRecipe`, hooked with `HoverHooks`); the
   per-note decorations of sl-ui-panels.js decorate (UI4-9's chevrons and thumbnails, the own-settings dot, and the
   warning mark where a slide goes into a note that starts well inside the one before it); the Note settings tab.
+
+## Fix
+
+The M5 fix pass: the twelve findings of the three reviews of main 79bad32 (tool parity P1-P6, the UI against the
+prototype UI5-1 and UI5-2, tests and threads R5T-1 to R5T-4). Branch `m5-fixes`, from main 79bad32.
+
+### Progress
+
+- Done: every finding read against the code and the prototype; 10 fixed with a test that fails without the fix, 1
+  (UI5-2) kept as it is with a question on Kalan's checklist, 1 (R5T-4) the same fault as P2.
+- In progress: the first CI run of the fixes.
+- Next: look at the new pictures (`m5_ghost_connect_dark`, `m5_ghost_disconnect_light`) and the changed ones, then
+  the CI figures here, then the fast-forward of main.
+
+### The findings
+
+- **P1 (medium), fixed: the open Pattern or Random drawer did not follow a change of the primary note alone.**
+  Confirmed by reading: a plain click on a note already selected only calls `ClipDocument::setPrimary`, and
+  `SelectionBar::Seen` held no primary, so `SelectionTools::sync` read the new primary's generator into the drawer's
+  settings while the drawer still showed the old one's (the next control then wrote the hidden values). `Seen` now
+  holds the primary note and the mode, so the drawer is drawn again in place, as the prototype's 'selection' event
+  does. Test `selectionBarPrimaryChange` (in the editor): A primary shows Square, 1/8, 80 %, locked; B made the
+  primary shows Triangle, 1/4, 20 %, unlocked in the same drawer; Lock to the beat then locks B's pattern; C (nothing on
+  Tone) as the primary lights Apply and shows "Choose the settings ...".
+- **P2 (medium) and R5T-4 (low), the same fault, fixed: a Paste lanes the 32 MiB cap refused still said "Pasted onto
+  N notes".** Confirmed: `pasteLanes` ignored the document's answer, and the toast keeps only the last text. `show`
+  now returns whether the document took the edit; `pasteLanes` stops after the cap's toast, and `setClipLabelled`
+  pushes no undo step for a refused edit. S3's note that the document's own caps "refuse the same way" for pastes
+  (above) was true for Duplicate and Paste notes only; it is now true for Paste lanes too. Test
+  `copyPasteLanesRefusedBySize`: a fully drawn note's lanes onto 1100 notes (the direct call encodes to about 35 MB)
+  is refused with "That would make the clip ... MB; the limit is 32 MB.", no bytes, no step, no clip version; onto 3
+  notes it pastes.
+- **P3 (low), fixed: Duplicate and Paste notes near 4096 were refused even when the result would fit.** Confirmed:
+  `model::duplicateNotes` and `pasteNotes` count every copy, and `capOf` clamps any larger `maxNotes` to 4096, so
+  the review's first remedy (a larger cap) cannot work without a model change. The gestures now ask the model only
+  for the copies that start before the clip's end (the ones `placeCopies` keeps): each copy moves by the same offset,
+  so they are always the first ones in time order, and asking for them alone gives the same ids, links and places as
+  the whole call (an id comes from the note's place in time order and the offset; a link to a copy left out is
+  dropped either way). Duplicate passes the whole selection's offset (its length, as the model works it out). Test
+  `copyPasteCopiesPastTheEndDoNotCount`: the review's clip (100 notes in beats 200-230 of a 4000-note clip) duplicates
+  to 4087 notes, the bytes of the prototype's whole Duplicate; Paste notes the same ("Pasted 87 of 100 notes ...");
+  on 4050 notes the refusal names 4137, the notes the edit would make; and 120 seeded Duplicates and Paste notes on a
+  clip with links give the bytes of the whole model call with the copies past the end taken out.
+- **P4 (low), fixed: after the bar's own More or Less the drawers read the scaled generator back.** Confirmed (S2's
+  note above that reading after the bar's own edits "gives the same values" was wrong for More and Less, which scale
+  the notes' d0, d1 and amount). The prototype's busy rule is now ported: `SelectionTools::act` and `liveRun` mark
+  the clip they make as seen (`markSeen`, only when sync had seen the clip before the edit), so the drawers keep their
+  values. The Slides tab's edits are sl-ui.js's own in the prototype, not the panels', so they still read. And, as the
+  prototype's 'mode' listener does, every mode change reads the primary note's generator again (before, only a change
+  of lane did: Build and the lane's own mode share the lane). Test `selectionToolsOwnEditsKeepTheDrawers`: Pattern at
+  30 % then More (the notes swing 60 %) keeps the drawer at 30 %, and the lane menu's "Pattern: ..." puts 30 % back
+  (the bytes of the drawer's pattern); Random at 50 % then Less keeps 50 %; Undo, a mode change on the same lane and
+  another selection read the note's 60 % again; the same through the editor's real buttons and lane arrow.
+- **P5 (low), fixed: the Connect and Disconnect ghosts drew no slide links.** Confirmed: sl-ui-panels.js decorate draws
+  them; `RollPainter::paintGhost` did not. `RollPainter::ghostLinks` ports that part of decorate (the rest of decorate
+  stays with M6): for each note whose ghost slides into another note, a dashed line in the ghost colour from where the
+  note ends now to the start of the note the ghost slides it into, with a dot there; for a link the ghost takes away, a
+  cross half way along it. `overlayBounds` repaints them. Test `ghostSlideLinks`: Nearest on A (C3, beats 0-1) and B
+  (C4, beats 2-3) gives one link from A's end to B's start, drawn half way along; with that link made, Disconnect's
+  ghost puts a cross half way along it. Pictures `m5_ghost_connect_dark` and `m5_ghost_disconnect_light`.
+- **P6 (low), fixed: the editor test's "Flip the selection" check could not fail.** Confirmed: after Select all and
+  Chop every note was selected. The test now selects every third note first and checks that the flip selects exactly
+  the others.
+- **R5T-1 (low), fixed: nothing took a ghost away when the clip, the selection or the mode changed under it.**
+  Confirmed: Undo, Redo, Escape, a state load and a mode key left the old preview drawn until the mouse left its
+  control. `RollView::setGhost` now notes the clip, the selection and the mode it was made from, and `refresh` drops a
+  ghost once any of them changed (every ghost, where the prototype's drawer redraw drops only a drawer button's; the
+  mouse brings it back by entering the control again). Test `ghostsGoWithTheirClip`: the ghost of Ramp up after Swell
+  goes with Undo, Redo, Escape and a state load (at the editor's next tick), Reverse's with a mode change, and with
+  nothing changed the timer keeps it.
+- **R5T-2 (low), fixed: the editor test's "a drag of Last note ... its release one step" could not fail.** Confirmed:
+  canUndo () was already true from the Walk click, and the release's label is "Walk Start" too. The test now checks
+  that one Undo gives the clip right after the Walk click, a second the clip before it, and two Redos the release's.
+- **R5T-3 (low), fixed in part: the selection bar's cost on the message thread.** Confirmed: `RollGeometry::selectedNotes`
+  tested every note with `RollState::isSelected`, a search of the selection list, so with 4096 notes selected each call
+  was about 8 million string compares, and the bar's sync makes several a tick. `selectedNotes` and `hitNote` now put
+  the selection in a set first, and `ToolSlider::dragTo` calls `onInput` only when the slider's value changed (an HTML
+  range input fires 'input' only then), so a move within one step no longer rebuilds the result. `RollState::isSelected`
+  itself is unchanged (its other callers test a few ids). Test `selectionScanCost`: the selection in time order and the
+  bar's own sync with 4096 notes selected, timed (targets 2 ms and 6 ms, gates 5 times them), and a slider move on
+  the same step calls nothing.
+- **UI5-1 (low), fixed: checklist step 8 could not show the Pitch chip's effect** (the second Copy copied from a note
+  that already had the pasted lanes). The step now says to select the first note again, Copy, and Paste onto two
+  notes not pasted onto yet. Step 4 also says what the Connect ghosts show now.
+- **UI5-2 (low), kept, with a question for Kalan: at 900 x 560 an open drawer can cut its second row in half.** The
+  drawer keeps its 62 px floor and scrolls (S1's decision; the prototype's drawer scrolls too). Snapping it to whole
+  rows would either drop under the 62 px that a scroll bar thumb needs, or take about 40 px more from the roll (Walk's
+  two rows are 88 px: S1's `selectionBarSmallWindow`), whose 137 px would then fall under decision 6's 110 px floor.
+  Checklist step 11 now asks whether scrolling the drawer to Walk's sliders works for Kalan, or whether the drawer
+  should take more room from the roll.
+
+### Decisions and deviations
+
+- **Every ghost goes with its clip, selection and mode** (R5T-1), where the prototype only drops a drawer button's
+  ghost when it draws the drawer again: its drawer's own ghost (a slider before Apply) stays through another selection
+  that still has notes, and the bar's Turn into nodes keeps its ghost through Undo. A stale ghost never shows what a
+  click would do, so the plugin drops them all.
+- **A slider calls its input only when its value changes** (R5T-3), as an HTML range input does: a press on the
+  slider at its own value no longer draws Walk's or Humanize's ghost before a move (it did not in the prototype
+  either). Its release still calls its change, as before.
+
+### For the architect
+
+- **The model's caps clamp** (`ClipEdit.cpp capOf`): `duplicateNotes` and `pasteNotes` never make more than 4096
+  notes, even for a result that shrinks below it once the copies past the end are left out. The gestures work around
+  it by asking for the copies that fit (P3, above); a `maxNotes` allowed past 4096 for an intermediate result would let
+  the UI call the model once, as the prototype does.
+- **UI5-2: a drawer on the smallest window** cuts its second row and scrolls (checklist step 11 asks Kalan). Snapping
+  it to whole rows needs either a drawer under the 62 px scroll bar floor or a roll under decision 6's 110 px.
+- **RollState::isSelected searches the selection list.** Its callers that loop over notes now use a set; a set kept in
+  RollState would need every writer of the selection to keep it (M8's performance pass, with M4's R4T-3).
