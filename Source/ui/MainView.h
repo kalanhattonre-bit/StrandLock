@@ -75,10 +75,14 @@ namespace sl::ui
         void setUiScalePercent (int percent);
 
         /** A key the editor received: the KeyRouter runs its shortcut on the roll (with Keys on). True when
-            StrandLock keeps the key; false sends it on to Cubase (every key with Keys off, Space always). While an
-            inspector box is typed in, every key is the box's and nothing runs; while the Diagnostics tab hides the
-            roll, no shortcut runs; with the right-click menu open, Escape closes it. */
+            StrandLock keeps the key; false sends it on to Cubase (every key with Keys off, Space always). While a
+            text box is typed in (isTyping), every key is the box's and nothing runs; while the Diagnostics tab hides
+            the roll, no shortcut runs; with the right-click menu open, Escape closes it. */
         bool handleKey (const juce::KeyPress& key, bool keysOn);
+
+        /** A text box in the view is being typed in: an inspector box, a Sample tab knob's value, or a box a later
+            tab adds (each is a juce::Label showing its editor). */
+        bool isTyping() const;
 
         /** A key went up (the editor's keyStateChanged). */
         void keyReleased();

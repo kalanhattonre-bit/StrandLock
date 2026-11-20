@@ -412,6 +412,12 @@ namespace sl::ui
         return label->getCurrentTextEditor();
     }
 
+    void SampleKnob::finishTyping()
+    {
+        if (label != nullptr && label->isBeingEdited())
+            label->hideEditor (false);
+    }
+
     //==============================================================================================
     juce::Rectangle<int> SampleKnob::dialBounds() const
     {

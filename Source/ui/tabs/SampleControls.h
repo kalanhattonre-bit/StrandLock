@@ -109,6 +109,10 @@ namespace sl::ui
         bool isTyping() const;
         juce::TextEditor* getTextEditor() const;
 
+        /** Closes the value box and keeps what it holds, as a click elsewhere does (JUCE closes it on Enter and Escape
+            through a posted message, which the test runner does not deliver). */
+        void finishTyping();
+
         /** The dial's area (presses there drag) and the value's (a click there types). */
         juce::Rectangle<int> dialBounds() const;
         juce::Rectangle<int> valueBounds() const;

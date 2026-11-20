@@ -7,7 +7,8 @@
 //   are the prototype's;
 // - each control changes exactly its own parameter (0 others; Lock from another engine also picks Cloud, and Mirror
 //   with one head also sets Heads, as in the prototype) and makes exactly 1 undo step, which Undo takes back whole;
-// - Lock Grain typed as 4.3 stays 4.3 and plays 4 taps (a drag lands on whole waves).
+// - Lock Grain typed as 4.3 stays 4.3 and plays 4 taps (a drag lands on whole waves);
+// - while a knob's value box is typed in, Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z and Ctrl+D run nothing on the roll (fix pass).
 // And pictures of both tabs for review.
 
 #include <juce_audio_processors/juce_audio_processors.h>
@@ -17,6 +18,7 @@
 #include "core/Inst.h"
 #include "core/JsonLite.h"
 #include "engine/VoiceRig.h"
+#include "model/Clip.h"
 #include "model/Presets.h"
 #include "params/ParamBridge.h"
 #include "params/ParamIds.h"
@@ -608,6 +610,90 @@ SL_TEST ("ui", lockGrainTypedPlaysFourTaps)
     const int halfTaps = tapsNow();
     check (std::abs (params::plainValueOf (p) - 4.5f) < 1e-6f && hostTaps == 4 && halfTaps == 5,
            fmt ("typed into Cubase as \"4.3\" it plays %d taps; 4.5 (what a 0.5 grid would make of it) plays %d", hostTaps, halfTaps));
+}
+
+//==================================================================================================
+SL_TEST ("ui", sampleKnobTypingKeepsKeys)
+{
+    section ("While a Sample tab knob's value box is typed in, its keys are the box's: Ctrl+Z, Ctrl+Y, Ctrl+Shift+Z and Ctrl+D run nothing on the "
+             "roll, with Keys on and off, on each of the 9 knobs that take typing (fix pass M6R-PAR-1, as M4's F2 did for the inspector)");
+
+    TabRig r;
+    auto& editor = *r.editor;
+    auto& doc = r.proc.getDocument();
+    using M = juce::ModifierKeys;
+
+    model::Clip clip = model::newClip (2);
+    clip.notes.push_back (std::make_shared<const model::Note> (model::mkNote (60.0, 0.0, 1.0, "a")));
+    clip.notes.push_back (std::make_shared<const model::Note> (model::mkNote (62.0, 2.0, 1.0, "b")));
+    r.set (core::defaultInst(), clip);
+    r.view().openTab (MainView::sampleTab);
+
+    // a step a Ctrl+Z on the roll would undo and one a Ctrl+Y would redo: Speed typed as 2, then 3, then Undo; and note a
+    // selected, for a Ctrl+D to duplicate
+    auto& speed = r.sample().getKnob (rules::KnobId::speed);
+    const bool typed = speed.type ("2") && speed.type ("3") && r.proc.undo();
+    doc.setSelection ({ "a" }, std::string ("a"));
+    r.view().syncRollControls();
+    r.settle();
+    const auto clip0 = doc.current();
+    const auto undo0 = r.proc.undoLabel(), redo0 = r.proc.redoLabel();
+    const auto values0 = valuesOf (r.proc);
+    check (typed && undo0.has_value() && redo0.has_value() && clip0->notes.size() == 2,
+           fmt ("set up: an undo step (\"%s\") and a redo step (\"%s\"), note a selected", undo0.value_or ("").c_str(), redo0.value_or ("").c_str()));
+
+    // a key goes to the box's text editor first, then up its parents to the editor, as JUCE's window hands a key over
+    // (ComponentPeer::handleKeyPress). The box has no typing of its own to undo or redo, and it knows no Ctrl+D, so
+    // before the fix these keys reached the roll's Undo, Redo and Duplicate.
+    const juce::KeyPress keys[] = { juce::KeyPress ('z', M::commandModifier, 0), juce::KeyPress ('y', M::commandModifier, 0),
+                                    juce::KeyPress ('z', M::commandModifier | M::shiftModifier, 0), juce::KeyPress ('d', M::commandModifier, 0) };
+    int boxes = 0, kept = 0, stayed = 0;
+    std::string firstFail;
+    for (const bool keysOn : { true, false })
+    {
+        editor.setKeysOn (keysOn);
+        for (int i = 0; i < 9; ++i)
+        {
+            auto& knob = r.sample().getKnob (static_cast<rules::KnobId> (i));
+            knob.beginTyping();
+            juce::Component* const box = knob.getTextEditor();
+            if (box == nullptr)
+            {
+                firstFail = firstFail.empty() ? std::string (knob.getSpec().undo) + ": no box opened" : firstFail;
+                continue;
+            }
+            ++boxes;
+            bool allKept = true;
+            for (const auto& key : keys)
+            {
+                bool used = false;
+                for (juce::Component* c = box; c != nullptr && ! used; c = c->getParentComponent())
+                    used = c->keyPressed (key);
+                allKept = allKept && used;
+            }
+            const bool same = doc.current() == clip0 && r.proc.undoLabel() == undo0 && r.proc.redoLabel() == redo0
+                              && changedBetween (values0, valuesOf (r.proc)).empty() && doc.rollState().selected == std::vector<std::string> { "a" };
+            kept += allKept && same ? 1 : 0;
+            stayed += knob.isTyping() && r.view().isTyping() ? 1 : 0;
+            if (firstFail.empty() && ! (allKept && same))
+                firstFail = fmt ("%s with Keys %s: %s%s (undo \"%s\", %zu notes)", knob.getSpec().undo, keysOn ? "on" : "off",
+                                 allKept ? "" : "a key went on past StrandLock ", same ? "" : "the roll or the history changed",
+                                 r.proc.undoLabel().value_or ("").c_str(), doc.current()->notes.size());
+            knob.finishTyping();
+        }
+    }
+    const bool closed = ! r.view().isTyping() && doc.current() == clip0 && r.proc.undoLabel() == undo0;
+    check (boxes == 18 && kept == 18 && stayed == 18 && closed,
+           fmt ("%d of 18 boxes (9 knobs, Keys on and off) kept all 4 keys with the clip, the undo history and every parameter unchanged; %d "
+                "stayed open; closed with nothing typed, nothing changed %s", kept, stayed, firstFail.c_str()));
+
+    // with no box open the shortcuts reach the roll again: Ctrl+D duplicates the selected note (one step)
+    editor.setKeysOn (true);
+    editor.keyPressed (juce::KeyPress ('D', M::commandModifier, 0));
+    check (doc.current()->notes.size() == 3 && r.proc.undoLabel().value_or ("") == "Duplicate",
+           fmt ("no box open, Keys on: Ctrl+D duplicates the selected note (%zu notes, undo \"%s\")", doc.current()->notes.size(),
+                r.proc.undoLabel().value_or ("").c_str()));
+    editor.setKeysOn (false);
 }
 
 //==================================================================================================

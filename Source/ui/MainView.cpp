@@ -100,6 +100,20 @@ namespace sl::ui
         private:
             Caption line;
         };
+
+        /** A juce::Label inside c shows its text box now (Label::showEditor): an inspector box, a Sample tab knob's
+            value, or a box a later tab adds. */
+        bool boxBeingTyped (const juce::Component& c)
+        {
+            for (const juce::Component* child : c.getChildren())
+            {
+                if (const auto* label = dynamic_cast<const juce::Label*> (child); label != nullptr && label->isBeingEdited())
+                    return true;
+                if (boxBeingTyped (*child))
+                    return true;
+            }
+            return false;
+        }
     }
 
     //==============================================================================================
@@ -668,12 +682,19 @@ namespace sl::ui
         }
     }
 
+    bool MainView::isTyping() const
+    {
+        return boxBeingTyped (*this);
+    }
+
     bool MainView::handleKey (const juce::KeyPress& key, bool keysNow)
     {
-        // While an inspector box is typed in, the keys are the box's: a key the box leaves (Ctrl+Z with no typing
-        // of its own to undo, Ctrl+Y, Ctrl+D) runs no shortcut and goes nowhere else, with Keys on or off (fix pass
-        // F2; sl-ui-panels.js stops a field's keys, and sl-ui.js runs no shortcut while a text field has the focus).
-        if (inspector.isEditing())
+        // While a text box is typed in (an inspector box, a Sample tab knob's value), the keys are the box's: a key the
+        // box leaves (Ctrl+Z with no typing of its own to undo, Ctrl+Y, Ctrl+D) runs no shortcut and goes nowhere
+        // else, with Keys on or off (M4 fix pass F2 for the inspector; the M6 fix pass for every box, M6R-PAR-1;
+        // sl-ui-panels.js and sl-ui-sample.js stop a field's keys, and sl-ui.js runs no shortcut while a text field
+        // has the focus).
+        if (isTyping())
             return true;
 
         // With the right-click menu open, Escape closes it and keeps the selection (sl-ui.js's first key rule).
