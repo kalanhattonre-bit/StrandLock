@@ -89,6 +89,11 @@ namespace sl::ui
         /** The id the Jump every list gives "mixed" (shown only while the selected notes differ). */
         static constexpr int jumpMixedId = 100;
 
+        /** How many syncs did their work (something the tab shows had changed), and how many times a group's width was
+            measured (only when its texts changed). */
+        int getSyncs() const noexcept { return syncs; }
+        int getFits() const noexcept { return fits; }
+
     private:
         class GroupBox;
         class HeadLine;
@@ -136,6 +141,7 @@ namespace sl::ui
         bool asleep = true;
         bool spotMixed = false, rangeMixed = false, velMixed = false;   // the sliders read "mixed"
         bool jumpHasMixed = false;
+        int syncs = 0, fits = 0;
         std::map<const juce::Component*, juce::String> titles;          // each control's own text
         std::vector<std::unique_ptr<HoverWatch>> hovers;
 

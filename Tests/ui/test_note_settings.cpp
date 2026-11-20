@@ -9,18 +9,22 @@
 // - Mirror on notes with one head also sets their Heads lane to 2 heads in that step (and says so); Path on a flat Travel
 //   line makes it play through the Region (Fit);
 // - the first line, the faded groups and their reasons, and the tab asleep with nothing selected;
+// - the editor's sync measures a group's text again only when it changed, and does nothing while the tab sleeps (the
+//   editor syncs it on every tick, while the host's automation changes the instrument);
 // and pictures.
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
+#include "core/Inst.h"
 #include "core/Rates.h"
 #include "model/ClipCodec.h"
 #include "model/ClipEdit.h"
 #include "model/Node.h"
 #include "model/NoteSettings.h"
 #include "model/Shapes.h"
+#include "params/ParamBridge.h"
 #include "support/Check.h"
 #include "support/TestRegistry.h"
 #include "ui/MainView.h"
@@ -503,6 +507,74 @@ SL_TEST ("ui", noteSettingsFadesSayWhy)
     const bool open = ! tab.isFaded (Group::lock) && ! tab.isFaded (Group::jump) && ! tab.isFaded (Group::tape) && ! tab.isFaded (Group::rev)
                    && tab.getSegments (Group::motion).getButton (1 + (int) core::Motion::freeze).getAlpha() > 0.99f;
     check (open, "a Cloud note and a Tape note on Scatter: Lock, Jump every, Tape and Each grain backwards are not faded, and Freeze is plain");
+}
+
+//==================================================================================================
+SL_TEST ("ui", noteSettingsMeasuresOnlyWhatChanged)
+{
+    section ("Note settings: the editor's sync measures a group again only when its text changed, and asleep the "
+             "instrument's changes cost nothing (M6; measuring shapes text, and the host's automation changes the "
+             "instrument on most of the editor's ticks: alloc/hostChangesWithEditorOpen)");
+
+    NsRig rig (settingsClip());
+    auto& tab = rig.tab();
+    const auto change = [&rig] (const core::InstPatch& p)
+    {
+        params::applyPatch (rig.proc.getApvts(), p);
+        rig.editor->refreshNow();
+    };
+
+    // nothing selected: 40 changes of Engine, Motion and the Region, and no sync does any work
+    const int syncs0 = tab.getSyncs(), fits0 = tab.getFits();
+    for (int i = 0; i < 40; ++i)
+    {
+        core::InstPatch p;
+        p.engine = (core::Engine) (i % 3);
+        p.motion = (core::Motion) (i % 6);
+        p.region.start = 0.01 * (double) i;
+        change (p);
+    }
+    check (tab.isAsleep() && tab.getSyncs() == syncs0 && tab.getFits() == fits0,
+           fmt ("nothing selected: 40 changes of Engine, Motion and the Region: %d syncs did work, %d groups measured",
+                tab.getSyncs() - syncs0, tab.getFits() - fits0));
+
+    // ns-1, ns-3 and ns-5 selected: the Region moves 40 times; each sync works (the Spot reads the Region) and measures
+    // nothing (no text a group is measured by changed)
+    {
+        core::InstPatch p;
+        p.engine = core::Engine::voice;
+        p.motion = core::Motion::forward;
+        p.region.start = 0.0;
+        p.region.end = 1.0;
+        change (p);
+    }
+    rig.select ({ "ns-1", "ns-3", "ns-5" }, "ns-1");
+    const auto spot0 = tab.getSpot().getValueText();
+    const int syncs1 = tab.getSyncs(), fits1 = tab.getFits();
+    for (int i = 1; i <= 40; ++i)
+    {
+        core::InstPatch p;
+        p.region.start = 0.005 * (double) i;
+        change (p);
+    }
+    const auto spot1 = tab.getSpot().getValueText();
+    check (! tab.isAsleep() && tab.getSyncs() - syncs1 == 40 && tab.getFits() == fits1 && spot1 != spot0,
+           fmt ("3 notes selected, the Region moved 40 times: %d syncs did work, %d groups measured; the Spot read \"%s\", now \"%s\"",
+                tab.getSyncs() - syncs1, tab.getFits() - fits1, spot0.toRawUTF8(), spot1.toRawUTF8()));
+
+    // the Sample tab's Engine changes: Engine's Follow names it, so that group alone is measured again, once
+    const int fits2 = tab.getFits();
+    {
+        core::InstPatch p;
+        p.engine = core::Engine::cloud;
+        change (p);
+    }
+    const auto follow = tab.getSegments (Group::engine).getButton (0).getButtonText();
+    const int measured = tab.getFits() - fits2;
+    rig.editor->refreshNow();
+    check (follow == "Follow (Cloud)" && measured == 1 && tab.getFits() == fits2 + 1,
+           fmt ("Engine Cloud: \"%s\", %d group measured, then %d more on the next tick", follow.toRawUTF8(), measured,
+                tab.getFits() - fits2 - measured));
 }
 
 //==================================================================================================

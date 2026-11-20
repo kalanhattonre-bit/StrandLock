@@ -154,6 +154,19 @@ namespace sl::ui
             return w - kPartGap + kGroupGap;
         }
 
+        /** True when what its width depends on changed since the last call: the caption, every button's text and the
+            "mixed" tag. Measuring shapes text, which is slow (most of all in a Debug build), and the editor syncs the tab
+            15 times a second while the host's automation changes the instrument, so the tab measures a group only then. */
+        bool textsChanged()
+        {
+            juce::String now = caption.getText() + (tag.isVisible() ? "|mixed" : "|");
+            addButtonTexts (*this, now);
+            if (now == fitted)
+                return false;
+            fitted = now;
+            return true;
+        }
+
         void setMixed (bool mixed)
         {
             if (mixed != tag.isVisible())
@@ -204,6 +217,16 @@ namespace sl::ui
     private:
         void updateAlpha() { setAlpha (asleep ? kAsleep : faded ? 0.5f : 1.0f); }
 
+        static void addButtonTexts (const juce::Component& c, juce::String& out)
+        {
+            for (const auto* child : c.getChildren())
+            {
+                if (const auto* b = dynamic_cast<const juce::Button*> (child))
+                    out << "|" << b->getButtonText();
+                addButtonTexts (*child, out);
+            }
+        }
+
         struct Part
         {
             std::unique_ptr<juce::Component> component;
@@ -215,6 +238,7 @@ namespace sl::ui
         std::vector<Part> parts;
         bool faded = false, asleep = false;
         juce::String reason;
+        juce::String fitted;   // what textsChanged saw last
     };
 
     /** The first line (.slp-nshead): how many notes are selected, in bold, then whether they follow the Sample tab; or
@@ -231,14 +255,18 @@ namespace sl::ui
             bold = boldPart;
             rest = restPart;
             note = asNote;
+            width = -1;
             repaint();
         }
 
         juce::String text() const { return bold + rest; }
 
+        /** Measured once for each text (measuring shapes text, which is slow). */
         int preferredWidth() const
         {
-            return (int) std::ceil (Theme::textWidth (boldFont(), bold) + Theme::textWidth (restFont(), rest)) + 2;
+            if (width < 0)
+                width = (int) std::ceil (Theme::textWidth (boldFont(), bold) + Theme::textWidth (restFont(), rest)) + 2;
+            return width;
         }
 
         void paint (juce::Graphics& g) override
@@ -259,6 +287,7 @@ namespace sl::ui
         const Theme& theme;
         juce::String bold, rest;
         bool note = false;
+        mutable int width = -1;   // preferredWidth's, while the texts stay
     };
 
     //==============================================================================================
@@ -727,7 +756,11 @@ namespace sl::ui
 
     bool NoteSettingsTab::fitGroup (Group g)
     {
+        // measured again only when its texts or its "mixed" tag changed (GroupBox::textsChanged)
         auto& box = group (g);
+        if (! box.textsChanged())
+            return false;
+        ++fits;
         box.resized();
         return resizeItem (box, box.preferredWidth());
     }
@@ -737,6 +770,11 @@ namespace sl::ui
         auto& tools = roll.getTools();
         const auto clip = tools.clip();
         const auto ids = tools.ids();
+
+        // asleep, and still nothing selected: the tab shows nothing of the instrument or the clip while it sleeps
+        if (! force && seen.valid && asleep && (clip == nullptr || ids.empty()))
+            return;
+
         const auto st = tools.rollState();
         const auto I = processor.readInst();
         const double secs = soundSeconds();
@@ -754,6 +792,7 @@ namespace sl::ui
         seen.inst = I;
         seen.seconds = secs;
         seen.valid = true;
+        ++syncs;
 
         bool layout = false;
         const auto mx = clip != nullptr && ! ids.empty() ? model::getMixed (*clip, ids) : std::nullopt;
