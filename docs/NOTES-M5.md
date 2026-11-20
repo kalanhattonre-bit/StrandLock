@@ -194,8 +194,10 @@ The drawers, the lane-button menus and the hover ghosts (plan 7.7 S2). Branch `m
 - Done: the tests of the M5 table's S2 rows in `test_selection_tools.cpp` (f3db408): the drawers and lane menus
   through the UI layer, live sliders, seeded Random and Re-roll, the lane menu's items, the drawers in the editor,
   and pictures of the Shapes, Pattern and Random drawers.
-- Done: the inspector's one value for several picked nodes (S1's open item), with its test in `test_box_select.cpp`.
-- In progress: CI on these commits, the pictures, then the fast-forward of main.
+- Done: the inspector's one value for several picked nodes (S1's open item), with its test in `test_box_select.cpp`
+  (9ba763f), and no ghost on a greyed control (ac4ee27).
+- Done: CI green on ac4ee27 (run 44681435341, figures below); every new and changed picture of its artifact looked at.
+- In progress: CI on this commit (notes only), then the fast-forward of main.
 - Next: S3 (the Copy / Paste and Slides tabs, the M5 snapshots, the checklist), from the hand-off below.
 
 ### Files
@@ -270,6 +272,9 @@ The drawers, the lane-button menus and the hover ghosts (plan 7.7 S2). Branch `m
   click or the menu closing). A click takes any preview away before it acts. The right-click menu's shapes have
   ghosts too (sl-ui.js shapeItems). Recipes: `SelectionTools::previewRecipe` is the hover of M6's recipe buttons
   (`model::applyRecipe` on the selected notes, or every note), tested here.
+- **A greyed control draws no ghost**, and still shows its text in the hint bar: a click on it does nothing, so its
+  preview would show a change that cannot happen (Random's Re-roll with nothing on the lane drew every selected note
+  as an unchanged ghost, since the model's reroll copies them). A greyed menu item already drew none (M4's panel).
 - **The hint bar shows a control's text while the mouse is on it** (sl-ui.js setHint): its tooltip, or a slider's
   title, over the bar the way a cut hint shows whole, changing no size. A lane mode's line says "▾ on the lane button
   = shapes for every selected note" again, the prototype's words.
@@ -280,3 +285,96 @@ The drawers, the lane-button menus and the hover ghosts (plan 7.7 S2). Branch `m
 - **Two test errors in the paused session's test_ghost.cpp, fixed in the test:** the lane menu's ghosts read the
   scope at hover time and the shapes before them in the list had left it on Across; and the editor test skipped
   every control, because a test editor has no window, so `isShowing ()` is false.
+
+### For the architect
+
+- **The menus' items have no tooltips** (above): the prototype's lane menu titles some items; M4's menu panel shows
+  none. The Shapes drawer's buttons carry the same sentences in their tooltips and in the hint bar.
+- **A drawer on a small window** (S1's note, now with taller drawers): at 900 x 560 with the tabs folded, the Pattern
+  drawer (three lines and its note, about 120 px of controls) keeps its 62 px and scrolls, and the roll keeps 75 px
+  (picture `m5_bar_pattern_narrow_dark`). Decision 6 (S3) is where a short window gives room back.
+- **Ghosts draw every note the preview copied.** The roll draws a ghost for each note that is not the same object as
+  the clip's (sl-ui.js drawGhost), so a model call that copies notes without changing them shows them dashed over
+  themselves. The greyed-control rule removes the one case the drawers met (Re-roll with nothing to re-roll).
+
+### Hand-off for S3
+
+- **Copy / Paste tab.** `RollGestures::copyMask` is still every lane (M4); the tab sets it (sl-ui.js's Copy / Paste
+  panel) and pastes through `model::pasteLanes` / `pasteNotes` with the 4096 cap's toast (decision 5).
+- **Slides tab.** `glideMode` and `glideTime` with the M2 30 Hz polling, no attachments (decision 4).
+- **The M5 snapshots** (dark and light at 100 %: the bar with the Shapes drawer open, a hover ghost, a box select in
+  progress): S2's review pictures are close to them (`m5_ghost_shapes_dark` / `_light` show the Shapes drawer with
+  Swell's ghost and its hint; `m5_box_select_*` the box; `m5_bar_pattern_*`, `m5_bar_random_dark`,
+  `m5_bar_shapes_travel_light` and `m5_ghost_lane_menu_*` the other S2 parts). S3 names the table's own.
+- **The checklist's M5 section** can take S2's steps: a lane button's arrow opens its menu (a shape on every selected
+  note, one undo step; the dashed preview while the mouse is on an item); Shapes, Pattern and Random in the bar
+  (Apply, then a slider changes the notes while it moves and is one undo step when let go; Random stays the same on
+  every loop until Re-roll); Turn into nodes; hovering any of them draws the dashed preview and changes nothing;
+  three nodes picked with Nodes take one typed value in the inspector.
+- **Recipes (M6).** `SelectionTools::previewRecipe (n)` is the recipe buttons' hover; hook each button with
+  `HoverHooks` (its preview, and sl-ui-sample.js's hint text) and the ghost rows hold.
+- **Small windows** (decision 6): see "For the architect".
+
+### CI results
+
+- Run 44675856276 on 3e79077 (the paused session's work as it was): both platforms compiled it the first time; 2 of
+  1726 checks red on Windows and 2 of 1718 on Linux, both in test_ghost.cpp's own logic (the lane menu's ghosts read
+  the scope the shapes before them had left on Across, and the editor test skipped every control because a test
+  editor is not showing). Every other step green, pluginval included.
+- Run 44678655129 on f3db408 (the S2 tests): 1 of 1746 red on Windows and 1 of 1738 on Linux: the editor ghost test
+  still skipped every control (it asked the editor itself to be visible). Run 44681076870 on 9ba763f: green.
+- Run 44681435341 on ac4ee27, green on every job and step: Windows Release 1748 checks in 295 tests (main had 1714
+  in 286), Linux Release 1740 in 295, the sanitizers' contract, model and engine groups 808 in 139 and the state group
+  142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug snapshots 0 JUCE assertions,
+  pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4.87 MB of the 5 MB budget; S2 adds no
+  fixtures). The `ui` group: 84 tests, 408 checks on both platforms (S2 added 9 tests and 34 checks).
+- Tools through the UI layer (`selectionToolsDrawerSweep`): every drawer action and lane-menu item on the 7 fixture
+  clips with notes, with every note and with a seeded half selected, on all 10 lanes: 6075 runs (shapes Each and
+  Across 2370, Pattern 1374, Random 407, Re-roll 140, Remove 140, Turn into nodes 140, lane-menu items 1504), 6075
+  the bytes of the direct model call; 5198 changed the clip with 1 undo step and its label each, 381 two-click
+  chains (Apply, then Re-roll, Remove or Turn into nodes) 2 steps each, the rest none; 381 lane-menu items greyed
+  with nothing on the lane; Turn into nodes with nothing to turn 127 of 127 toasted the prototype's sentence.
+- Through the editor (`selectionBarDrawersInTheEditor`): Shapes on Tone, 8 of 8 buttons one step equal to
+  `model::applyShape`; Pattern's Apply, its 7 chips after Apply (one live step each), Re-roll on Smooth random,
+  Remove (the buttons grey), Apply and Turn into nodes, Random's Apply and the bar's Turn into nodes, each the bytes
+  of its model call; 7 of 7 lane arrows open their lane's menu and show the lane; with nothing selected the toast.
+- Ghosts (`ghostsChangeNothing`): 8769 hovers in 140 runs (2370 shapes, 1120 patterns, 1120 recipes, 1499 lane-menu
+  items, and every tool preview): 8413 drew a ghost (6641 of them unlike the clip), 356 drew none where the click
+  would change nothing to see; 8769 of 8769 the bytes of the direct model call; 140 of 140 runs pushed 0 undo steps
+  and made 0 clip versions; 8769 of 8769 ghosts went when the mouse left; the same controls' clicks made 3 steps and
+  3 versions. In the editor (`ghostsInTheEditor`): 20 drawers on 4 lanes, 234 hooked controls hovered (132 drew a
+  ghost), 7 lane menus with 126 items, 8 right-click shapes, 8 recipes: the SnapshotPublisher took 0 new clips, the
+  clip kept its version, no undo step; the roll drew exactly the ghost while the mouse was there and none after
+  (234 of 234), the hint bar showed each control's text (234 of 234); a click on Swell was 1 submit and 1 step.
+- Live sliders (`selectionToolsGenLive`): before Apply a Pattern slider drew the ghost and changed nothing; Apply 1
+  step; 6 moves of Depth at start, 6 clip versions and no step, each the bytes of the drawer's pattern; the release 1
+  step "Pattern depth (Tone)"; Undo back to Apply's clip. Random: 3 Amount moves, 3 versions, no step, the release 1
+  step; Smooth the same; a move left without its release became 1 step when the selection changed. Through the
+  editor: 5 moves of the real slider, 5 clips handed to the SnapshotPublisher, no new undo step until the release,
+  which was exactly 1 (one Undo back to Apply's clip).
+- Random and Re-roll (`selectionToolsRandomSeeds`): Random on Tone, Different per note, on two windows: the same
+  bytes and the same lane tables, seed 1 on every note, each note its own line; Undo and Random again: the same
+  bytes; Re-roll: seed 2 on every note, other tables, the model's reroll; Amount afterwards kept seed 2. The Random
+  shape: the same nodes on two windows with seed 1; the second click used seed 2 and dealt other nodes.
+- Lane menus (`selectionToolsLaneMenu`): Tone on 3 notes lists the prototype's 18 items in its order (the header in
+  Tone's colour, Each note lit, 8 shapes, the line, "Pattern: squiggle 1/16 triplet", Pattern settings..., "Random
+  1/16 triplet", Random settings..., and Re-roll the random, Remove pattern / random and Turn into nodes greyed); 12
+  items draw a ghost; Across reopens the menu; the settings items open their drawer on the lane; Saw up at 1/8
+  dotted reads "Pattern: saw up 1/8 dotted"; on Travel 12 shapes for Speed notes, 11 for a Path note, 15 for both.
+- The inspector's group (`boxSelectNodesInspector`): three picked Volume nodes on two notes show "3 nodes (Volume)"
+  with no time box; "-6 dB" set all three to 0.6209 and no other node, one undo step "Type value for 3 nodes"; "loud"
+  toasted "Type a level in dB, for example -6" and changed nothing; one picked node shows "Node (Volume)" with its
+  time box.
+- The pictures (run 44681435341's artifact, 78), compared pixel for pixel with S1's (run 44325854672): 9 new
+  (`m5_bar_pattern_dark`, `_light`, `_narrow_dark`, `m5_bar_random_dark`, `m5_bar_shapes_travel_light`,
+  `m5_ghost_shapes_dark`, `_light`, `m5_ghost_lane_menu_dark`, `_light`), 36 changed, 33 the same. The changed
+  ones: with notes selected, the bar's Turn into nodes is now greyed while no selected note has a pattern or random on
+  the lane (S1's always looked clickable); the hint's hover shows the lane menus' words; the M4 right-click menu
+  picture with Swell under the mouse now draws Swell's ghost; and the picked-nodes picture's inspector shows "3 NODES
+  (VOLUME)" and one value. Looked at against lanemenu.png, ghost.png and tools.png: the Shapes drawer (SHAPE TONE,
+  Each note lit, the 8 shapes; on Travel the 12 with the Speed sentence), the Pattern drawer after Apply on Random
+  steps (the 7 chips, the rate with Triplet lit, both depths at 30%, Lock to the beat lit, the speed-up slider faded,
+  Same / Different, Apply unlit, Re-roll, Remove, Turn into nodes, "Moving these changes the pattern..."), the Random
+  drawer on Pitch ("±1 semitone", "steps"), the Formant lane menu under its arrow with Ramp up's dashed ghost, and
+  Swell's ghost with its sentence over the hint bar. Nothing cut, overlapping or off-palette; at 900 x 560 the
+  Pattern drawer scrolls in its 62 px with its scroll bar showing (decision 6).
