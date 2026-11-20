@@ -42,7 +42,7 @@ namespace sl::ui
         for (int i = 0; i < core::kNumLanes; ++i)
             g.copyMask[(std::size_t) i] = ((mask >> i) & 1u) != 0;
 
-        // shell.html: Lanes to copy, a chip per lane in its colour, Copy, Paste, and what is held
+        // shell.html: Lanes to copy and a chip per lane in its colour; then Copy, Paste, and what is held
         caption ("Lanes to copy", Caption::Style::label);
         for (int i = 0; i < core::kNumLanes; ++i)
         {
@@ -63,12 +63,15 @@ namespace sl::ui
             const int w = b->preferredWidth();
             return add (std::move (b), w, kButtonHeight);
         };
+        // Copy, Paste and what is held start the second line (with the notes after them), so the tab is two whole rows
+        // from 900 px wide up and shows on the smallest window (decision 6), where the chips' line would otherwise wrap
+        newRow();
         copyButton = &button ("Copy", "Copy the chosen lanes of the selected note (Ctrl+C while Keys is on)", [this] { roll.copyLanes(); });
         pasteButton = &button ("Paste", "Paste them onto every selected note (Ctrl+V while Keys is on)", [this] { roll.pasteLanes(); });
         lanesText = &caption (lanesHeld (nullptr), Caption::Style::label);
 
         // the notes themselves: Copy notes, Paste notes and Duplicate, and what is held
-        newRow();
+        shortSeparator();
         caption ("Notes", Caption::Style::label);
         copyNotesButton = &button ("Copy notes", "Copy the selected notes", [this] { roll.copyNotes(); });
         pasteNotesButton = &button ("Paste notes",

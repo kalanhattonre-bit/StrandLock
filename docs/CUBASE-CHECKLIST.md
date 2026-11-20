@@ -460,16 +460,17 @@ What is new, and what moved:
    shape to see its preview, then click it. With no note selected the arrow says to select notes first.
 
 8. **Copy / Paste.** Open the **Copy / Paste** tab.
-   - Its first row says **LANES TO COPY**, then a button for each lane (all lit), **Copy**, **Paste** and what is
-     held (**NOTHING COPIED**).
+   - Its first row says **LANES TO COPY** and has a button for each lane (all lit). The second row starts with
+     **Copy**, **Paste** and what is held (**NOTHING COPIED**).
    - Draw something on one note's Pitch and Volume lines (in **2 Pitch** and **3 Volume**). Select that note and
      click **Copy**: the text says what it holds. Select three other notes of different lengths and click **Paste**:
      do their lanes now look like the first note's, stretched or squeezed to each note's length? **Undo** puts them
      back.
    - Click the **Pitch** lane button so it goes dark, then **Copy** and **Paste** again: only the other lanes are
      pasted. Save, close the project and open it again: is **Pitch** still dark?
-   - The second row is for whole notes: select a few notes and click **Copy notes**, then select another note and
-     click **Paste notes**: the copies start where that note ends, and any slides between them come along.
+   - The rest of the second row (**NOTES**) is for whole notes: select a few notes and click **Copy notes**, then
+     select another note and click **Paste notes**: the copies start where that note ends, and any slides between
+     them come along.
      **Duplicate** copies the selected notes right after themselves. In **1 Build**, right-click an empty spot:
      **Paste notes here** puts the copied notes there.
 

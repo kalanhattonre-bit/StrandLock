@@ -838,7 +838,7 @@ SL_TEST ("ui", decisionSixLayout)
         auto& view = e.view();
         int shown = 0, foldedCount = 0, cut = 0, squeezed = 0, needless = 0, cases = 0;
         juce::String firstCut, firstNeedless, foldList;
-        bool sampleFoldsSmall = false, sampleShowsDefault = false;
+        bool sampleFoldsSmall = false, sampleShowsDefault = false, copyShowsSmall = false, slidesShowsSmall = false;
         for (const int w : { 900, 1100 })
             for (int h = 560; h <= 900; h += 20)
             {
@@ -880,6 +880,11 @@ SL_TEST ("ui", decisionSixLayout)
                     ++shown;
                     if (tab == MainView::sampleTab && w == 1100 && h == 680)
                         sampleShowsDefault = true;
+                    if (w == 900 && h == 560)
+                    {
+                        copyShowsSmall = copyShowsSmall || tab == MainView::copyTab;
+                        slidesShowsSmall = slidesShowsSmall || tab == MainView::slidesTab;
+                    }
                     bool whole = false;
                     for (const int b : { 0, bar })
                         if (panel != nullptr)
@@ -896,11 +901,13 @@ SL_TEST ("ui", decisionSixLayout)
             }
         note (fmt ("the Sample tab at 900 x 560 (M4 review UI4-7: its pane cut the knob row): %s; folded (window, tab 0 Sample .. 6 Sound): %s",
                    sampleFoldsSmall ? "folded" : "shown whole", foldList.toRawUTF8()));
-        check (cut == 0 && squeezed == 0 && needless == 0 && shown + foldedCount == cases && shown > 0 && foldedCount > 0 && sampleShowsDefault,
+        check (cut == 0 && squeezed == 0 && needless == 0 && shown + foldedCount == cases && shown > 0 && foldedCount > 0 && sampleShowsDefault
+                   && copyShowsSmall && slidesShowsSmall,
                fmt ("%d tab and window cases: %d show whole rows, %d fold (%d cut a row%s%s, %d leave the roll under %d px, %d folded where a whole "
-                    "row fitted%s%s); the Sample tab shows at 1100 x 680 (%s)", cases, shown, foldedCount, cut, firstCut.isEmpty() ? "" : ", first ",
+                    "row fitted%s%s); the Sample tab shows at 1100 x 680 (%s); Copy / Paste (two rows) and Slides show at 900 x 560 (%s, %s)",
+                    cases, shown, foldedCount, cut, firstCut.isEmpty() ? "" : ", first ",
                     firstCut.toRawUTF8(), squeezed, MainView::rollFloor, needless, firstNeedless.isEmpty() ? "" : ", first ", firstNeedless.toRawUTF8(),
-                    sampleShowsDefault ? "yes" : "NO"));
+                    sampleShowsDefault ? "yes" : "NO", copyShowsSmall ? "yes" : "NO", slidesShowsSmall ? "yes" : "NO"));
 
         // folded for want of room: a click on the tab or Show says why, and the person's choice stays. The first tab and
         // height at 900 px wide that folds (which one depends on the fonts).

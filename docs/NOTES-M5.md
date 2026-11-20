@@ -396,17 +396,19 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   Fixed in the test. JUCE assertions in the Debug pictures 0, pluginval SUCCESS. Its 88 pictures compared with S2's
   and looked at (below).
 - Done: the Cubase checklist's M5 section.
-- Done: run 44695294607 on ba326b7 (the decision 6 test made font-independent, the box picture in Tone): Linux's tests
-  green.
-- In progress: CI on the third push (these notes, the first run's figures, S1's Chop picture scrolled to its notes).
+- Done: run 44695294607 on ba326b7 (the decision 6 test made font-independent, the box picture in Tone), green on
+  every job and step (below). Its list of folded tabs showed Copy / Paste folding on the smallest window (its chips'
+  line wrapped), so the tab now keeps Copy and Paste on its second line; run 44697009302 (notes) was cancelled for it.
+- In progress: CI on the fourth push (the Copy / Paste tab in two rows, a check that it and Slides show at 900 x 560,
+  these notes).
 - Next: the final run's figures and the M5 summary, then the merge to main.
 
 ### Files
 
 - `Source/ui/tabs/CopyPasteTab`: shell.html's "copy" pane (sl-ui.js copyLanes, pasteLanes, the chips): LANES TO COPY
-  with a chip per lane in its colour (the gestures' `copyMask`, kept in UIST `copyMask`), Copy, Paste and what is held
-  ("nothing copied", "holding: Pitch, Tone", "holding: 9 lanes"); on a second row NOTES with Copy notes, Paste notes,
-  Duplicate and what is held. `lanesHeld` is the text, for the tests.
+  with a chip per lane in its colour (the gestures' `copyMask`, kept in UIST `copyMask`); on a second line Copy, Paste
+  and what is held ("nothing copied", "holding: Pitch, Tone", "holding: 9 lanes"), a line, then NOTES with Copy notes,
+  Paste notes, Duplicate and what is held. `lanesHeld` is the text, for the tests.
 - `Source/ui/tabs/SlidesTab`: shell.html's "glide" pane (sl-ui.js syncGlideUI, wirePanels): AUTO SLIDE (a `ChoiceBox` on
   `glideMode` with the prototype's words), SLIDE TIME (`SlideTimeBox`, the prototype's 1/32 .. 1/2 on the float
   `glideTime`), a line, SELECTED NOTES (a `ToolSlider`, 0 .. 2 beats in 1/64 steps), Auto and Jump, no slide.
@@ -450,6 +452,10 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   the document refused the edit (the 32 MiB cap), which left nothing selected; it now returns with the toast.
 - **The clipboards live as long as the editor window** (the gestures'), as the bar's settings do; the lanes Copy
   takes are the project's (UIST `copyMask`, which M0's format already had and nothing used).
+- **The Copy / Paste tab is two whole rows from 900 px wide up.** The prototype's pane is one wrapping line (the label,
+  the chips, Copy, Paste, what is held); here Copy starts a second line and the notes follow on it. With the
+  prototype's order the chips' line wrapped at 900 px and the tab folded on the smallest window on both platforms
+  (run 44695294607's list: Copy / Paste among the folds at 900 x 560); in two rows it shows there.
 - **"holding: ..." lists the lanes in the registry's order.** The prototype lists them in the order the chips were
   last switched on (a JavaScript Set keeps insertion order); the lanes copied are the same either way. With no lane
   chosen it says "holding: " and nothing, as the prototype.
@@ -564,3 +570,12 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   "—". The Shapes drawer on Volume, the hover ghost of Ramp up with its sentence in the hint bar (ghost.png), the box.
   Nothing cut, overlapping or off-palette. One picture improved for the next run: S1's Chop refused picture lost its
   notes from view (its clip sits lower than the first view now centres), so it scrolls to them.
+- Run 44695294607 on ba326b7, green on every job and step: Windows Release 1797 checks in 303 tests, Linux Release
+  1789 in 303, the sanitizers' groups 808 in 139 and 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE
+  assertions), the Debug pictures 0 JUCE assertions, pluginval strictness 10 SUCCESS, the fixture check passed (4.87 MB
+  of the 5 MB budget; S3 adds no fixtures). The  group: 92 tests, 457 checks on both platforms (S3 added 8 tests
+  and 49 checks). Decision 6's sweep: 0 cut rows, 0 rolls under 110 px, 0 needless folds; folded on Windows: 900 x 560
+  Sample, Macros and Copy / Paste, 900 x 580 Sample; on Linux: 900 x 560 Macros and Copy / Paste. The first folded
+  tab's click said the sentence and kept the choice, and at 900 x 900 the tab opened by itself. With Walk's panel open,
+  900 x 560 to 760 in 8 px steps: the inspector's line went to the roll at 1 height (560: the roll 137 px) and stayed
+  at 25, 0 wrong, on both platforms.
