@@ -205,11 +205,25 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     while (commands->pop (command))
         applyCommand (command);
 
-    // The transport (split where a host cycle wraps inside the block) and the MIDI, each at its own sample.
+    // Preview (U5, M6): Kalan's switch, read every block (a click may come at any time).
+    const std::uint32_t previewWord = previewSwitch.load (std::memory_order_acquire);
+    hostSync.setPreview ((previewWord & 1u) != 0);
+
+    // The transport (split where a host cycle wraps inside the block, or Preview's own clock while Cubase is
+    // stopped) and the MIDI, each at its own sample.
     if (buffer.getNumChannels() >= 2 && n > 0)
     {
         const core::Snapshot* clip = snapshots.current();
-        const auto transport = hostSync.plan (hostBlock, n, clip != nullptr ? clip->offsetBeats : 0.0, clip == nullptr || clip->loop);
+        const double clipBeats = clip != nullptr ? (double) std::max (1, clip->bars) * (double) std::max (1, clip->beatsPerBar) : 0.0;
+        const auto transport = hostSync.plan (hostBlock, n, clip != nullptr ? clip->offsetBeats : 0.0, clip == nullptr || clip->loop, clipBeats);
+        if (transport.previewEnded)
+        {
+            // Cubase plays (or a clip that does not loop ended): the switch goes off, unless a click changed it after
+            // this block read it (the click count in the upper bits then differs, and the click stands)
+            std::uint32_t expected = previewWord;
+            if (previewSwitch.compare_exchange_strong (expected, previewWord & ~1u, std::memory_order_acq_rel, std::memory_order_acquire))
+                previewStops.fetch_add (1, std::memory_order_acq_rel);
+        }
         const host::MidiSettings settings { nonParam.mod1Cc.load (std::memory_order_relaxed), nonParam.mod2Cc.load (std::memory_order_relaxed) };
         host::MidiRouter::renderBlock (eng, transport, midi, settings, buffer.getWritePointer (0), buffer.getWritePointer (1), n);
     }
@@ -217,6 +231,7 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     {
         buffer.clear();
     }
+    previewPlaying.store (hostSync.isPreviewing(), std::memory_order_release);
 
     // The versions the engine still reads (a releasing voice's old note, a stolen voice's old sample) stay;
     // the 10 Hz collect frees the rest.
@@ -242,6 +257,9 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         f.filterResets = st.filterResets;
         diag.audioEngine (f);
     }
+
+    // One more block: the Sample tab's paused-host check counts them (M6, plan 7.8 decision 3).
+    blocksProcessed.fetch_add (1, std::memory_order_acq_rel);
 }
 
 void StrandLockProcessor::applyCommand (const doc::UiCommand& command) noexcept
@@ -265,11 +283,23 @@ void StrandLockProcessor::applyCommand (const doc::UiCommand& command) noexcept
         case doc::UiCommandKind::allNotesOff:
             eng.allNotesOff();
             break;
-        case doc::UiCommandKind::previewStart:   // Preview is M6
+        case doc::UiCommandKind::previewStart:   // Preview's switch is setPreview's atomic word, read every block (M6)
         case doc::UiCommandKind::previewStop:
         case doc::UiCommandKind::midiLearnArm:   // MIDI Learn is M8
             break;
     }
+}
+
+void StrandLockProcessor::setPreview (bool on)
+{
+    // A new click count above the on bit: the audio thread turns the switch off only while it still holds the word it
+    // read at the start of its block, so a click made after that block began always stands.
+    std::uint32_t word = previewSwitch.load (std::memory_order_acquire);
+    std::uint32_t next = 0;
+    do
+    {
+        next = (((word >> 1) + 1u) << 1) | (on ? 1u : 0u);
+    } while (! previewSwitch.compare_exchange_weak (word, next, std::memory_order_acq_rel, std::memory_order_acquire));
 }
 
 void StrandLockProcessor::timerCallback()

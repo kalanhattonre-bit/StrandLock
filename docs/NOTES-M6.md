@@ -372,3 +372,14 @@ Note settings panel (S7) and the "Try this" line (U3) (plan 7.8 T2, decisions 5 
   Linux 26.4 ms (target 50, gate 250). The display slot: 10,000 blocks in 806 ms on Windows and 1245 ms on Linux, the
   longest block 0.14 ms and 0.23 ms. 106 of the 107 pictures are byte for byte the ones looked at; in
   `m6_mode8_light_200` 2 pixels of the hint line's text differ by at most 8 levels.
+
+## T3
+
+Recipes 1-8 and Dice with pins, Preview while Cubase is stopped, the M6 table's pictures and the checklist (plan 7.8 T3,
+decisions 3 and 4). Branch `m6-sample`, from main dd0aef2 (T2).
+
+### Progress
+
+- In progress: Preview's clock in `host/HostSync` and the processor's switch, with `Tests/engine/test_preview.cpp`.
+- Next: the pins in UserSettings; Recipes, Dice, the pins and the Preview row on the Sample tab; the M6 table's pictures;
+  the checklist; these notes; the fast-forward of main.

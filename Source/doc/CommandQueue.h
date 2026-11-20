@@ -11,8 +11,8 @@
 //   auditionOff    engine.noteOff (note)
 //   letGoWheel     engine.releaseController (mod1 or mod2)      "Let go" on the Mod wheels tab
 //   allNotesOff    engine.allNotesOff ()
-//   previewStart   HostSync starts its own clock at the host tempo while the host is stopped (U5, M6)
-//   previewStop    HostSync stops it
+//   previewStart   taken and ignored: Preview (U5, M6) is a switch the audio thread reads every block and turns off
+//   previewStop    itself when the host plays (StrandLockProcessor::setPreview), so it is an atomic word, not a command
 //   midiLearnArm   MidiRouter reports the next other CC for that wheel (M8); wheel -1 disarms
 
 #include "rt/SpscFifo.h"

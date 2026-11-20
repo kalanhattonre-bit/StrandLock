@@ -177,8 +177,30 @@ public:
     bool waitForSnapshot (int timeoutMs = kLoadWaitMs);
 
     /** UI -> audio commands (doc/CommandQueue.h): processBlock drains it at the start of every block. Auditions,
-        "Let go" of a wheel and all notes off play now; Preview (M6) and MIDI Learn (M8) are taken and ignored. */
+        "Let go" of a wheel and all notes off play now; the previewStart / previewStop commands and MIDI Learn (M8)
+        are taken and ignored (Preview's switch is setPreview below). */
     sl::doc::CommandQueue& getCommandQueue() noexcept { return *commands; }
+
+    //----------------------------------------------------------------------------------------------
+    // Preview (U5, plan 1.10, 7.8 decision 3).
+
+    /** Kalan's Preview switch (message thread). While it is on and Cubase is stopped, the audio thread plays the clip
+        at Cubase's tempo from Cubase's position (host/HostSync). The audio thread turns it off itself when Cubase
+        plays: Preview never runs while the host plays. The switch is one atomic word, the on bit and a count of
+        clicks, so that stop never undoes a click that came after the block that stopped it read the switch. */
+    void setPreview (bool on);
+    bool isPreviewOn() const noexcept { return (previewSwitch.load (std::memory_order_acquire) & 1u) != 0; }
+
+    /** How many times the audio thread turned Preview off itself (Cubase played, or a clip that does not loop
+        ended); the Sample tab says why. Any thread. */
+    std::uint32_t getPreviewStops() const noexcept { return previewStops.load (std::memory_order_acquire); }
+
+    /** The audio thread's last block played the Preview clock. Any thread. */
+    bool isPreviewPlaying() const noexcept { return previewPlaying.load (std::memory_order_acquire); }
+
+    /** Blocks processBlock has played since the processor was made (any thread): the Sample tab tells Kalan when
+        none arrive while Preview is on (Cubase has paused StrandLock while it is stopped). */
+    std::uint64_t getBlocksProcessed() const noexcept { return blocksProcessed.load (std::memory_order_acquire); }
 
     /** Frees every snapshot and sample version the audio thread no longer reads (plan 1.3's 10 Hz collect; the
         processor's own timer calls it, and the tests, which run no message loop, call it themselves). */
@@ -262,6 +284,13 @@ private:
     bool firstBlock = true;                                     // audio thread: the first block after prepareToPlay
     std::uint64_t displayFramesWritten = 0;                     // audio thread
     std::atomic<bool> snapRampsPending { false };               // a state load asks the next block to snap the ramps (plan 2.3)
+
+    // Preview (M6): the switch (bit 0 on, the bits above count the clicks), the audio thread's own stops, whether its
+    // last block played the Preview clock, and the blocks played (the paused-host check).
+    std::atomic<std::uint32_t> previewSwitch { 0 };
+    std::atomic<std::uint32_t> previewStops { 0 };
+    std::atomic<bool> previewPlaying { false };
+    std::atomic<std::uint64_t> blocksProcessed { 0 };
 
     // The document and its hand-offs. Declared before the two threads below, so they outlive them.
     sl::doc::ClipDocument clipDoc { nonParam };
