@@ -479,11 +479,80 @@ namespace sl::ui::roll
         }
     }
 
+    std::vector<RollPainter::GhostLink> RollPainter::ghostLinks() const
+    {
+        // sl-ui-panels.js decorate: for each note of the clip whose ghost note slides elsewhere, from where the note ends
+        // now (its own line, without the ghost's slide) to the start of the note the ghost slides it into; or, when the
+        // ghost slides it nowhere, a cross half way to the note it slides into now
+        std::vector<GhostLink> out;
+        if (s.ghost == nullptr || s.clip == nullptr || s.geo == nullptr)
+            return out;
+        std::unordered_map<std::string, const model::Note*> ghostById;
+        ghostById.reserve (s.ghost->notes.size());
+        for (const auto& q : s.ghost->notes)
+            ghostById.emplace (q->id, q.get());
+        const auto& geo = *s.geo;
+        const double bw = geo.beatWidth(), rh = geo.rowHeight();
+        for (const auto& n : s.clip->notes)
+        {
+            const auto it = ghostById.find (n->id);
+            if (it == ghostById.end() || it->second->glideTo == n->glideTo)
+                continue;
+            const model::Note& gn = *it->second;
+            GhostLink l;
+            l.x1 = (n->s + n->l) * bw;
+            l.y1 = geo.baseYAt (*n, 1.0);
+            const auto tg = gn.glideTo.empty() ? ghostById.end() : ghostById.find (gn.glideTo);
+            if (tg != ghostById.end())
+            {
+                const model::Note& t = *tg->second;
+                l.x2 = t.s * bw;
+                l.y2 = geo.cy (t.p) - (model::evalNodes (model::noteLane (t, core::LaneId::pitch), 0.0) - 0.5) * 24.0 * rh;
+                out.push_back (l);
+            }
+            else if (! n->glideTo.empty())
+            {
+                if (const auto m = s.noteById (n->glideTo))
+                {
+                    l.x2 = m->s * bw;
+                    l.y2 = geo.cy (m->p);
+                    l.removed = true;
+                    out.push_back (l);
+                }
+            }
+        }
+        return out;
+    }
+
     void RollPainter::paintGhost (juce::Graphics& g) const
     {
         // sl-ui.js drawGhost: the notes of the preview that differ from the clip, dashed
         if (s.ghost == nullptr || s.ghostGeo == nullptr)
             return;
+
+        // its slide links first (sl-ui-panels.js decorate, the Connect and Disconnect previews): dashed in the ghost
+        // colour with a dot where the slide would land, or a cross on a link the preview takes away
+        g.setColour ((*s.colours)[Tok::ghost].withAlpha (0.9f));
+        for (const auto& l : ghostLinks())
+        {
+            if (l.removed)
+            {
+                const double xm = (l.x1 + l.x2) / 2.0, ym = (l.y1 + l.y2) / 2.0;
+                juce::Path cross;
+                cross.startNewSubPath (pt (xm - 4.0, ym - 4.0));
+                cross.lineTo (pt (xm + 4.0, ym + 4.0));
+                cross.startNewSubPath (pt (xm + 4.0, ym - 4.0));
+                cross.lineTo (pt (xm - 4.0, ym + 4.0));
+                g.strokePath (cross, juce::PathStrokeType (1.6f, juce::PathStrokeType::mitered, juce::PathStrokeType::rounded));
+                continue;
+            }
+            juce::Path line;
+            line.startNewSubPath (pt (l.x1, l.y1));
+            line.lineTo (pt (l.x2, l.y2));
+            dashed (g, line, 1.6f, 5.0f, 4.0f);
+            g.fillEllipse (around (l.x2, l.y2, 3.0).toFloat());
+        }
+
         const auto& gg = *s.ghostGeo;
         const double bw = gg.beatWidth(), rh = gg.rowHeight(), lh = gg.laneHeight();
         const auto AL = s.roll.activeLane();
@@ -611,11 +680,22 @@ namespace sl::ui::roll
             }
         }
 
-        // the ghost's notes that differ from the clip
+        // the ghost's notes that differ from the clip, and its slide links
         if (s.ghost != nullptr && s.ghostGeo != nullptr)
+        {
             for (const auto& n : s.ghost->notes)
                 if (s.noteById (n->id) != n)
                     out.push_back (noteBoundsIn (*s.ghostGeo, *n));
+            for (const auto& l : ghostLinks())
+            {
+                if (l.removed)
+                    out.push_back (around ((l.x1 + l.x2) / 2.0, (l.y1 + l.y2) / 2.0, 7.0));
+                else
+                    out.push_back (juce::Rectangle<double>::leftTopRightBottom (std::min (l.x1, l.x2), std::min (l.y1, l.y2), std::max (l.x1, l.x2),
+                                                                                std::max (l.y1, l.y2))
+                                       .expanded (5.0));
+            }
+        }
 
         // the box and the readout
         if (s.box)

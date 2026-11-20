@@ -44,6 +44,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 class StrandLockProcessor;
@@ -75,7 +76,9 @@ namespace sl::ui::roll
         /** Mode 1..8, and for mode 8 its sub-lane (0 Travel .. 3 Refresh; -1 keeps it). */
         void setMode (int mode, int subLaneIndex = -1);
 
-        /** A preview of another clip (M5's hover ghosts): its notes that differ are drawn dashed. Null: none. */
+        /** A preview of another clip (M5's hover ghosts): its notes that differ are drawn dashed. Null: none. It is made
+            from the clip, the selection and the mode of now; once any of them changes (Undo, Redo, Escape, a state load,
+            a key) the next refresh takes it away, as it no longer shows what a click would do. */
         void setGhost (model::ClipPtr ghostClip);
 
         /** The hover ghosts: which preview is drawn and who owns it (the selection bar's controls, the menus). */
@@ -310,6 +313,17 @@ namespace sl::ui::roll
         PaintState state;
         model::ClipPtr ghost;
         std::unique_ptr<RollGeometry> ghostGeo;
+
+        /** What the ghost was made from: the document's clip, selection and mode when it was set (review R5T-1). */
+        struct GhostBase
+        {
+            model::ClipPtr clip;
+            std::vector<std::string> selected;
+            int mode = 0;
+            core::LaneId subLane = core::LaneId::travel;
+        };
+        GhostBase ghostBase;
+        bool ghostIsStale() const;
         GhostPreview ghosts { [this] (model::ClipPtr c) { setGhost (std::move (c)); } };
         ViewKey lastKey;
         bool haveKey = false;

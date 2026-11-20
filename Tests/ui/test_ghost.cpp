@@ -12,6 +12,8 @@
 //   SnapshotPublisher's submit count, the clip and the undo history are unchanged; the roll draws the ghost while the
 //   mouse is there and none once it leaves; the hint bar shows the control's text meanwhile.
 // - Pictures for review: a ghost from the Shapes drawer, and one from a lane menu.
+// - The fix pass: a ghost goes once the clip, the selection or the mode it was made from changes (Undo, Redo, Escape, a
+//   state load, a mode change); the Connect and Disconnect ghosts draw their slide links, with pictures for review.
 
 #include <juce_audio_processors/juce_audio_processors.h>
 
@@ -40,6 +42,8 @@
 #include "ui/roll/RollView.h"
 #include "ui/roll/SelectionBar.h"
 
+#include <cmath>
+#include <cstdlib>
 #include <functional>
 #include <map>
 #include <optional>
@@ -546,6 +550,222 @@ SL_TEST ("ui", ghostsInTheEditor)
            fmt ("a click on Swell publishes (%d submits) and is one undo step \"%s\"", (int) (proc.getSnapshotPublisher().stats().submitted - published0),
                 proc.undoLabel().value_or ("").c_str()));
 }
+
+//==================================================================================================
+// The M5 fix pass: a ghost goes with the clip it was made from (R5T-1); the Connect ghosts draw their links (P5).
+
+SL_TEST ("ui", ghostsGoWithTheirClip)
+{
+    section ("A ghost goes when the clip, the selection or the mode changes under it (review R5T-1): Undo, Redo, Escape, a state load and a "
+             "mode change each take it away at once; with nothing changed the editor's timer keeps it");
+
+    EditorRig r;
+    auto& view = r.view();
+    auto& roll = r.roll();
+    auto& bar = r.bar();
+    auto& proc = r.proc;
+    roll.setMenusShown (false);
+    roll.selectAll();
+    view.setMode (5);
+    bar.getDrawerButton (ToolSettings::Drawer::shapes).onClick();
+    r.editor->refreshNow();
+
+    // the mouse on a control of the open drawer (looked up each time) and off it
+    auto control = [&bar] (const juce::String& text) -> juce::Component*
+    {
+        if (auto* shapes = dynamic_cast<ui::roll::ShapesDrawer*> (bar.getOpenDrawer()))
+            return shapes->findButton (text);
+        if (auto* tools = dynamic_cast<ui::roll::ToolsDrawer*> (bar.getOpenDrawer()))
+            return &tools->getButton (text);
+        return nullptr;
+    };
+    auto hover = [&] (const juce::String& text)
+    {
+        auto* c = control (text);
+        if (c == nullptr || bar.getOpenDrawer() == nullptr)
+            return false;
+        bar.getOpenDrawer()->getHooks().enter (*c);
+        return roll.getPaintState().ghost != nullptr && roll.getGhosts().isShown();
+    };
+    auto leave = [&] (const juce::String& text)
+    {
+        if (auto* c = control (text); c != nullptr && bar.getOpenDrawer() != nullptr)
+            bar.getOpenDrawer()->getHooks().exit (*c);
+    };
+    auto gone = [&roll] { return roll.getPaintState().ghost == nullptr && ! roll.getGhosts().isShown(); };
+
+    // Swell (one step), then the mouse on Ramp up: its ghost is Ramp up on Swell's notes
+    if (auto* shapes = dynamic_cast<ui::roll::ShapesDrawer*> (bar.getOpenDrawer()))
+        if (auto* swell = shapes->findShape (model::ShapeKey::swell))
+            swell->onClick();
+    r.editor->refreshNow();
+    const bool shown = hover ("Ramp up");
+    r.editor->refreshNow();
+    const bool stays = ! gone();
+    roll.undo();   // Ctrl+Z with Keys on, or the Undo button: the clip before Swell
+    const bool afterUndo = gone();
+    leave ("Ramp up");
+    const bool shownAgain = hover ("Ramp up");
+    roll.redo();
+    const bool afterRedo = gone();
+    leave ("Ramp up");
+    hover ("Ramp up");
+    roll.clearSelection();   // Escape
+    const bool afterEscape = gone();
+    leave ("Ramp up");
+
+    // a state load (Cubase opening a project, or its own undo): the editor sees the new clip on its timer
+    roll.selectAll();
+    r.editor->refreshNow();
+    const bool shownBeforeLoad = hover ("Ramp up");
+    juce::MemoryBlock saved;
+    proc.getStateInformation (saved);
+    proc.setStateInformation (saved.getData(), (int) saved.getSize());
+    r.editor->refreshNow();
+    const bool afterLoad = gone();
+    leave ("Ramp up");
+
+    // a mode change under Reverse's ghost (the Tools drawer stays as it is: its Reverse would act on another lane now)
+    roll.selectAll();
+    bar.getDrawerButton (ToolSettings::Drawer::tools).onClick();
+    r.editor->refreshNow();
+    const bool shownReverse = hover ("Reverse");
+    view.setMode (3);
+    const bool afterMode = gone();
+    leave ("Reverse");
+
+    check (shown && stays && afterUndo && shownAgain && afterRedo && afterEscape,
+           fmt ("the mouse on Ramp up after Swell draws its ghost (%d), which the timer keeps (%d); Undo takes it away (%d); again (%d), Redo "
+                "takes it away (%d); Escape too (%d)", (int) shown, (int) stays, (int) afterUndo, (int) shownAgain, (int) afterRedo,
+                (int) afterEscape));
+    check (shownBeforeLoad && afterLoad && shownReverse && afterMode,
+           fmt ("a state load takes Ramp up's ghost away at the next tick (%d, %d); a mode change takes Reverse's away (%d, %d)",
+                (int) shownBeforeLoad, (int) afterLoad, (int) shownReverse, (int) afterMode));
+}
+
+namespace
+{
+    /** Pixels near at (r around it) that differ between two pictures of the same size. */
+    int changedNear (const juce::Image& a, const juce::Image& b, juce::Point<int> at, int radius)
+    {
+        if (a.getBounds() != b.getBounds())
+            return -1;
+        int n = 0;
+        const auto area = juce::Rectangle<int> (at.x - radius, at.y - radius, 2 * radius + 1, 2 * radius + 1).getIntersection (a.getBounds());
+        const juce::Image::BitmapData pa (a, juce::Image::BitmapData::readOnly), pb (b, juce::Image::BitmapData::readOnly);
+        for (int y = area.getY(); y < area.getBottom(); ++y)
+            for (int x = area.getX(); x < area.getRight(); ++x)
+            {
+                const auto ca = pa.getPixelColour (x, y), cb = pb.getPixelColour (x, y);
+                const int d = std::abs ((int) ca.getRed() - (int) cb.getRed()) + std::abs ((int) ca.getGreen() - (int) cb.getGreen())
+                            + std::abs ((int) ca.getBlue() - (int) cb.getBlue());
+                n += d > 24 ? 1 : 0;
+            }
+        return n;
+    }
+
+    /** A (C3, beats 0 to 1) and B (C4, beats 2 to 3), both selected, in Build with the Connect drawer open: the roll before
+        and with Nearest's ghost (it slides A into B across the gap), then with that link made, before and with Disconnect's
+        ghost. */
+    struct LinkShots
+    {
+        juce::Image without, connect, linked, disconnect;
+        std::vector<ui::roll::RollPainter::GhostLink> connectLinks, disconnectLinks;
+        juce::Point<int> connectMid, crossAt;   // editor pixels: the middle of Nearest's link, Disconnect's cross
+        double bw = 0.0, yA = 0.0, yB = 0.0;     // roll pixels: a beat, where A ends now, B's row
+        bool ok = false;
+    };
+
+    LinkShots shootLinks (ThemeId theme)
+    {
+        LinkShots out;
+        EditorRig r (theme);
+        auto& view = r.view();
+        auto& roll = r.roll();
+        auto& bar = r.bar();
+        auto& proc = r.proc;
+        roll.setMenusShown (false);
+        model::Clip clip = model::newClip (4.0);
+        clip.notes.push_back (std::make_shared<const model::Note> (model::mkNote (60.0, 0.0, 1.0, "A")));
+        clip.notes.push_back (std::make_shared<const model::Note> (model::mkNote (72.0, 2.0, 1.0, "B")));
+        proc.editClip ("Start", clip);
+        proc.getDocument().setSelection ({ "A", "B" }, std::string ("A"));
+        view.setMode (1);
+        const auto& geo = roll.getGeometry();
+        roll.setScroll (0.0, geo.cy (66.0) - geo.viewHeight() / 2.0);
+        roll.edited();
+        bar.getDrawerButton (ToolSettings::Drawer::connect).onClick();
+        r.editor->refreshNow();
+        auto* connect = dynamic_cast<ui::roll::ConnectDrawer*> (bar.getOpenDrawer());
+        if (connect == nullptr)
+            return out;
+        const auto toEditor = [&roll, &geo] (double x, double y)
+        {
+            const auto v = geo.toView (x, y);
+            const auto canvas = roll.getCanvasArea() + roll.getPosition();
+            return juce::Point<int> (canvas.getX() + juce::roundToInt (v.x), canvas.getY() + juce::roundToInt (v.y));
+        };
+        auto picture = [&r] { return r.editor->createComponentSnapshot (r.editor->getLocalBounds(), true, 1.0f); };
+        out.bw = geo.beatWidth();
+        out.yB = geo.cy (72.0);
+        if (const auto c = proc.getDocument().current(); c != nullptr && ! c->notes.empty())
+            out.yA = geo.baseYAt (*c->notes.front(), 1.0);
+
+        out.without = picture();
+        auto& nearest = connect->getButton ("Nearest");
+        connect->getHooks().enter (nearest);
+        r.editor->refreshNow();
+        out.connect = picture();
+        out.connectLinks = ui::roll::RollPainter (roll.getPaintState()).ghostLinks();
+        if (! out.connectLinks.empty())
+        {
+            const auto& l = out.connectLinks.front();
+            out.connectMid = toEditor ((l.x1 + l.x2) / 2.0, (l.y1 + l.y2) / 2.0);
+        }
+        connect->getHooks().exit (nearest);
+
+        nearest.onClick();
+        r.editor->refreshNow();
+        out.linked = picture();
+        auto& disconnect = connect->getButton ("Disconnect");
+        connect->getHooks().enter (disconnect);
+        r.editor->refreshNow();
+        out.disconnect = picture();
+        out.disconnectLinks = ui::roll::RollPainter (roll.getPaintState()).ghostLinks();
+        if (! out.disconnectLinks.empty())
+        {
+            const auto& l = out.disconnectLinks.front();
+            out.crossAt = toEditor ((l.x1 + l.x2) / 2.0, (l.y1 + l.y2) / 2.0);
+        }
+        connect->getHooks().exit (disconnect);
+        out.ok = true;
+        return out;
+    }
+}
+
+SL_TEST ("ui", ghostSlideLinks)
+{
+    section ("The Connect and Disconnect ghosts draw their slide links (review P5, sl-ui-panels.js decorate): a dashed line from where the note "
+             "ends to the start of the note the preview slides it into, with a dot there; a cross half way along a link the preview takes away");
+
+    const auto s = shootLinks (ThemeId::dark);
+    const auto within = [] (double a, double b) { return std::abs (a - b) < 1e-6; };
+    const bool line = s.ok && s.connectLinks.size() == 1 && ! s.connectLinks[0].removed && within (s.connectLinks[0].x1, s.bw)
+                      && within (s.connectLinks[0].y1, s.yA) && within (s.connectLinks[0].x2, 2.0 * s.bw) && within (s.connectLinks[0].y2, s.yB);
+    const int linePixels = s.ok ? changedNear (s.connect, s.without, s.connectMid, 6) : -1;
+    check (line && linePixels > 3,
+           fmt ("Nearest's ghost: one link from A's end (beat 1) to B's start (beat 2, C4's row) (%d); drawn half way along it (%d pixels change "
+                "within 6 px of its middle)", (int) line, linePixels));
+    const bool cross = s.ok && s.disconnectLinks.size() == 1 && s.disconnectLinks[0].removed && within (s.disconnectLinks[0].x1, s.bw)
+                       && within (s.disconnectLinks[0].x2, 2.0 * s.bw) && within (s.disconnectLinks[0].y2, s.yB);
+    const int crossPixels = s.ok ? changedNear (s.disconnect, s.linked, s.crossAt, 6) : -1;
+    check (cross && crossPixels > 3,
+           fmt ("with A sliding into B, Disconnect's ghost: a cross half way along the link it takes away (%d); drawn (%d pixels change within "
+                "6 px of it)", (int) cross, crossPixels));
+}
+
+SL_SNAPSHOT (m5_ghost_connect_dark)     { return shootLinks (ThemeId::dark).connect; }
+SL_SNAPSHOT (m5_ghost_disconnect_light) { return shootLinks (ThemeId::light).disconnect; }
 
 //==================================================================================================
 // Pictures for review: a ghost from the Shapes drawer (Swell on Tone), and from the Formant lane menu (Ramp up).

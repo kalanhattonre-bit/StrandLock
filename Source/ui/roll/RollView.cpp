@@ -598,6 +598,18 @@ namespace sl::ui::roll
 
     void RollView::refresh()
     {
+        // A ghost made from another clip, selection or mode than the document holds now no longer shows what a click
+        // would do: Undo, Redo, Escape, a key or a state load changed them under it (review R5T-1). The prototype draws
+        // its drawer again on each of these, which takes a drawer button's ghost away; here every ghost goes, and the
+        // mouse brings it back by entering the control again.
+        if (ghost != nullptr && ghostIsStale())
+        {
+            ghosts.clear();           // its owner lets go: setGhost (nullptr), which refreshes
+            if (ghost != nullptr)
+                setGhost (nullptr);   // one set without the preview (the tests)
+            return;
+        }
+
         auto& set = gestures->settings();
         set.inst = processor.readInst();
         set.bpm = hostBpm.value_or (120.0);
@@ -806,8 +818,23 @@ namespace sl::ui::roll
             if (ghostGeo == nullptr)
                 ghostGeo = std::make_unique<RollGeometry>();
             ghostGeo->setClip (ghost);
+            // what it was made from (the preview's model call read the document just now)
+            const auto& document = processor.getDocument();
+            const auto st = document.rollState();
+            ghostBase.clip = document.current();
+            ghostBase.selected = st.selected;
+            ghostBase.mode = st.mode;
+            ghostBase.subLane = st.subLane;
         }
         refresh();
+    }
+
+    bool RollView::ghostIsStale() const
+    {
+        const auto& document = processor.getDocument();
+        const auto st = document.rollState();
+        return document.current() != ghostBase.clip || st.selected != ghostBase.selected || st.mode != ghostBase.mode
+            || (st.mode == 8 && st.subLane != ghostBase.subLane);
     }
 
     //==============================================================================================

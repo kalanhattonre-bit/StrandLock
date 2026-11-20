@@ -84,6 +84,19 @@ namespace sl::ui::roll
         /** What is drawn over the notes, in sl-ui.js's order: the slide links, the handles, the ghost, the box. */
         void paintOverlay (juce::Graphics&) const;
 
+        /** A slide link the ghost would make or take away (sl-ui-panels.js decorate, "the ghost's slide links"): a note
+            whose ghost slides into another note than it does now draws a dashed line from where it ends now to the start
+            of the note the ghost slides it into, with a dot there; a note whose ghost slides nowhere draws a cross half
+            way along the link it has now. In roll pixels. */
+        struct GhostLink
+        {
+            double x1 = 0.0, y1 = 0.0, x2 = 0.0, y2 = 0.0;
+            bool removed = false;   // a cross half way from (x1, y1) to (x2, y2), not a line and a dot
+        };
+
+        /** The ghost's slide links, in the clip's note order (none without a ghost). */
+        std::vector<GhostLink> ghostLinks() const;
+
         /** The readout box, with the Graphics at the view's origin (visible: the view in roll pixels). */
         void paintReadout (juce::Graphics&, juce::Rectangle<double> visible) const;
 
