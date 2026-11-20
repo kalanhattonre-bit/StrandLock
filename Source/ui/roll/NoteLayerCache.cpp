@@ -16,7 +16,7 @@ namespace sl::ui::roll
             && exactlyEqual (beatWidth, o.beatWidth) && exactlyEqual (rowHeight, o.rowHeight)
             && theme == o.theme && mode == o.mode && lane == o.lane && dimRefresh == o.dimRefresh
             && exactlyEqual (bpm, o.bpm) && exactlyEqual (vibRate, o.vibRate) && exactlyEqual (glideTime, o.glideTime)
-            && glideMode == o.glideMode;
+            && glideMode == o.glideMode && decor == o.decor;
     }
 
     NoteLayerCache::Key NoteLayerCache::keyOf (const PaintState& st)
@@ -41,6 +41,7 @@ namespace sl::ui::roll
         const auto lane = st.roll.activeLane();
         k.lane = lane.has_value() ? core::laneIndex (*lane) : -1;
         k.dimRefresh = st.inst.refresh.mode == core::RefreshMode::smooth;
+        k.decor = st.decorKey;
         return k;
     }
 
@@ -57,6 +58,13 @@ namespace sl::ui::roll
             r.glideLen = g->len;
             r.glideCurve = g->curve;
         }
+        // M6: a note's slide warning sits where the note it slides into starts, so that note's move redraws it
+        if (! n->glideTo.empty())
+            if (const auto m = st.noteById (n->glideTo))
+            {
+                r.linked = true;
+                r.linkStart = m->s;
+            }
         r.order = order;
         return r;
     }
@@ -103,7 +111,8 @@ namespace sl::ui::roll
             const Shown* was = it != shown.end() ? &it->second : nullptr;
             if (was != nullptr && was->note == n && was->selected == now.selected && was->primary == now.primary
                 && was->glide == now.glide && juce::exactlyEqual (was->glideD, now.glideD)
-                && juce::exactlyEqual (was->glideLen, now.glideLen) && juce::exactlyEqual (was->glideCurve, now.glideCurve))
+                && juce::exactlyEqual (was->glideLen, now.glideLen) && juce::exactlyEqual (was->glideCurve, now.glideCurve)
+                && was->linked == now.linked && juce::exactlyEqual (was->linkStart, now.linkStart))
             {
                 inOrder = inOrder && was->order > lastOrder;
                 lastOrder = was->order;

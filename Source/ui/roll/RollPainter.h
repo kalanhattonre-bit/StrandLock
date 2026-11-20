@@ -11,7 +11,12 @@
 //
 // It also says where each piece can draw (noteBounds, overlayBounds), so the view repaints only what changed and
 // the NoteLayerCache draws again only the notes that changed. Message thread only.
+//
+// M6 (plan 7.8 T2, decision 5): after each strand, the note's decorations (sl-ui-panels.js decorate, drawn in every
+// mode with the prototype's alphas): its thumbnail above the line and its chevrons under it (NoteDecor), the dot of a
+// note with settings of its own, and the warning where its slide goes into a note that starts well inside it.
 
+#include "NoteDecor.h"
 #include "RollGeometry.h"
 #include "RollGestures.h"
 
@@ -21,6 +26,7 @@
 #include "model/Clip.h"
 #include "ui/Theme.h"
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -44,6 +50,8 @@ namespace sl::ui::roll
         double snap = 0.25;                      // the Grid in beats (0 = Free: the grid shows sixteenths)
         model::ClipPtr ghost;                    // a preview of another clip (M5's hover ghosts); null = none
         const RollGeometry* ghostGeo = nullptr;  // the ghost's own geometry (its glides), with the same zoom
+        NoteDecor* decor = nullptr;              // the notes' chevrons and thumbnails (M6); null = none drawn
+        std::uint64_t decorKey = 0;              // NoteDecor::key of the instrument: what every note's decorations read
         std::optional<Readout> readout;          // the live readout beside the pointer (roll pixels)
         std::optional<RollGestures::Box> box;    // a box being dragged (roll pixels): it selects notes or picks nodes
 
@@ -73,11 +81,35 @@ namespace sl::ui::roll
         std::vector<model::NotePtr> visibleNotes (juce::Rectangle<double> visible) const;
 
         /** One note (sl-ui.js drawNote): the ribbons of the sound lanes (the active lane last and stronger), the
-            Travel middle line, the note line with its squiggle, the start dot and the end dot. */
+            Travel middle line, the note line with its squiggle, the start dot and the end dot; then its decorations. */
         void paintNote (juce::Graphics&, const model::Note&, bool selected) const;
 
+        /** What a note's decorations draw (sl-ui-panels.js decorate, M6 decision 5), in roll pixels, in the lane-sample
+            colour unless it says: the thumbnail's columns in the wave colour (none without a sound, or on a note under
+            12 px), the chevrons under the line (the Mirror ones at half strength), two bars where it stands still, a
+            square where it falls silent (At the end: Stop), Scatter's jumps (at 0.85 of the strength), the dot of a note
+            with settings of its own, and the warning where its slide goes into a note that starts well inside it. */
+        struct Decorations
+        {
+            struct Chevron
+            {
+                double x = 0.0, y = 0.0;
+                int dir = 1;          // 1 points right (forwards), -1 left
+                double scale = 1.0;
+            };
+
+            float thumbAlpha = 0.0f, strength = 0.0f;
+            std::vector<juce::Rectangle<float>> columns;
+            std::vector<Chevron> chevrons, mirrors;
+            std::vector<juce::Rectangle<float>> stops, jumps;
+            std::optional<juce::Rectangle<float>> ownDot;
+            std::optional<juce::Point<double>> warning;   // where the target starts, on this note's line
+        };
+
+        Decorations decorations (const model::Note& n, bool selected) const;
+
         /** Where a note's drawing can reach (roll pixels): its line, ribbons and dots, plus room for the line's
-            mitred joins and the antialiased edge. */
+            mitred joins and the antialiased edge, and its decorations under the line. */
         juce::Rectangle<double> noteBounds (const model::Note& n) const { return noteBoundsIn (*s.geo, n); }
         static juce::Rectangle<double> noteBoundsIn (const RollGeometry&, const model::Note&);
 
@@ -113,7 +145,12 @@ namespace sl::ui::roll
         /** The padding noteBounds adds around a note's line, ribbons and dots. */
         static constexpr double notePad = 14.0;
 
+        /** The padding under the line's lowest point: the decorations reach 15.5 px below the line (a Mirror chevron
+            under a chevron), plus the antialiased edge. */
+        static constexpr double decorPad = 18.0;
+
     private:
+        void paintDecorations (juce::Graphics&, const model::Note&, bool selected) const;
         void paintLinks (juce::Graphics&) const;
         void paintHandles (juce::Graphics&) const;
         void paintGhost (juce::Graphics&) const;

@@ -45,6 +45,7 @@ namespace sl::ui
     class SlidesTab;
     class SampleTab;
     class MacrosTab;
+    class NoteSettingsTab;
 
     /** The top bar's Undo and Redo buttons: a curved arrow (shell.html's undo and redo signs), drawn as a path. */
     class HistoryButton final : public FlatButton
@@ -150,6 +151,7 @@ namespace sl::ui
         SlidesTab& getSlidesTab() noexcept { return *slides; }
         SampleTab& getSampleTab() noexcept { return *samplePanel; }
         MacrosTab& getMacrosTab() noexcept { return *macrosPanel; }
+        NoteSettingsTab& getNoteSettingsTab() noexcept { return *noteSettings; }
         DiagnosticsPage& getDiagnosticsPage() noexcept { return *diagPage; }
         WaveStrip& getStrip() noexcept { return strip; }
         roll::RollView& getRoll() noexcept { return roll; }
@@ -232,6 +234,7 @@ namespace sl::ui
         SlidesTab* slides = nullptr;         // panels[slidesTab] (M5 S3)
         SampleTab* samplePanel = nullptr;    // panels[sampleTab] (M6 T1)
         MacrosTab* macrosPanel = nullptr;    // panels[macrosTab] (M6 T1)
+        NoteSettingsTab* noteSettings = nullptr;   // panels[noteTab] (M6 T2)
         juce::Component paneContent;   // every panel, so a theme switch and the focus rules reach the hidden ones too
         juce::Viewport paneViewport, diagViewport;
         std::unique_ptr<DiagnosticsPage> diagPage;

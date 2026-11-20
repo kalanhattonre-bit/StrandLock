@@ -10,7 +10,8 @@
 // and the new bounds of each note that changed; the next paint clears each marked rectangle and draws every note
 // that reaches it again, in the drawing order, the clear and the notes through one clip. Everything else the notes
 // depend on (the view's size, scroll and zoom, the theme, the mode, the tempo, the vibrato rate, the slide
-// settings, the device scale) is the Key: when it changes, the whole layer is drawn again. So is a change of more
+// settings, the device scale, and since M6 what the decorations read: NoteDecor::key) is the Key: when it changes, the
+// whole layer is drawn again. So is a change of more
 // than maxChangedNotes notes, or of the order of notes that did not change.
 //
 // A partial update draws exactly what a full one draws inside the marked rectangles (the same notes, the same
@@ -26,6 +27,7 @@
 
 #include <juce_graphics/juce_graphics.h>
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -44,6 +46,7 @@ namespace sl::ui::roll
             bool dimRefresh = false;
             double bpm = 0.0, vibRate = 0.0, glideTime = 0.0;
             int glideMode = -1;
+            std::uint64_t decor = 0;   // NoteDecor::key: the instrument fields and the sound the decorations read (M6)
 
             bool operator== (const Key&) const noexcept;
             bool operator!= (const Key& o) const noexcept { return ! (*this == o); }
@@ -93,6 +96,8 @@ namespace sl::ui::roll
             bool selected = false, primary = false;
             bool glide = false;
             double glideD = 0.0, glideLen = 0.0, glideCurve = 0.0;
+            bool linked = false;                             // it slides into a note of the clip (M6: its warning mark
+            double linkStart = 0.0;                          // follows where that note starts)
             std::optional<juce::Rectangle<double>> bounds;   // where its drawing is, when it was drawn or changed
             int order = 0;                                   // its place in the clip
         };

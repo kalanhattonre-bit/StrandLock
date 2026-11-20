@@ -207,6 +207,15 @@ namespace sl::ui::roll
             pushes no step. False when refused. The lane menu's items act through it, as the prototype's do. */
         bool act (model::Clip proposed, const std::string& label);
 
+        /** A live slider session of a control outside the bar (M6: the Note settings tab's Spot, Range and Velocity;
+            sl-ui-panels.js liveRun, which those sliders share with the bar): every move rebuilds the result from the clip
+            the session started from (make), shown and played with no undo step; final (the release) is one step called
+            label. key names the session ("ns:pos"); another selection, an act or another session ends it. */
+        void live (const std::string& key, const std::string& label, const std::function<model::Clip (const model::Clip&)>& make, bool final)
+        {
+            liveRun (key, label, make, final);
+        }
+
         /** What the document holds now, after the roll or Undo changed it: a live slider session the selection or the
             clip left behind ends (sl-ui-panels.js wire), and a lane mode's lane becomes the Lane. Another clip, selection,
             primary note, mode or lane reads the primary note's generator into the drawers' settings (loadGenValues); a

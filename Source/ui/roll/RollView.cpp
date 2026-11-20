@@ -486,7 +486,8 @@ namespace sl::ui::roll
             && exactlyEqual (beatWidth, o.beatWidth) && exactlyEqual (rowHeight, o.rowHeight)
             && mode == o.mode && lane == o.lane && exactlyEqual (snap, o.snap) && key == o.key && scale == o.scale
             && refreshMode == o.refreshMode && glideMode == o.glideMode && exactlyEqual (glideTime, o.glideTime)
-            && exactlyEqual (vibRate, o.vibRate) && exactlyEqual (bpm, o.bpm) && bars == o.bars && beatsPerBar == o.beatsPerBar;
+            && exactlyEqual (vibRate, o.vibRate) && exactlyEqual (bpm, o.bpm) && bars == o.bars && beatsPerBar == o.beatsPerBar
+            && decor == o.decor;
     }
 
     RollHost RollView::makeHost()
@@ -619,6 +620,10 @@ namespace sl::ui::roll
         gestures->sync();
         const auto& geo = gestures->geometry();
 
+        // the notes' decorations (M6): the sound the thumbnails read, the notes whose simulations are kept
+        decor.setSound (processor.getCurrentSound());
+        decor.setClip (geo.getClip());
+
         PaintState next;
         next.colours = &theme.colours();
         next.geo = &geo;
@@ -630,6 +635,8 @@ namespace sl::ui::roll
         next.snap = set.snap;
         next.readout = gestures->readout();
         next.box = gestures->box();
+        next.decor = &decor;
+        next.decorKey = decor.key (set.inst);
         if (ghost != nullptr && ghostGeo != nullptr)
         {
             ghostGeo->setInst (set.inst);
@@ -703,6 +710,7 @@ namespace sl::ui::roll
         k.bpm = geo.getBpm();
         k.bars = state.clip != nullptr ? state.clip->bars : 0;
         k.beatsPerBar = state.clip != nullptr ? state.clip->beatsPerBar : 0;
+        k.decor = state.decorKey;
         return k;
     }
 

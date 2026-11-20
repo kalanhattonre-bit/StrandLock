@@ -7,16 +7,19 @@
 // What the mouse does on the waveform, as in the prototype:
 // - drag across it: a new Region there;
 // - drag an orange edge: move that edge; drag the band along the top of the Region: move the whole Region;
-// - hold the mouse down inside the Region: hear that spot (an audition at the root, from there; the integration
-//   step plays the command queue); outside the Region the readout says where you are;
+// - hold the mouse down inside the Region: hear that spot (an audition at the root, from there, through the command
+//   queue); outside the Region the readout says where you are;
+// - a short click (under 300 ms) with notes selected sets their Start there (M6: model::setNoteSample, one undo step
+//   "Set start", and a toast); outside the Region it says notes start inside it;
 // - the wheel zooms around the pointer, Shift + wheel (or a sideways wheel) moves the view; when zoomed in, the
 //   bar along the bottom shows the view and dragging it moves the view.
 // A Region drag is one host gesture per edge and one undo step ("Region") when the mouse lets go; StrandLock keeps
 // the exact f64 edges it set (INST, plan 2.2) while the parameters hold their floats.
 //
-// The heads' playheads (numbered lines with direction arrows) and the grains (dots) come from the engine's
-// display frames, when the processor has a DisplaySlot (the integration step makes it); until then none are drawn.
+// The heads' playheads (numbered lines with direction arrows) and the grains (dots) come from the engine's display
+// frames, through the HeadsOverlay (M6), with the selected notes' Start markers under them.
 
+#include "HeadsOverlay.h"
 #include "WavePeaks.h"
 
 #include "engine/DisplayFrame.h"
@@ -68,6 +71,10 @@ namespace sl::ui
         /** Where the strip's toasts go (MainView shows them): the text and how long, in ms. */
         std::function<void (const juce::String&, int)> onToast;
 
+        /** Called after the strip changed the clip (a click set the selected notes' Start): MainView refreshes the roll
+            and the rows that show the notes. */
+        std::function<void()> onEdit;
+
         //==========================================================================================
         // For the tests.
 
@@ -85,8 +92,11 @@ namespace sl::ui
         float xOf (double pos) const noexcept;
         double posOf (float x) const noexcept;
         /** How many heads and grains the last paint drew. */
-        int headsDrawn() const noexcept { return lastHeads; }
-        int grainsDrawn() const noexcept { return lastGrains; }
+        int headsDrawn() const noexcept { return overlay.headsDrawn(); }
+        int grainsDrawn() const noexcept { return overlay.grainsDrawn(); }
+
+        /** The live heads and the Start markers (M6). */
+        HeadsOverlay& getOverlay() noexcept { return overlay; }
 
         void paint (juce::Graphics&) override;
         void resized() override;
@@ -128,7 +138,8 @@ namespace sl::ui
         void auditionStop();
         void toast (const juce::String& text, int ms = 2600);
         void paintWave (juce::Graphics&, juce::Rectangle<float> area);
-        void paintHeads (juce::Graphics&, juce::Rectangle<float> area);
+        void setStartAt (double pos, bool inside);
+        bool updateStarts();
 
         const Theme& theme;
         StrandLockProcessor& processor;
@@ -162,9 +173,8 @@ namespace sl::ui
         juce::String readout;
         std::unique_ptr<ParamBinding> startBinding, endBinding;
 
-        // The heads from the engine (a copy of the newest frame; null until the integration step sends one).
-        std::unique_ptr<engine::DisplayFrame> frame;
-        int lastHeads = 0, lastGrains = 0;
+        // The heads from the engine (a copy of the newest frame) and the selected notes' Start markers.
+        HeadsOverlay overlay;
 
         juce::Rectangle<int> waveArea;
         juce::ComboBox soundMenu;

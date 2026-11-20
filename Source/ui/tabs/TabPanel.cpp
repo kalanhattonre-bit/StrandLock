@@ -106,6 +106,26 @@ namespace sl::ui
         }
     }
 
+    bool TabPanel::resizeItem (const juce::Component& item, int width)
+    {
+        for (auto& it : items)
+            if (it.component == &item)
+            {
+                if (it.width == width)
+                    return false;
+                it.width = width;
+                return true;
+            }
+        return false;
+    }
+
+    void TabPanel::layoutChanged()
+    {
+        resized();
+        if (onLayoutChange)
+            onLayoutChange();
+    }
+
     int TabPanel::heightFor (int width) const
     {
         const auto area = juce::Rectangle<int> (0, 0, juce::jmax (1, width), 100000).reduced (padX, padY);

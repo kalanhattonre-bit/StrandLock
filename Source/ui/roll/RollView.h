@@ -28,6 +28,7 @@
 // are the view's too: what a control or a menu item would do, drawn dashed, never applied.
 
 #include "GhostPreview.h"
+#include "NoteDecor.h"
 #include "NoteLayerCache.h"
 #include "PianoStrip.h"
 #include "RollGeometry.h"
@@ -41,6 +42,7 @@
 #include "ui/Theme.h"
 
 #include <array>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -218,6 +220,7 @@ namespace sl::ui::roll
         const RollGeometry& getGeometry() const noexcept { return gestures->geometry(); }
         NoteLayerCache& getCache() noexcept { return cache; }
         const PaintState& getPaintState() const noexcept { return state; }
+        NoteDecor& getDecor() noexcept { return decor; }
         juce::Component& getCanvas() noexcept;
         Ruler& getRuler() noexcept { return ruler; }
         PianoStrip& getPiano() noexcept { return piano; }
@@ -270,6 +273,7 @@ namespace sl::ui::roll
             int key = -1, scale = -1, refreshMode = -1, glideMode = -1;
             double glideTime = 0.0, vibRate = 0.0, bpm = 0.0;
             int bars = 0, beatsPerBar = 0;
+            std::uint64_t decor = 0;   // what the notes' decorations read (M6: NoteDecor::key)
 
             bool operator== (const ViewKey&) const noexcept;
             bool operator!= (const ViewKey& o) const noexcept { return ! (*this == o); }
@@ -310,6 +314,7 @@ namespace sl::ui::roll
 
         NoteLayerCache cache;
         NoteLayerCache::Change lastChange;
+        NoteDecor decor;   // the notes' chevrons and thumbnails (M6): the sound's peak bins, each note's simulation
         PaintState state;
         model::ClipPtr ghost;
         std::unique_ptr<RollGeometry> ghostGeo;

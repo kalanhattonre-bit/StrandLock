@@ -144,6 +144,8 @@ namespace
 
         Rig()
         {
+            // the notes' thumbnails read the sound (M6): start from it, so its arrival cannot redraw the roll mid-test
+            proc.waitForSounds();
             proc.getDocument().replace (std::make_shared<const model::Clip> (denseClip()));
             proc.getDocument().setSelection ({ noteId (10, 8) }, noteId (10, 8));
             view = std::make_unique<RollView> (theme, proc);

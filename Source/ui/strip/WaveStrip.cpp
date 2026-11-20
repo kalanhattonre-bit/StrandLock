@@ -3,6 +3,8 @@
 #include "PluginProcessor.h"
 #include "core/JsCompat.h"
 #include "core/Music.h"
+#include "model/NoteSettings.h"
+#include "ui/roll/RollGeometry.h"
 #include "params/ParamIds.h"
 #include "params/ParameterLayout.h"
 
@@ -243,9 +245,14 @@ namespace sl::ui
         const float centsNow = params::plainValueOf (processor.getParam (params::P::rootCents));
 
         const bool newSound = now != sound;
+        const bool startsMoved = updateStarts();
         if (! newSound && juce::exactlyEqual (r.start, exactStart) && juce::exactlyEqual (r.end, exactEnd) && rootNow == root
             && juce::exactlyEqual (centsNow, cents))
+        {
+            if (startsMoved)
+                repaint (waveArea);
             return;
+        }
 
         if (newSound)
         {
@@ -275,17 +282,80 @@ namespace sl::ui
     {
         if (f == nullptr)
         {
-            if (frame != nullptr)
+            if (overlay.getFrame() != nullptr)
             {
-                frame.reset();
+                overlay.setFrame (nullptr);
                 repaint();
             }
             return;
         }
-        if (frame == nullptr)
-            frame = std::make_unique<engine::DisplayFrame>();
-        *frame = *f;
+        overlay.setFrame (f);
         repaint (waveArea);
+    }
+
+    bool WaveStrip::updateStarts()
+    {
+        // sl-ui.js drawStrip: the Start markers of the selected notes (in time order, the first 64) that start at a spot
+        // in the Region or at a random one
+        std::vector<HeadsOverlay::StartMark> marks;
+        const auto& doc = processor.getDocument();
+        const auto clip = doc.current();
+        const auto st = doc.rollState();
+        if (clip != nullptr && ! st.selected.empty())
+            for (const auto& n : roll::RollGeometry::selectedNotes (*clip, st))
+            {
+                if ((int) marks.size() >= HeadsOverlay::maxStarts)
+                    break;
+                const auto& s = n->sample.start;
+                if (s.mode != model::StartMode::region && s.mode != model::StartMode::random)
+                    continue;
+                HeadsOverlay::StartMark m;
+                m.pos = s.pos;
+                m.range = s.range;
+                m.random = s.mode == model::StartMode::random;
+                marks.push_back (m);
+            }
+        return overlay.setStarts (std::move (marks));
+    }
+
+    void WaveStrip::setStartAt (double pos0, bool inside)
+    {
+        // sl-ui.js stripUp: a short click sets the Start of the selected notes there (one undo step), or says why not
+        const auto& doc = processor.getDocument();
+        const auto clip = doc.current();
+        const auto st = doc.rollState();
+        if (clip == nullptr || st.selected.empty())
+            return;
+        std::vector<std::string> ids;
+        for (const auto& n : roll::RollGeometry::selectedNotes (*clip, st))
+            ids.push_back (n->id);
+        if (ids.empty())
+            return;
+        if (! inside)
+        {
+            toast ("That spot is outside the Region, and notes start inside it. Drag across the waveform to make a Region there.", 3500);
+            return;
+        }
+        const auto R = regionNow();
+        const double pos = clampd ((pos0 - R.start) / std::max (1.0e-9, R.end - R.start), 0.0, 1.0);
+        model::StartPatch start;
+        start.mode = model::StartMode::region;
+        start.pos = pos;
+        model::SamplePatch patch;
+        patch.start = start;
+        const auto out = processor.editClip ("Set start", model::setNoteSample (*clip, ids, patch));
+        if (out.refused)
+        {
+            toast (juce::String::fromUTF8 (out.message.c_str()), 4000);
+            return;
+        }
+        updateStarts();
+        repaint (waveArea);
+        if (onEdit)
+            onEdit();
+        const int count = (int) ids.size();
+        toast ("Start set for " + juce::String (count) + (count == 1 ? " note" : " notes") + " at "
+               + juce::String ((int) core::jsRound (pos * 100.0)) + "% of the Region");
     }
 
     //==============================================================================================
@@ -451,7 +521,7 @@ namespace sl::ui
         g.reduceClipRegion (waveArea);
         const auto area = waveArea.toFloat();
         paintWave (g, area);
-        paintHeads (g, area);
+        overlay.paint (g, area, [this] (double p) { return xOf (p); }, exactStart, exactEnd, theme);
 
         // The view, when zoomed in: a bar along the bottom (drag it to move the view).
         if (viewB - viewA < 0.999)
@@ -539,64 +609,6 @@ namespace sl::ui
         }
     }
 
-    void WaveStrip::paintHeads (juce::Graphics& g, juce::Rectangle<float> area)
-    {
-        lastHeads = 0;
-        lastGrains = 0;
-        if (frame == nullptr)
-            return;
-
-        // sl-ui.js drawStrip: every head as a numbered line with its direction, every grain as a dot.
-        const float y = area.getY(), H = area.getHeight();
-        const auto headColour = theme (Tok::head), headText = theme (Tok::headTxt);
-        g.setFont (Theme::px (9.0f, true));
-        const int voices = juce::jmin ((int) frame->numVoices, engine::kDisplayVoices);
-        for (int v = 0; v < voices; ++v)
-        {
-            const auto& voice = frame->voices[v];
-            const int heads = juce::jmin ((int) voice.numHeads, engine::kMaxHeads);
-            for (int k = 0; k < heads; ++k)
-            {
-                const auto& h = voice.heads[k];
-                const float x = xOf ((double) h.pos);
-                if (! (x > area.getX() - 12.0f && x < area.getRight() + 12.0f))
-                    continue;
-                const float lv = clampf (h.level * voice.env * 1.6f, 0.0f, 1.0f);
-                const float alpha = (voice.released ? 0.45f : 1.0f) * (0.35f + 0.65f * lv);
-                g.setColour (headColour.withMultipliedAlpha (alpha));
-                g.fillRect (juce::Rectangle<float> (x - 1.0f, y + (float) band, 2.0f, H - (float) band));
-                g.fillEllipse (juce::Rectangle<float> (14.0f, 14.0f).withCentre ({ x, y + (float) band + 8.0f }));
-                juce::Path arrow;
-                const float b = y + H;
-                if (h.dir > 0)
-                    arrow.addTriangle (x + 2.0f, b - 13.0f, x + 10.0f, b - 8.0f, x + 2.0f, b - 3.0f);
-                else if (h.dir < 0)
-                    arrow.addTriangle (x - 2.0f, b - 13.0f, x - 10.0f, b - 8.0f, x - 2.0f, b - 3.0f);
-                else
-                    arrow.addRectangle (x - 3.0f, b - 11.0f, 6.0f, 6.0f);
-                g.fillPath (arrow);
-                g.setColour (headText.withMultipliedAlpha (alpha));
-                g.drawText (juce::String ((int) h.index + 1), juce::Rectangle<float> (14.0f, 14.0f).withCentre ({ x, y + (float) band + 8.0f }),
-                            juce::Justification::centred, false);
-                ++lastHeads;
-            }
-        }
-
-        const auto grain = theme (Tok::grain);
-        const int grains = juce::jmin ((int) frame->numGrains, engine::kDisplayGrains);
-        for (int i = 0; i < grains; ++i)
-        {
-            const auto& gr = frame->grains[i];
-            const float x = xOf ((double) gr.pos);
-            if (! (x >= area.getX() && x <= area.getRight()))
-                continue;
-            const float age = clampf (gr.age, 0.0f, 1.0f);
-            g.setColour (grain.withMultipliedAlpha (0.9f - 0.6f * age));
-            g.fillRect (juce::Rectangle<float> (x - 1.5f, y + (float) band + 20.0f + (H - (float) band - 34.0f) * age, 3.0f, 3.0f));
-            ++lastGrains;
-        }
-    }
-
     //==============================================================================================
     void WaveStrip::mouseDown (const juce::MouseEvent& e)
     {
@@ -642,11 +654,11 @@ namespace sl::ui
         dragPos0 = pos0;
         dragInside = pos0 >= R.start - 1.0e-9 && pos0 <= R.end + 1.0e-9;
         dragMoved = false;
-        dragAt = juce::Time::getMillisecondCounterHiRes();
+        dragAt = (double) e.eventTime.toMilliseconds();   // the event time, as the roll reads it (M6: the click rule)
         auditionStop();
         if (dragInside)
         {
-            // Hear that spot: the root note, starting there (the integration step plays the command queue).
+            // Hear that spot: the root note, starting there, through the command queue.
             auditionNote = juce::jlimit (0, 127, root);
             const double start = clampd ((pos0 - R.start) / std::max (1.0e-9, R.end - R.start), 0.0, 1.0);
             processor.getCommandQueue().push (doc::UiCommand::auditionOn (auditionNote, 0.8, start));
@@ -713,7 +725,7 @@ namespace sl::ui
         repaint();
     }
 
-    void WaveStrip::mouseUp (const juce::MouseEvent&)
+    void WaveStrip::mouseUp (const juce::MouseEvent& e)
     {
         // sl-ui.js stripUp.
         const auto d = drag;
@@ -724,8 +736,10 @@ namespace sl::ui
             return;
         if (d == Drag::click && ! dragMoved)
         {
-            // Holding the mouse was listening; a short click sets the selected notes' Start (with the roll, M4).
+            // Holding the mouse was listening; a short click (300 ms at most) sets the selected notes' Start there.
             auditionStop();
+            if ((double) e.eventTime.toMilliseconds() - dragAt <= (double) clickMs)
+                setStartAt (dragPos0, dragInside);
             return;
         }
         endRegionGesture();

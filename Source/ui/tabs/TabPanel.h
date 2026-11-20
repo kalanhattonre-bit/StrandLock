@@ -86,6 +86,13 @@ namespace sl::ui
         /** An item takes another width: the panel lays itself out again and calls onLayoutChange. */
         void setItemWidth (const juce::Component& item, int width);
 
+        /** The same without laying out (M6: the Note settings tab changes several widths, then calls layoutChanged
+            once). True when the width changed. */
+        bool resizeItem (const juce::Component& item, int width);
+
+        /** The panel lays itself out again and calls onLayoutChange. */
+        void layoutChanged();
+
         const Theme& theme;
         juce::AudioProcessorValueTreeState& state;
 

@@ -9,6 +9,7 @@
 #include "ui/roll/LaneMenu.h"
 #include "ui/tabs/CopyPasteTab.h"
 #include "ui/tabs/MacrosTab.h"
+#include "ui/tabs/NoteSettingsTab.h"
 #include "ui/tabs/SampleTab.h"
 #include "ui/tabs/SlidesTab.h"
 #include "ui/tabs/SoundTab.h"
@@ -38,7 +39,7 @@ namespace sl::ui
         const char* const kComing[] = {
             nullptr,
             nullptr,
-            "Settings for the selected notes (engine, motion, the knobs per note) arrive in M6.",
+            nullptr,
             nullptr,
             nullptr,
             "The two mod wheels, MIDI Learn and Let go arrive in M8.",
@@ -48,8 +49,6 @@ namespace sl::ui
 
         // Decision 6: a click on a tab while the window is too short for its controls
         constexpr const char* kTooShort = "This window is too short to show the tab. Make the window taller and the tab opens by itself.";
-
-        constexpr const char* kTryThis = "play C3 on your keyboard, then open the Diagnostics tab.";
 
         // The banner when the clip's lanes would need more memory than a snapshot may hold (doc/SnapshotPublisher.h).
         constexpr const char* kTooDetailed = "This clip is too detailed to play, so its notes are silent: it needs fewer notes or simpler lanes";
@@ -342,6 +341,13 @@ namespace sl::ui
             panels[slidesTab] = std::move (slidesPanel);
             panels[copyTab] = std::move (copyPanel);
         }
+        {
+            // M6 T2: the Note settings tab (S7) changes the selected notes through the roll's tools
+            auto ns = std::make_unique<NoteSettingsTab> (t, apvts, roll, processor);
+            noteSettings = ns.get();
+            noteSettings->onLayoutChange = [this] { resized(); };
+            panels[noteTab] = std::move (ns);
+        }
         for (int i = 0; i < numTabs; ++i)
             if (kComing[i] != nullptr)
                 panels[(std::size_t) i] = std::make_unique<ComingPanel> (t, kComing[i]);
@@ -377,7 +383,12 @@ namespace sl::ui
         };
         addAndMakeVisible (strip);
         strip.onToast = [this] (const juce::String& text, int ms) { showToast (text, ms); };
-        hintBar.setTryThis (kTryThis);
+        strip.onEdit = [this]
+        {
+            // a click on the waveform set the selected notes' Start (M6): the roll and the rows show it
+            roll.refresh();
+            syncRollControls();
+        };
         addAndMakeVisible (hintBar);
         toast = std::make_unique<Toast> (t);
         addChildComponent (*toast);
@@ -444,6 +455,9 @@ namespace sl::ui
             slides->onLayoutChange = nullptr;
         if (copyPaste != nullptr)
             copyPaste->onLayoutChange = nullptr;
+        if (noteSettings != nullptr)
+            noteSettings->onLayoutChange = nullptr;
+        strip.onEdit = nullptr;
         roll.onToast = nullptr;
         roll.onToastFor = nullptr;
         roll.onEdit = nullptr;
@@ -493,6 +507,7 @@ namespace sl::ui
         {
             const auto& lane = core::laneInfo (core::kSampleLanes[i]);
             auto chip = std::make_unique<FlatButton> (theme, lane.name);
+            chip->setTooltip (sampleLaneHint (core::kSampleLanes[i]));   // sl-ui.js: each chip's title is its SUB_HINT
             chip->setLaneColour (Tok::laneSample);
             chip->onClick = [this, i] { setMode (8, i); };
             addAndMakeVisible (*chip);
@@ -617,6 +632,10 @@ namespace sl::ui
         if (copyPaste != nullptr)
             copyPaste->sync();
 
+        // the Note settings tab (M6 T2): the selected notes' own settings, "mixed" where they differ
+        if (noteSettings != nullptr)
+            noteSettings->sync();
+
         // the Sample and Macros tabs (M6 T1): what each control does with the settings and the notes now
         if (samplePanel != nullptr)
             samplePanel->sync();
@@ -634,6 +653,17 @@ namespace sl::ui
 
         inspector.sync (g.settings().bpm);
         updateHint();
+
+        // Try this (U3, M6 decision 6): one suggestion for the mode, the Sample lane and the primary note's settings
+        {
+            const auto clip = processor.getDocument().current();
+            const model::Note* primary = nullptr;
+            if (clip != nullptr && ! st.primary.empty())
+                for (const auto& n : clip->notes)
+                    if (n->id == st.primary)
+                        primary = n.get();
+            hintBar.setTryThis (tryThis (st.mode, st.subLane, primary, processor.readInst()));
+        }
     }
 
     bool MainView::handleKey (const juce::KeyPress& key, bool keysNow)

@@ -347,12 +347,193 @@ namespace sl::ui::roll
         g.fillEllipse (end);
         g.setColour (T[Tok::dotFill]);
         ring (g, end, 2.0f);
+
+        // sl-ui.js runNoteDecorators: the note's decorations right after it (M6)
+        paintDecorations (g, n, isSel);
+    }
+
+    //==============================================================================================
+    // sl-ui-panels.js decorate (M6, plan 7.8 decision 5).
+
+    RollPainter::Decorations RollPainter::decorations (const model::Note& n, bool sel) const
+    {
+        Decorations out;
+        if (s.geo == nullptr)
+            return out;
+        const auto& geo = *s.geo;
+        const auto& I = s.inst;
+        const int mode = s.roll.mode;
+        const double bw = geo.beatWidth(), rh = geo.rowHeight();
+        const double x0 = n.s * bw, x1 = (n.s + n.l) * bw, W = x1 - x0;
+        out.thumbAlpha = thumbAlpha (mode, sel);
+        out.strength = chevronStrength (mode, sel);
+
+        if (W >= kDecorMinWidth && s.decor != nullptr)
+        {
+            const int N = simPoints (W);
+            const auto& G = geo.geom (n);
+            const auto& e = s.decor->entry (n, I, geo.getBpm(), geo.laneTable (n, core::LaneId::travel), geo.laneTable (n, core::LaneId::pitch),
+                                            N, G.res);
+            const auto& sim = e.sim;
+
+            // U7: what this note plays, faint, just above its line, in the waveform strip's colour
+            if ((int) e.amps.size() == N)
+            {
+                const double h = std::max (6.0, rh * 1.1), cw = W / (double) N;
+                for (int i = 0; i < N; ++i)
+                {
+                    const double a = (double) e.amps[(std::size_t) i];
+                    if (! (a > 0.015))
+                        continue;
+                    const double yc = geo.baseYAt (n, ((double) i + 0.5) / (double) N) - 3.0 - h / 2.0, hh = std::max (1.0, a * h);
+                    out.columns.push_back (rectF (x0 + (double) i * cw, yc - hh / 2.0, std::max (1.0, cw - 0.7), hh));
+                }
+            }
+
+            // H4: chevrons for the way and the speed, just under the line
+            if ((int) sim.pos.size() == N + 1)
+            {
+                const auto motion = n.sample.motion.value_or (I.motion);
+                const auto& heads = geo.laneTable (n, core::LaneId::heads);
+                double x = x0 + 10.0;
+                while (x < x1 - 7.0)
+                {
+                    const double t = (x - x0) / W;
+                    const auto i = (std::size_t) std::min ((double) N, core::jsRound (t * (double) N));
+                    const double y = geo.baseYAt (n, t) + 6.5;
+                    if (std::isnan (sim.pos[i]))   // silent from here (At the end: Stop)
+                    {
+                        out.stops.push_back (rectF (x - 2.5, y - 2.5, 5.0, 5.0));
+                        break;
+                    }
+                    const int d = sim.dir[i];
+                    const double sp = (double) sim.sp[i];
+                    if (d == 0 || sp < 0.02)   // standing still
+                    {
+                        out.stops.push_back (rectF (x - 2.6, y - 3.0, 1.6, 6.0));
+                        out.stops.push_back (rectF (x + 1.0, y - 3.0, 1.6, 6.0));
+                        x += 24.0;
+                        continue;
+                    }
+                    out.chevrons.push_back ({ x, y, d, 1.0 });
+                    if (sp >= 2.5)
+                        out.chevrons.push_back ({ x + 3.6 * (double) d, y, d, 1.0 });
+                    if (motion == core::Motion::mirror && I.heads + (tabAt (heads, t) - 0.5) * 14.0 + (I.macros[2] - 0.5) * 14.0 >= 1.5)
+                        out.mirrors.push_back ({ x, y + 6.0, -d, 0.75 });
+                    x += clampD (14.0 / std::sqrt (sp), 6.0, 40.0);
+                }
+                for (int i = 1; i <= N; ++i)   // Scatter's jumps
+                    if (sim.jump[(std::size_t) i] != 0)
+                    {
+                        const double t = (double) i / (double) N, y = geo.baseYAt (n, t) + 6.5;
+                        out.jumps.push_back (rectF (x0 + t * W - 0.6, y - 4.5, 1.2, 9.0));
+                    }
+            }
+        }
+
+        // S7: a dot on notes with settings of their own
+        if (hasOwnSettings (n))
+            out.ownDot = around (x0 + 3.0, geo.baseYAt (n, 0.0) - 11.0, 3.2).toFloat();
+
+        // a slide whose target starts well inside its source: the engine cuts the source short there
+        if (! n.glideTo.empty())
+            if (const auto m = s.noteById (n.glideTo); m != nullptr && n.l > 0.0 && slideWarns (n, *m))
+                out.warning = juce::Point<double> (m->s * bw, geo.baseYAt (n, (m->s - n.s) / n.l));
+        return out;
+    }
+
+    void RollPainter::paintDecorations (juce::Graphics& g, const model::Note& n, bool sel) const
+    {
+        const auto& T = *s.colours;
+        const auto d = decorations (n, sel);
+        const auto col = T[Tok::laneSample];
+
+        if (! d.columns.empty())
+        {
+            juce::RectangleList<float> columns;
+            for (const auto& r : d.columns)
+                columns.addWithoutMerging (r);
+            g.setColour (T[Tok::wave].withMultipliedAlpha (d.thumbAlpha));
+            g.fillRectList (columns);
+        }
+
+        // the chevrons: 1.4 px, round ends and joins (each one a path, so Direct2D clips them as the software renderer does)
+        const auto chevrons = [] (const std::vector<Decorations::Chevron>& list)
+        {
+            juce::Path p;
+            for (const auto& c : list)
+            {
+                const double dx = 1.7 * (double) c.dir * c.scale, dy = 3.0 * c.scale;
+                p.startNewSubPath (pt (c.x - dx, c.y - dy));
+                p.lineTo (pt (c.x + dx, c.y));
+                p.lineTo (pt (c.x - dx, c.y + dy));
+            }
+            return p;
+        };
+        const juce::PathStrokeType stroke (1.4f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded);
+        if (! d.stops.empty())
+        {
+            juce::RectangleList<float> stops;
+            for (const auto& r : d.stops)
+                stops.addWithoutMerging (r);
+            g.setColour (col.withMultipliedAlpha (d.strength));
+            g.fillRectList (stops);
+        }
+        if (! d.chevrons.empty())
+        {
+            g.setColour (col.withMultipliedAlpha (d.strength));
+            g.strokePath (chevrons (d.chevrons), stroke);
+        }
+        if (! d.mirrors.empty())
+        {
+            g.setColour (col.withMultipliedAlpha (d.strength * 0.5f));
+            g.strokePath (chevrons (d.mirrors), stroke);
+        }
+        if (! d.jumps.empty())
+        {
+            juce::RectangleList<float> jumps;
+            for (const auto& r : d.jumps)
+                jumps.addWithoutMerging (r);
+            g.setColour (col.withMultipliedAlpha (d.strength * 0.85f));
+            g.fillRectList (jumps);
+        }
+
+        if (d.ownDot)
+        {
+            g.setColour (col);
+            g.fillEllipse (*d.ownDot);
+            g.setColour (T[Tok::dotFill]);
+            ring (g, *d.ownDot, 1.2f);
+        }
+
+        if (d.warning)
+        {
+            const double x = d.warning->x, y = d.warning->y;
+            const auto warn = T[Tok::warn];
+            juce::Path line;
+            line.startNewSubPath (pt (x, y - 8.0));
+            line.lineTo (pt (x, y + 8.0));
+            g.setColour (warn);
+            dashed (g, line, 1.5f, 2.0f, 2.0f);
+            juce::Path tri;
+            tri.addTriangle (pt (x, y - 22.0), pt (x + 6.5, y - 11.0), pt (x - 6.5, y - 11.0));
+            g.fillPath (tri);
+            // "!" in bold 9 px, the page's colour, centred on x with its baseline 12.5 px above the line
+            juce::GlyphArrangement mark;
+            mark.addLineOfText (Theme::px (9.0f, true), "!", 0.0f, 0.0f);
+            const auto box = mark.getBoundingBox (0, -1, true);
+            g.setColour (T[Tok::bg]);
+            mark.draw (g, juce::AffineTransform::translation ((float) x - box.getCentreX(), (float) (y - 12.5)));
+        }
     }
 
     juce::Rectangle<double> RollPainter::noteBoundsIn (const RollGeometry& geo, const model::Note& n)
     {
         // The ribbons rise up to a lane band above the note's base line (the line without the vibrato); the line
-        // itself is the base plus the squiggle (smin .. smax); the dots sit on the line at both ends.
+        // itself is the base plus the squiggle (smin .. smax); the dots sit on the line at both ends. The decorations
+        // (M6): the thumbnail, the own-settings dot and the slide warning stay inside the lane band above the line
+        // (at most 3 + 1.1 rows, 15 px and 22 px above it, the band 2.6 rows plus the padding); the chevrons and marks
+        // reach 15.5 px under the line (decorPad).
         const NoteGeom& G = geo.geom (n);
         double hiBase = -std::numeric_limits<double>::infinity(), loBase = std::numeric_limits<double>::infinity();
         for (const float b : G.base)
@@ -362,7 +543,7 @@ namespace sl::ui::roll
         }
         const double rh = geo.rowHeight(), bw = geo.beatWidth(), cy = geo.cy (n.p);
         const double top = cy - std::max (hiBase * rh + geo.laneHeight(), G.smax * rh) - notePad;
-        const double bottom = cy - std::min (loBase, G.smin) * rh + notePad;
+        const double bottom = cy - std::min (loBase, G.smin) * rh + decorPad;
         const double left = n.s * bw - notePad, right = (n.s + n.l) * bw + notePad;
         if (! std::isfinite (top) || ! std::isfinite (bottom) || ! std::isfinite (left) || ! std::isfinite (right))
             return {};

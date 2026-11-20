@@ -309,6 +309,7 @@ SL_TEST ("ui", rollViewRepaintsWhatChanged)
     section ("Roll view: a refresh repaints only what changed; the view, the zoom or the theme repaint everything");
 
     StrandLockProcessor proc;
+    proc.waitForSounds();   // the notes' thumbnails read the sound (M6): its arrival would redraw every note
     ui::Theme theme (ThemeId::dark);
     RollView view (theme, proc);
     view.setBounds (0, 0, 1100, 680);

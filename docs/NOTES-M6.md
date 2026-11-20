@@ -166,9 +166,11 @@ Note settings panel (S7) and the "Try this" line (U3) (plan 7.8 T2, decisions 5 
 
 ### Progress
 
-- In progress: `ui/roll/NoteDecor` (sl-ui-panels.js tabAt, simulate, peakBins and thumbAmps, ported line by line) and
-  its fixture test `noteDecorHelpersMatchFixture` (the 30 cases of `ui/inspector.json` that M4 left for M6), pushed
-  first so CI checks them while the rest is written.
-- Next: the decorations drawn through RollPainter and the NoteLayerCache; HeadsOverlay and the strip click; the Note
-  settings tab; Try this; the tests in `test_heads_overlay.cpp`, `test_note_settings.cpp` and `test_note_decor.cpp`;
-  pictures to look at.
+- Done: `ui/roll/NoteDecor` (sl-ui-panels.js tabAt, simulate, peakBins and thumbAmps, ported line by line) and its
+  fixture test `noteDecorHelpersMatchFixture`: run 44767434482 on af7ca15 green on every job and step, the 30 cases
+  of `ui/inspector.json` that M4 left for M6 30 of 30 bit for bit on both platforms.
+- In progress (second push): the decorations drawn through RollPainter and the NoteLayerCache (chevrons, thumbnails,
+  the own-settings dot, the slide warning), `ui/strip/HeadsOverlay` and the strip click that sets Start,
+  `ui/tabs/NoteSettingsTab`, Try this in the hint bar, the Sample chips' tooltips, and the tests
+  `test_heads_overlay`, `test_note_settings`, `test_note_decor`, `test_try_this` with their pictures.
+- Next: CI on that push, every new picture looked at, these notes, then the fast-forward of main.
