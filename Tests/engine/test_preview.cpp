@@ -3,15 +3,18 @@
 // and MidiRouter plays the block on the real Engine, exactly as processBlock does. Rows:
 //
 // - note starts: with the host stopped, every note starts within [0, 1) sample of the Preview clock's beat (120, 87 and
-//   133 bpm; from ppq 0, from ppq 2.5, from ppq 6.5 with a 4-beat offset, with no position at all; 3 loop passes);
+//   133 bpm; from ppq 0, from ppq 2.5, from ppq 6.5 with a 4-beat offset on a 2-bar clip, from ppq 2.5 before a 4-beat
+//   offset (the pre-roll), with no position at all; up to 3 loop passes);
 // - the Preview plays what Cubase would: a Preview from ppq 1.3 renders bit for bit what the host playing from 1.3 does;
 // - the clock follows the host: a tempo change carries on from the beat it reached, moving the host's position starts
 //   it again there, and a clip that does not loop ends it at the clip's end;
 // - Preview never runs while the host plays: the render is the same as without it, the switch goes off, and it stays
-//   off after the host stops;
+//   off after the host stops; Cubase's Play after a Preview plays on Cubase's beat from that block, wherever Preview's
+//   clock was, and so does a cursor move while Preview plays (fix pass F1);
 // - the processor: Kalan's switch, Cubase's Play turning it off (and counted), a click after that standing, the display
-//   frames saying "playing" while it runs; and no allocation on the audio thread with Preview on (group "alloc", so the
-//   Debug-CRT run checks it too).
+//   frames saying "playing" while it runs; the switch word keeping a click made after a block read it (fix pass F4);
+//   and no allocation on the audio thread with Preview on, tempo changes reaching a running Preview and a playing
+//   host (group "alloc", so the Debug-CRT run checks it too).
 //
 // Note starts are found as in test_hostsync: short notes on a constant (DC) source sound from their first sample and
 // are silent between notes. Group "engine" (the sanitizer job runs it).
@@ -246,21 +249,29 @@ namespace
 SL_TEST ("engine", previewNoteStarts)
 {
     section ("Preview with the host stopped: notes start within [0, 1) sample of the Preview clock's beat (120, 87 and 133 bpm; from ppq 0, "
-             "2.5 and 6.5 with a 4-beat offset; with no position; 3 loop passes)");
+             "from ppq 2.5, from ppq 6.5 with a 4-beat offset on a 2-bar clip, from ppq 2.5 before a 4-beat offset; with no position)");
 
+    // The offset cases (fix pass F2) use an offset that is not a whole number of clip lengths away from the cursor's
+    // place in the clip: 6.5 - 4 on the 2-bar clip (its second bar empty) plays from 2.5, where 6.5 is in the empty bar;
+    // 2.5 - 4 on the 1-bar clip is the pre-roll, silent until the clip's beat 0, where 2.5 plays at once.
     struct Case
     {
         double ppq, offset;
+        int bars;
         const char* what;
     };
-    const Case cases[] = { { 0.0, 0.0, "from ppq 0" }, { 2.5, 0.0, "from ppq 2.5" }, { 6.5, 4.0, "from ppq 6.5, the clip offset 4 beats" } };
+    const Case cases[] = { { 0.0, 0.0, 1, "from ppq 0" },
+                           { 2.5, 0.0, 1, "from ppq 2.5" },
+                           { 6.5, 4.0, 2, "from ppq 6.5, the 2-bar clip offset 4 beats" },
+                           { 2.5, 4.0, 1, "from ppq 2.5, the clip offset 4 beats (1.5 beats of pre-roll)" } };
     int blockSize = 333;
     for (const double bpm : { 120.0, 87.0, 133.0 })
     {
         const double spb = 60.0 / bpm * kSr;
         for (const auto& c : cases)
         {
-            const model::Clip clip = clipOf (1, kFourShort, true, c.offset);
+            const model::Clip clip = clipOf (c.bars, kFourShort, true, c.offset);
+            const double lb = 4.0 * c.bars;
             Rig rig (tapeInst(), dcSample(), &clip);
             rig.previewSwitch = true;
             const auto n = static_cast<std::int64_t> (12 * spb);
@@ -269,17 +280,25 @@ SL_TEST ("engine", previewNoteStarts)
             const double b0 = c.ppq - c.offset;
             std::string why;
             const auto starts = soundStarts (out.L, out.R);
-            const bool onTime = startsOnTime (starts, clockStarts (kFourBeats, 4.0, b0, spb, n), why);
-            check (onTime && rig.previewBlocks == rig.blocks && rig.ended == 0 && rig.sync.isPreviewing(),
-                   fmt ("%g bpm, %s: %zu starts in 3 passes, each in [0, 1) sample of the clock's beat; Preview played every block (%d of %d) %s", bpm,
-                        c.what, starts.size(), rig.previewBlocks, rig.blocks, why.c_str()));
+            const bool onTime = startsOnTime (starts, clockStarts (kFourBeats, lb, b0, spb, n), why);
+            const bool silentFirst = b0 >= 0.0 || (! starts.empty() && static_cast<double> (starts.front()) >= -b0 * spb - 1e-6);
+            check (onTime && silentFirst && rig.previewBlocks == rig.blocks && rig.ended == 0 && rig.sync.isPreviewing(),
+                   fmt ("%g bpm, %s: %zu starts, each in [0, 1) sample of the clock's beat from beat %g, nothing before the clip's beat 0; Preview "
+                        "played every block (%d of %d) %s", bpm, c.what, starts.size(), b0, rig.previewBlocks, rig.blocks, why.c_str()));
 
             // a no-op is not a pass: against a clock started at beat 0 (not the Preview start) the same starts fail
-            if (b0 > 0.0)
+            if (! juce::exactlyEqual (b0, 0.0))
             {
                 std::string why2;
-                check (! startsOnTime (starts, clockStarts (kFourBeats, 4.0, 0.0, spb, n), why2),
+                check (! startsOnTime (starts, clockStarts (kFourBeats, lb, 0.0, spb, n), why2),
                        fmt ("negative control: measured from beat 0 instead of %g they fail (%s)", b0, why2.c_str()));
+            }
+            // and with the clip's offset left out (the clock from the cursor's own ppq) they fail too
+            if (! juce::exactlyEqual (c.offset, 0.0))
+            {
+                std::string why3;
+                check (! startsOnTime (starts, clockStarts (kFourBeats, lb, c.ppq, spb, n), why3),
+                       fmt ("negative control: measured from ppq %g, the offset left out, they fail (%s)", c.ppq, why3.c_str()));
             }
         }
     }
@@ -445,10 +464,137 @@ SL_TEST ("engine", previewNeverWhileHostPlays)
         });
         const bool kept = rig.transports.size() == 200;
         const auto first = kept ? rig.transports[100] : host::BlockTransport {};   // the block at sample 48000
+        int restarts = 0;
+        for (const auto& t : rig.transports)
+            restarts += t.restart ? 1 : 0;
         check (kept && rig.previewBlocks == 100 && rig.ended == 1 && first.start.playing && ! first.previewing
-                   && juce::exactlyEqual (first.start.beat, 8.0) && ! rig.previewSwitch,
-               fmt ("Preview for %d blocks, then the host plays from ppq 8: that block plays beat %g (the host's), the switch went off",
-                    rig.previewBlocks, first.start.beat));
+                   && juce::exactlyEqual (first.start.beat, 8.0) && ! rig.previewSwitch && first.restart && restarts == 1,
+               fmt ("Preview for %d blocks, then the host plays from ppq 8: that block plays beat %g (the host's) and starts the engine's clock "
+                    "again there (%d restart), the switch went off", rig.previewBlocks, first.start.beat, restarts));
+    }
+}
+
+namespace
+{
+    /** n samples in blocks of up to 240: song (k) says what the host says at the block starting at sample k, and the
+        block before sample `at` is cut so that a block starts exactly there. */
+    Output runCutAt (Rig& rig, std::int64_t n, std::int64_t at, const std::function<Song (std::int64_t)>& song)
+    {
+        Output out;
+        out.L.assign (static_cast<std::size_t> (n), 0.0f);
+        out.R.assign (static_cast<std::size_t> (n), 0.0f);
+        for (std::int64_t k = 0; k < n;)
+        {
+            const int len = static_cast<int> (std::min<std::int64_t> (240, (k < at ? at : n) - k));
+            rig.block (song (k), out.L.data() + k, out.R.data() + k, len);
+            k += len;
+        }
+        return out;
+    }
+
+    /** The starts at or after sample `from`, and where the 1-bar clip's notes fall on a clock from beat 0 at that sample.
+        A note sounding right at `from` (chased there) shows as no start when the sound before it had not ended. */
+    void startsFrom (const Output& out, std::int64_t from, double spb, std::vector<std::int64_t>& got, std::vector<double>& want)
+    {
+        for (const auto s : soundStarts (out.L, out.R))
+            if (s >= from)
+                got.push_back (s);
+        const auto i = static_cast<std::size_t> (from - 1);
+        const bool soundingBefore = from > 0 && (! juce::exactlyEqual (out.L[i], 0.0f) || ! juce::exactlyEqual (out.R[i], 0.0f));
+        const auto n = static_cast<std::int64_t> (out.L.size());
+        for (const double at : clockStarts (kFourBeats, 4.0, 0.0, spb, n - from))
+            if (at > 0.0 || ! soundingBefore)
+                want.push_back (static_cast<double> (from) + at);
+    }
+}
+
+SL_TEST ("engine", previewHandsOverOnTheBeat)
+{
+    section ("Cubase's Play after a Preview plays on Cubase's beat from that block, wherever Preview's clock was (4.05, 3.95, 8.08 and 4.5 beats "
+             "of Preview on a 1-bar clip, then the host from ppq 0; 120 and 87 bpm); a cursor move while Preview plays starts the clock exactly "
+             "there (fix pass F1)");
+
+    const model::Clip clip = clipOf (1, kFourShort);
+    for (const double bpm : { 120.0, 87.0 })
+    {
+        const double spb = 60.0 / bpm * kSr, bps = bpm / 60.0 / kSr;
+        for (const double previewBeats : { 4.05, 3.95, 8.08, 4.5 })
+        {
+            // Preview from Cubase's cursor at ppq 0, then Cubase plays from ppq 0 at sample p, for 7.5 beats (the last note
+            // starts at its beat 7, well inside the render)
+            const auto p = static_cast<std::int64_t> (std::llround (previewBeats * spb));
+            const auto n = p + static_cast<std::int64_t> (std::ceil (7.5 * spb));
+            Rig rig (tapeInst(), dcSample(), &clip);
+            rig.previewSwitch = true;
+            rig.keep = true;
+            const auto out = runCutAt (rig, n, p, [p, bpm, bps] (std::int64_t k) {
+                Song s;
+                s.bpm = bpm;
+                s.playing = k >= p;
+                s.ppq = s.playing ? static_cast<double> (k - p) * bps : 0.0;
+                return s;
+            });
+            std::vector<std::int64_t> got;
+            std::vector<double> want;
+            startsFrom (out, p, spb, got, want);
+            std::string why;
+            const bool onBeat = startsOnTime (got, want, why);
+            int restarts = 0;
+            for (const auto& t : rig.transports)
+                restarts += t.restart ? 1 : 0;
+            check (onBeat && ! got.empty() && restarts == 1 && rig.ended == 1 && ! rig.previewSwitch,
+                   fmt ("%g bpm, Preview for %g beats, then Cubase plays from ppq 0: %zu starts, each in [0, 1) sample of Cubase's beat (one "
+                        "restart of the engine's clock) %s", bpm, previewBeats, got.size(), why.c_str()));
+
+            // a no-op is not a pass: Preview's own clock carried on (the engine kept it before the fix whenever Cubase's beat was
+            // within 0.1 beat of it) puts these starts elsewhere
+            if (previewBeats < 4.5)
+            {
+                std::vector<double> carried;
+                for (const double at : clockStarts (kFourBeats, 4.0, 0.0, spb, n))
+                    if (at >= static_cast<double> (p))
+                        carried.push_back (at);
+                std::string why2;
+                check (! startsOnTime (got, carried, why2),
+                       fmt ("negative control: on Preview's clock carried on they fail (%s)", why2.c_str()));
+            }
+        }
+    }
+
+    // the cursor moves while Preview plays, to a place within 0.1 beat of Preview's clock in the clip: Preview from ppq 1
+    // for 3.05 beats (its clock at the clip's beat 0.05), then the cursor at ppq 0
+    for (const double bpm : { 120.0, 87.0 })
+    {
+        const double spb = 60.0 / bpm * kSr;
+        const auto m = static_cast<std::int64_t> (std::llround (3.05 * spb));
+        const auto n = m + static_cast<std::int64_t> (std::ceil (7.5 * spb));
+        Rig rig (tapeInst(), dcSample(), &clip);
+        rig.previewSwitch = true;
+        rig.keep = true;
+        const auto out = runCutAt (rig, n, m, [m, bpm] (std::int64_t k) {
+            Song s;
+            s.bpm = bpm;
+            s.ppq = k < m ? 1.0 : 0.0;
+            return s;
+        });
+        std::vector<std::int64_t> got;
+        std::vector<double> want;
+        startsFrom (out, m, spb, got, want);
+        std::string why;
+        const bool onBeat = startsOnTime (got, want, why);
+        int restarts = 0;
+        for (const auto& t : rig.transports)
+            restarts += t.restart ? 1 : 0;
+        check (onBeat && ! got.empty() && restarts == 1 && rig.previewBlocks == rig.blocks,
+               fmt ("%g bpm, the cursor moved to ppq 0 while Preview's clock was at the clip's beat 0.05: %zu starts, each in [0, 1) sample of the "
+                    "new clock's beat (one restart) %s", bpm, got.size(), why.c_str()));
+
+        std::vector<double> carried;
+        for (const double at : clockStarts (kFourBeats, 4.0, 1.0, spb, n))
+            if (at >= static_cast<double> (m))
+                carried.push_back (at);
+        std::string why2;
+        check (! startsOnTime (got, carried, why2), fmt ("negative control: on the old clock carried on they fail (%s)", why2.c_str()));
     }
 }
 
@@ -534,7 +680,7 @@ SL_TEST ("engine", previewThroughTheProcessor)
     check (p.isPreviewOn() && p.isPreviewPlaying() && r.frame->playing && p.getPreviewStops() == stops0 + 2,
            "a click after that: Preview plays again from Cubase's position");
 
-    // the switch's click count: a stop made for an older word never undoes a newer click
+    // three clicks before a block: the last one is the switch (a click made while a block runs: previewSwitchKeepsLaterClicks)
     const auto blocksBefore = p.getBlocksProcessed();
     p.setPreview (false);
     p.setPreview (true);
@@ -544,10 +690,38 @@ SL_TEST ("engine", previewThroughTheProcessor)
            fmt ("off, on, off before a block: off (%llu blocks counted)", (unsigned long long) (p.getBlocksProcessed() - blocksBefore)));
 }
 
+SL_TEST ("engine", previewSwitchKeepsLaterClicks)
+{
+    section ("Preview's switch word, as processBlock uses it (fix pass F4): the audio thread turns it off only while it still holds the word its "
+             "block read, so a click made after the block began always stands");
+
+    host::PreviewSwitch sw;
+    const bool startsOff = ! sw.isOn() && sw.read() == 0u;
+    sw.set (true);
+    const auto word = sw.read();   // a block begins and reads the switch on; Cubase plays, so it will turn it off
+    sw.set (false);
+    sw.set (true);                 // Kalan clicks off and on again while that block runs
+    const auto later = sw.read();
+    const bool refused = ! sw.turnOffIf (word);
+    check (startsOff && host::PreviewSwitch::isOn (word) && later != word && refused && sw.isOn() && sw.read() == later,
+           "the block that read the switch on cannot turn it off after a later click: the click stands, the word as the click left it");
+
+    // the next block reads the newer word: its stop goes through, and the clicks counted so far stay in the word
+    const bool off = sw.turnOffIf (later) && ! sw.isOn() && (sw.read() >> 1) == (later >> 1);
+    sw.set (true);
+    const bool counted = sw.isOn() && (sw.read() >> 1) == (later >> 1) + 1u;
+    const auto w2 = sw.read();
+    sw.set (false);   // a click off after a block read the word: that block's stop finds a newer word and leaves it be
+    const bool offStands = ! sw.turnOffIf (w2) && ! sw.isOn();
+    check (off && counted && offStands,
+           "a block's stop on the word it read turns the switch off and keeps the click count; a click after that counts on from it; a click "
+           "off made during a block stays off");
+}
+
 SL_TEST ("alloc", previewAllocatesNothing)
 {
-    section ("20 s at 48 kHz / 64-sample blocks with Preview: on and off, Cubase stopped and playing, tempo changes and cursor moves: no allocation "
-             "or free on the audio thread");
+    section ("20 s at 48 kHz / 64-sample blocks with Preview: on and off, Cubase stopped and playing, tempo changes while Preview runs and while "
+             "Cubase plays, cursor moves while Preview runs, Cubase's Play after a Preview: no allocation or free on the audio thread");
 
     const double rate = 48000.0;
     const int block = 64;
@@ -563,15 +737,16 @@ SL_TEST ("alloc", previewAllocatesNothing)
     juce::MidiBuffer midi;
     midi.ensureSize (1024);
     const auto total = static_cast<juce::int64> (20.0 * rate / block);
-    double ppq = 0.0;
-    int previewBlocks = 0;
+    double ppq = 0.0, lastBpm = 120.0;
+    int previewBlocks = 0, tempoInPreview = 0, tempoWhilePlaying = 0, movesInPreview = 0, handOvers = 0;
     long long switches = 0;
-    bool finite = true;
+    bool finite = true, playedBefore = false, previewBefore = false;
 
     alloc::reset();
     for (juce::int64 b = 0; b < total; ++b)
     {
-        // every 2 s: Cubase plays for 0.5 s of each 2; the switch goes on every second; the tempo and the cursor move
+        // every 2 s: Cubase plays for 0.5 s of each 2; the switch goes on every second; the cursor moves now and then;
+        // the tempo changes every 433 blocks, so it changes while Preview runs and while Cubase plays (fix pass F5)
         const juce::int64 inTwo = b % (juce::int64) (2.0 * rate / block);
         const bool playing = inTwo >= (juce::int64) (1.5 * rate / block);
         if (inTwo == 0 || inTwo == (juce::int64) (0.7 * rate / block))
@@ -579,10 +754,17 @@ SL_TEST ("alloc", previewAllocatesNothing)
             proc.setPreview (true);   // the message thread's click (outside the counted scope)
             ++switches;
         }
+        bool moved = false;
         if (b % 997 == 0)
-            ppq = (double) (b % 7);   // Kalan moves Cubase's cursor
+        {
+            const double cursor = (double) (b % 7);   // Kalan moves Cubase's cursor
+            moved = ! juce::exactlyEqual (cursor, ppq);
+            ppq = cursor;
+        }
+        const double bpm = (b / 433) % 2 == 0 ? 120.0 : 97.0;
+        const bool tempoChanged = ! juce::exactlyEqual (bpm, lastBpm);
         head.info.setIsPlaying (playing);
-        head.info.setBpm (b % 3000 < 1500 ? 120.0 : 97.0);
+        head.info.setBpm (bpm);
         head.info.setPpqPosition (ppq);
         if (playing)
             ppq += block * 2.0 / rate;
@@ -591,7 +773,15 @@ SL_TEST ("alloc", previewAllocatesNothing)
             const alloc::Scope counting;
             proc.processBlock (buffer, midi);
         }
-        previewBlocks += proc.isPreviewPlaying() ? 1 : 0;
+        const bool previewNow = proc.isPreviewPlaying();
+        previewBlocks += previewNow ? 1 : 0;
+        tempoInPreview += tempoChanged && previewBefore && previewNow ? 1 : 0;   // the Preview clock's tempo branch
+        tempoWhilePlaying += tempoChanged && playedBefore && playing ? 1 : 0;   // the engine's re-anchor to the host
+        movesInPreview += moved && previewBefore && previewNow ? 1 : 0;         // the Preview clock starts again
+        handOvers += playing && previewBefore ? 1 : 0;                          // Cubase's Play after a Preview block
+        previewBefore = previewNow;
+        playedBefore = playing;
+        lastBpm = bpm;
         for (int ch = 0; ch < 2; ++ch)
             for (int i = 0; i < block; ++i)
                 finite = finite && std::isfinite (buffer.getSample (ch, i));
@@ -599,10 +789,14 @@ SL_TEST ("alloc", previewAllocatesNothing)
             proc.collectVersions();
     }
     const auto c = alloc::counts();
-    note (fmt ("%lld blocks, %d of them Preview's, %lld clicks on, %u stops by Cubase's Play; counting %s", (long long) total, previewBlocks, switches,
-               proc.getPreviewStops(), alloc::coverage()));
+    note (fmt ("%lld blocks, %d of them Preview's, %lld clicks on, %u stops by Cubase's Play; %d tempo changes while Preview ran, %d while Cubase "
+               "played, %d cursor moves while Preview ran, %d times Cubase's Play came after a Preview block; counting %s", (long long) total,
+               previewBlocks, switches, proc.getPreviewStops(), tempoInPreview, tempoWhilePlaying, movesInPreview, handOvers, alloc::coverage()));
     check (previewBlocks > total / 3 && proc.getPreviewStops() > 0 && finite,
            fmt ("Preview played %d blocks and Cubase's Play stopped it %u times; every sample finite", previewBlocks, proc.getPreviewStops()));
+    check (tempoInPreview > 0 && tempoWhilePlaying > 0 && movesInPreview > 0 && handOvers > 0,
+           fmt ("the run reached every branch: %d tempo changes while Preview ran, %d while Cubase played, %d cursor moves while Preview ran, %d "
+                "hand-overs to Cubase's Play", tempoInPreview, tempoWhilePlaying, movesInPreview, handOvers));
     check (c.news == 0 && c.deletes == 0, fmt ("allocations in processBlock: %lld, frees: %lld (largest request %zu bytes)", c.news, c.deletes, c.largest));
     proc.setPlayHead (nullptr);
 }

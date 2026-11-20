@@ -47,8 +47,10 @@ namespace sl::host
         if (out.start.playing)
         {
             // Preview never runs while the host plays (plan 7.8 decision 3): its switch goes off, and Cubase's
-            // transport takes over from here.
+            // transport takes over from here. When the last block played the Preview clock, the engine's clock starts
+            // again at the host's beat (fix pass F1): kept, it could stay up to 0.1 beat off Cubase's grid.
             out.previewEnded = previewOn;
+            out.restart = previewRunning;
             previewOn = false;
             previewRunning = false;
 
@@ -78,6 +80,8 @@ namespace sl::host
             const bool moved = hasPpq && haveLast && std::abs (host.ppq - lastPpq) > kStoppedMoveBeats;
             if (! previewRunning || moved)
             {
+                // a move while Preview plays: the engine's clock starts again exactly there too (fix pass F1)
+                out.restart = previewRunning;
                 previewRunning = true;
                 previewBeat0 = hasPpq ? host.ppq - offset : 0.0;
                 previewSamples = 0;
@@ -97,6 +101,7 @@ namespace sl::host
                 previewOn = false;
                 previewRunning = false;
                 out.previewEnded = true;
+                out.restart = false;   // the block stops the engine's clock anyway
                 out.start.beat = nan;
             }
             else

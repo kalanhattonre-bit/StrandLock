@@ -2,7 +2,8 @@
 // engine's public API: a cycle wrap inside a 2048-sample block (1, 200 and 2047 samples in) splits the block
 // there; negative beats pass through; while stopped the host beat goes only when it moved more than 1e-6; the
 // tempo falls back to 120; offsetBeats is subtracted; every MIDI mapping (note on vel / 127, velocity 0, note
-// off, the mod CCs, CC64, CC120 and CC123, the pitch wheel with full up exactly +1) lands on its own sample.
+// off, the mod CCs, CC64, CC120 and CC123, the pitch wheel with full up exactly +1) lands on its own sample; a block
+// that restarts the clock after a Preview sends a stopped transport first (M6 fix pass F1).
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
@@ -235,6 +236,54 @@ SL_TEST ("hostsync", transportRules)
     h.hasBpm = false;
     const auto w = sync.plan (h, 64, 0.0, true);
     check (w.wrapAt == 10, fmt ("the wrap sample is found at the fallback tempo (%d)", w.wrapAt));
+}
+
+SL_TEST ("hostsync", previewRestartStopsFirst)
+{
+    section ("HostSync and MidiRouter after a Preview (M6 fix pass F1): Cubase's first playing block after a Preview block, and a cursor move while "
+             "Preview plays, restart the engine's clock: a stopped transport goes first, then the start, both before any sample");
+
+    diag::HostBlock stopped;
+    stopped.hasPosition = true;
+    stopped.playing = false;
+    stopped.hasPpq = true;
+    stopped.ppq = 0.0;
+    stopped.hasBpm = true;
+    stopped.bpm = 120.0;
+
+    host::HostSync sync;
+    sync.prepare (48000.0);
+    sync.setPreview (true);
+    const auto first = sync.plan (stopped, 512, 0.0, true, 4.0);    // Preview starts: the engine was stopped, so no restart
+    const auto second = sync.plan (stopped, 512, 0.0, true, 4.0);   // Preview runs on
+    const auto play = sync.plan (playingAt (0.0), 512, 0.0, true, 4.0);              // Cubase plays: restart
+    const auto on = sync.plan (playingAt (512.0 / 24000.0), 512, 0.0, true, 4.0);    // Cubase plays on: none
+    check (first.previewing && ! first.restart && second.previewing && ! second.restart && play.restart && play.start.playing && ! play.previewing
+               && play.previewEnded && ! on.restart,
+           "restart only on Cubase's first playing block after a Preview block (not when Preview starts, runs on, or Cubase plays on)");
+
+    FakeEngine e;
+    const bool contiguous = playBlock (e, play, {}, 512);
+    const auto tr = e.of (FakeEngine::Kind::transport);
+    check (contiguous && tr.size() == 2 && tr[0].at == 0 && ! tr[0].t.playing && std::isnan (tr[0].t.beat) && tr[1].at == 0 && tr[1].t.playing
+               && same (tr[1].t.beat, 0.0) && e.of (FakeEngine::Kind::process).size() == 1,
+           "that block: a stopped transport (no beat), then the start at Cubase's beat 0, both before the block renders");
+
+    FakeEngine f;
+    playBlock (f, on, {}, 512);
+    check (f.of (FakeEngine::Kind::transport).size() == 1, "a block with no restart sends its one transport, as before");
+
+    // the cursor moves while Preview plays (to ppq 2): the clock starts again at the new beat; the next block runs on
+    host::HostSync s2;
+    s2.prepare (48000.0);
+    s2.setPreview (true);
+    const auto started = s2.plan (stopped, 512, 0.0, true, 4.0);
+    auto moved = stopped;
+    moved.ppq = 2.0;
+    const auto jump = s2.plan (moved, 512, 0.0, true, 4.0);
+    const auto stay = s2.plan (moved, 512, 0.0, true, 4.0);
+    check (! started.restart && jump.restart && jump.previewing && same (jump.start.beat, 2.0) && ! stay.restart && stay.previewing,
+           "the cursor moved to ppq 2 while Preview plays: a restart at beat 2, then none");
 }
 
 SL_TEST ("hostsync", midiMappings)

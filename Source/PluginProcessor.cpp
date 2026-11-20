@@ -206,8 +206,8 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         applyCommand (command);
 
     // Preview (U5, M6): Kalan's switch, read every block (a click may come at any time).
-    const std::uint32_t previewWord = previewSwitch.load (std::memory_order_acquire);
-    hostSync.setPreview ((previewWord & 1u) != 0);
+    const std::uint32_t previewWord = previewSwitch.read();
+    hostSync.setPreview (host::PreviewSwitch::isOn (previewWord));
 
     // The transport (split where a host cycle wraps inside the block, or Preview's own clock while Cubase is
     // stopped) and the MIDI, each at its own sample.
@@ -221,8 +221,7 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
             // Cubase plays (or a clip that does not loop ended): the switch goes off, unless a click changed it after
             // this block read it (the click count in the upper bits then differs, and the click stands). Cubase's Play
             // is counted, so the Sample tab can say why Preview stopped.
-            std::uint32_t expected = previewWord;
-            const bool off = previewSwitch.compare_exchange_strong (expected, previewWord & ~1u, std::memory_order_acq_rel, std::memory_order_acquire);
+            const bool off = previewSwitch.turnOffIf (previewWord);
             if (off && transport.start.playing)
                 previewStops.fetch_add (1, std::memory_order_acq_rel);
         }
@@ -295,13 +294,8 @@ void StrandLockProcessor::applyCommand (const doc::UiCommand& command) noexcept
 void StrandLockProcessor::setPreview (bool on)
 {
     // A new click count above the on bit: the audio thread turns the switch off only while it still holds the word it
-    // read at the start of its block, so a click made after that block began always stands.
-    std::uint32_t word = previewSwitch.load (std::memory_order_acquire);
-    std::uint32_t next = 0;
-    do
-    {
-        next = (((word >> 1) + 1u) << 1) | (on ? 1u : 0u);
-    } while (! previewSwitch.compare_exchange_weak (word, next, std::memory_order_acq_rel, std::memory_order_acquire));
+    // read at the start of its block, so a click made after that block began always stands (host::PreviewSwitch).
+    previewSwitch.set (on);
 }
 
 void StrandLockProcessor::timerCallback()

@@ -26,6 +26,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <cstdint>
+#include <limits>
 
 namespace sl::host
 {
@@ -93,7 +94,10 @@ namespace sl::host
 
         /** One block of n samples into L and R: setTransport (transport.start) at sample 0, then each event in
             the buffer's order, rendering up to its sample first; the cycle wrap's setTransport at its sample
-            (events at that sample come after it); then the rest of the block. */
+            (events at that sample come after it); then the rest of the block. When the block restarts the clock
+            (HostSync: the host plays after a Preview, or its position moved while Preview plays), a stopped
+            transport goes first, so the start anchors the engine's clock at its beat and chases there, as a Play
+            from stopped does (fix pass F1). */
         template <class Sink>
         static void renderBlock (Sink& engine, const BlockTransport& transport, const juce::MidiBuffer& midi,
                                  const MidiSettings& settings, float* L, float* R, int n) noexcept
@@ -108,6 +112,13 @@ namespace sl::host
                 }
             };
 
+            if (transport.restart && transport.start.playing)
+            {
+                engine::Transport stop = transport.start;
+                stop.playing = false;
+                stop.beat = std::numeric_limits<double>::quiet_NaN();
+                engine.setTransport (stop);
+            }
             engine.setTransport (transport.start);
             bool wrapped = transport.wrapAt < 0 || transport.wrapAt >= n;
             for (const auto meta : midi)

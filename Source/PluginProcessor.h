@@ -187,9 +187,10 @@ public:
     /** Kalan's Preview switch (message thread). While it is on and Cubase is stopped, the audio thread plays the clip
         at Cubase's tempo from Cubase's position (host/HostSync). The audio thread turns it off itself when Cubase
         plays: Preview never runs while the host plays. The switch is one atomic word, the on bit and a count of
-        clicks, so that stop never undoes a click that came after the block that stopped it read the switch. */
+        clicks, so that stop never undoes a click that came after the block that stopped it read the switch
+        (host::PreviewSwitch). */
     void setPreview (bool on);
-    bool isPreviewOn() const noexcept { return (previewSwitch.load (std::memory_order_acquire) & 1u) != 0; }
+    bool isPreviewOn() const noexcept { return previewSwitch.isOn(); }
 
     /** How many times the audio thread turned Preview off because Cubase played; the Sample tab says why. (At the end
         of a clip that does not loop it turns off too, as the prototype's Play does, and is not counted.) Any thread. */
@@ -287,7 +288,7 @@ private:
 
     // Preview (M6): the switch (bit 0 on, the bits above count the clicks), the audio thread's own stops, whether its
     // last block played the Preview clock, and the blocks played (the paused-host check).
-    std::atomic<std::uint32_t> previewSwitch { 0 };
+    sl::host::PreviewSwitch previewSwitch;
     std::atomic<std::uint32_t> previewStops { 0 };
     std::atomic<bool> previewPlaying { false };
     std::atomic<std::uint64_t> blocksProcessed { 0 };
