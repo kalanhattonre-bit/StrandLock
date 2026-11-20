@@ -18,8 +18,9 @@ The Sample tab's rules and readouts, the full Sample tab and the Macros tab (pla
   and their tests in the editor (`Tests/ui/test_sample_tab.cpp`); M0's editor and controls tests follow the new knobs.
 - Done: the pictures of run 44744045791 (all eight `m6_*` pictures, and M0-M5's pictures with the tabs folded) looked at:
   nothing clipped or overlapping, the faded controls and the hint line as the prototype's.
-- In progress: CI on the fix for run 44744045791's three red checks (below): a knob's readout and the knob cases' start.
-- Next: these notes' figures, then rebase on main if it moved, a green run on the head, and the fast-forward of main.
+- Done: the fix for run 44744045791's three red checks (below): a knob's readout and the knob cases' start. Run
+  44756460594 on 54c3178 is green on every job and step; its 98 pictures are byte for byte the ones looked at.
+- Next: these notes on the branch, a green run on that head, then the fast-forward of main (main is still 3279614).
 
 ### Files
 
@@ -85,6 +86,13 @@ The Sample tab's rules and readouts, the full Sample tab and the Macros tab (pla
   flexbox lets a knob grow with its text, which would move the row while a knob is dragged.
 - **Not built in T1:** the engine suggestion line (E3) needs M7's analysis; the pins and Recipes and Dice are T3's (each
   `KnobSpec` already names its Dice field in `pin`).
+- **Where the M6 table's T1 rows run.** "fade rules": `test_sample_rules.cpp` (`sampleRulesMatchFixture`,
+  `sampleRulesWholeProduct`). "readouts": `test_readouts.cpp` (`readoutsMatchFixture`, `knobReadoutsMatchFixture`).
+  "knobs" in two halves: the rules alone in `test_sample_rules.cpp` (`knobGesturesMatchFixture`), and the real knobs in
+  the real editor in a third file, `test_sample_tab.cpp` (`sampleTabKnobsMatchFixture`, `sampleTabEachControlOwnParameter`,
+  `lockGrainTypedPlaysFourTaps`, and `sampleTabControlsMatchFixture` for the faded look). The plan names two files; the
+  editor half needs a processor and an editor, which the pure rules files do not build, so it has a file of its own
+  (one test file per area, 7.3).
 
 ### For the architect
 
@@ -106,7 +114,11 @@ The Sample tab's rules and readouts, the full Sample tab and the Macros tab (pla
   Refresh, Head tune) and the Lock, Tape and Each grain backwards switches need theirs too (sl-ui-sample.js pinBtn).
   Decision 4 keeps them in UserSettings.
 - **Undo labels** are the prototype's patchInst labels; `SampleTab::getSteps ()` and `MacrosTab::getSteps ()` list the
-  steps the tabs made, for tests.
+  steps the tabs made, for tests. A test that counts steps records its start first (`TabRig::record ()` in
+  test_sample_tab.cpp): the history leaves out a step equal to its newest.
+- **A knob's two values:** `SampleKnob::value ()` is its parameter's value (the exact one while the knob set it),
+  `readout ()` the text under the dial, which only the editor's timer (`syncToParameter`) and the knob's own gestures
+  change. A test that sets a parameter and then reads a knob calls `MainView::syncControls ()` in between.
 - **Pictures:** `m6_sample_tab_*` and `m6_macros_tab_*` (test_sample_tab.cpp) show both tabs whole in a tall window;
   T3 names the M6 table's own.
 
@@ -132,3 +144,15 @@ The Sample tab's rules and readouts, the full Sample tab and the Macros tab (pla
   there pushed nothing. The prototype's harness counts each case's pushes from a fresh start, so each case now records
   its start first. In the plugin this can only happen after a host change: the value typed is then already the
   history's newest step.
+- Run 44756460594 on 54c3178 (the fix), green on every job and step: Windows Release 1849 checks in 319 tests, Linux
+  Release 1841 in 319 (main had 1815 and 1807 in 310; the ui group is now 509 checks in 108 tests on Windows), the
+  sanitizers' groups 808 in 139 and 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug
+  pictures 0 JUCE assertions, pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4,958,478 bytes).
+  The M6 rows: fade rules 309 of 309 cases exact and 864 of 864 product pairs the prototype's digest (8321 faded
+  controls in all, 190 pairs with no grains); readouts 907 of 907 exact (macroText 361, offsetText 231) and 486 of 486
+  knob readouts; knobs on the rules 398 of 398 (227 drags moved a knob, 165 of them on the q grid, 62 fine; 49 typed
+  values kept, 11 refused); the real tabs: 200 of 200 controls in 4 settings with the prototype's faded state,
+  tooltip, hint line and readout, 398 of 398 knob cases in the editor (300 undo steps, 227 drags wrote their parameter
+  while they moved), 81 of 81 control gestures changed exactly their own parameters with one undo step and its label
+  (and Undo put every parameter back), Lock Grain typed 4.3 holds 4.30000019 and plays 4 taps (a 10 px drag from 4
+  lands on 5 and plays 5); the timer test: a host change shows only on the timer, never during a drag.
