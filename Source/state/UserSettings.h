@@ -1,9 +1,9 @@
 #pragma once
 
 // Settings that belong to the person, not the project (PLUGIN-PLAN 3, "Per-user data"): the theme, the UI
-// scale and whether the Keys switch starts on. They live in %APPDATA%\StrandLock\StrandLock.settings (a
-// juce::PropertiesFile), so they carry across projects; the theme here wins over the UIST copy in a project.
-// Every set is written to disk at once. Message thread only.
+// scale, whether the Keys switch starts on, and the Dice pins (M6, plan 7.8 decision 4). They live in
+// %APPDATA%\StrandLock\StrandLock.settings (a juce::PropertiesFile), so they carry across projects; the theme here
+// wins over the UIST copy in a project. Every set is written to disk at once. Message thread only.
 //
 // The test runner (STRANDLOCK_TESTS) never touches the real file: its default file is a fresh one in the
 // temporary folder, one per run, so the tests and the snapshots start from no per-user values.
@@ -13,6 +13,8 @@
 
 #include <memory>
 #include <optional>
+#include <string>
+#include <vector>
 
 namespace sl::state
 {
@@ -45,6 +47,12 @@ namespace sl::state
         /** Whether the Keys switch starts on in a new window (default off). */
         bool keysDefault() const;
         void setKeysDefault (bool on);
+
+        /** The settings Dice leaves alone (the prototype's strandlock_v4_pins): model::kDiceFields names in the order
+            they were pinned. A name that is not a Dice field, and a second copy of one, are left out (the prototype
+            filters the same way). None until the person pins one. */
+        std::vector<std::string> dicePins() const;
+        void setDicePins (const std::vector<std::string>& pins);
 
         /** Saves now; false when the file could not be written (shown, never thrown). */
         bool save();

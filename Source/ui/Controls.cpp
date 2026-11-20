@@ -463,6 +463,33 @@ namespace sl::ui
                 g.drawRoundedRectangle (front, 1.5f, 1.2f);
                 break;
             }
+
+            case Icon::play:
+            {
+                // Preview (M6): the prototype's Play triangle
+                juce::Path p;
+                p.addTriangle (c.x - s * 0.3f, c.y - s * 0.38f, c.x - s * 0.3f, c.y + s * 0.38f, c.x + s * 0.38f, c.y);
+                g.fillPath (p);
+                break;
+            }
+
+            case Icon::stop:
+            {
+                g.fillRoundedRectangle (juce::Rectangle<float> (s * 0.62f, s * 0.62f).withCentre (c), 1.0f);
+                break;
+            }
+
+            case Icon::dice:
+            {
+                // Dice (M6): a die showing five, drawn in the ink (the prototype's emoji keeps its own colours)
+                const auto die = juce::Rectangle<float> (s * 0.9f, s * 0.9f).withCentre (c);
+                g.drawRoundedRectangle (die, 2.0f, 1.2f);
+                const float d = s * 0.17f, off = s * 0.22f;
+                const juce::Point<float> pips[] = { c, c.translated (-off, -off), c.translated (off, -off), c.translated (-off, off), c.translated (off, off) };
+                for (const auto& at : pips)
+                    g.fillEllipse (juce::Rectangle<float> (d, d).withCentre (at));
+                break;
+            }
         }
     }
 
@@ -617,6 +644,34 @@ namespace sl::ui
         return caption.isEmpty() ? 0.0f : std::ceil (Theme::textWidth (labelFont(), caption.toUpperCase())) + 8.0f;
     }
 
+    float SegmentedControl::segmentsStart() const
+    {
+        return captionWidth() + (float) accessoryWidth;
+    }
+
+    void SegmentedControl::setCaptionAccessory (juce::Component* c, int width)
+    {
+        if (accessory != nullptr && accessory != c)
+            removeChildComponent (accessory);
+        accessory = c;
+        accessoryWidth = c != nullptr ? juce::jmax (0, width) : 0;
+        accessoryHeight = c != nullptr ? c->getHeight() : 0;
+        if (accessory != nullptr)
+            addAndMakeVisible (*accessory);
+        resized();
+        repaint();
+    }
+
+    void SegmentedControl::resized()
+    {
+        // the accessory sits 2 px after the caption's text (its 8 px gap less 6), the segments 6 px after it
+        if (accessory != nullptr)
+        {
+            const int h = accessoryHeight > 0 ? juce::jmin (getHeight(), accessoryHeight) : getHeight();
+            accessory->setBounds ((int) captionWidth() - 6, (getHeight() - h) / 2, accessoryWidth, h);
+        }
+    }
+
     std::vector<float> SegmentedControl::segmentWidths() const
     {
         std::vector<float> widths;
@@ -628,7 +683,7 @@ namespace sl::ui
 
     int SegmentedControl::preferredWidth() const
     {
-        float w = captionWidth();
+        float w = segmentsStart();
         for (float s : segmentWidths())
             w += s;
         return (int) std::ceil (w);
@@ -640,7 +695,7 @@ namespace sl::ui
         float total = 0.0f;
         for (float s : widths)
             total += s;
-        const float x0 = captionWidth();
+        const float x0 = segmentsStart();
         const float scale = total > 0.0f ? juce::jmax (0.0f, (float) getWidth() - x0) / total : 0.0f;
         float x = x0;
         for (int i = 0; i < (int) widths.size(); ++i)
@@ -754,12 +809,31 @@ namespace sl::ui
 
     int ChoiceBox::preferredWidth() const
     {
-        return (int) captionWidth() + boxWidth;
+        return (int) captionWidth() + accessoryWidth + boxWidth;
+    }
+
+    void ChoiceBox::setCaptionAccessory (juce::Component* c, int width)
+    {
+        if (accessory != nullptr && accessory != c)
+            removeChildComponent (accessory);
+        accessory = c;
+        accessoryWidth = c != nullptr ? juce::jmax (0, width) : 0;
+        accessoryHeight = c != nullptr ? c->getHeight() : 0;
+        if (accessory != nullptr)
+            addAndMakeVisible (*accessory);
+        resized();
     }
 
     void ChoiceBox::resized()
     {
-        box.setBounds (getLocalBounds().withTrimmedLeft ((int) captionWidth()));
+        // the accessory (M6's pin) sits 2 px after the caption's text, the box 6 px after it
+        const int captionW = (int) captionWidth();
+        if (accessory != nullptr)
+        {
+            const int h = accessoryHeight > 0 ? juce::jmin (getHeight(), accessoryHeight) : getHeight();
+            accessory->setBounds (captionW - 6, (getHeight() - h) / 2, accessoryWidth, h);
+        }
+        box.setBounds (getLocalBounds().withTrimmedLeft (captionW + accessoryWidth));
     }
 
     void ChoiceBox::paint (juce::Graphics& g)

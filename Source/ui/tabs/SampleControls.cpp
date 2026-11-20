@@ -15,6 +15,7 @@ namespace sl::ui
         constexpr int kDialSize = 36;               // .sls-dial
         constexpr int kValueHeight = 16;            // .sls-kval
         constexpr int kMinWidth = 64, kMaxWidth = 96;   // .sls-knob min-width, max-width
+        constexpr int kPinGap = 2;                       // .sls-klbl gap: the name and its Dice pin
 
         // the dial (sl-ui-sample.js knob): a 40-unit square, the track from 135 to 405 degrees (SVG, clockwise from three
         // o'clock) of radius 15, a cap of radius 10.5, a dot at radius 7, the bipolar mark at radius 18.4 at the top
@@ -426,14 +427,34 @@ namespace sl::ui
     {
         if (spec.macroRow)
             return kMaxWidth;
-        const float name = Theme::textWidth (labelFont(), juce::String (spec.label).toUpperCase()) + 8.0f;
+        const float pinRoom = pin != nullptr ? (float) (kPinGap + PinButton::width) : 0.0f;
+        const float name = Theme::textWidth (labelFont(), juce::String (spec.label).toUpperCase()) + pinRoom + 8.0f;
         const float text = Theme::textWidth (valueFont(), widestText (spec)) + 8.0f;
         return juce::jlimit (kMinWidth, kMaxWidth, (int) std::ceil (juce::jmax (name, text)));
+    }
+
+    void SampleKnob::setPin (juce::Component* p)
+    {
+        if (pin != nullptr && pin != p)
+            removeChildComponent (pin);
+        pin = p;
+        // .sls-klbl: the name and the pin side by side, 2 px apart, centred over the dial; the name keeps its text
+        nameWidth = std::ceil (Theme::textWidth (labelFont(), juce::String (spec.label).toUpperCase()));
+        if (pin != nullptr)
+            addAndMakeVisible (*pin);
+        resized();
+        repaint();
     }
 
     void SampleKnob::resized()
     {
         label->setBounds (valueBounds());
+        if (pin != nullptr)
+        {
+            const float total = nameWidth + (float) (kPinGap + PinButton::width);
+            const int x = (int) std::round (((float) getWidth() - total) * 0.5f + nameWidth) + kPinGap;
+            pin->setBounds (x, (kLabelHeight - PinButton::height) / 2, PinButton::width, PinButton::height);
+        }
     }
 
     void SampleKnob::lookAndFeelChanged()
@@ -444,11 +465,20 @@ namespace sl::ui
 
     void SampleKnob::paint (juce::Graphics& g)
     {
-        // the name in small capitals (.sls-klbl)
+        // the name in small capitals (.sls-klbl), with its Dice pin after it when it has one
         g.setColour (theme (Tok::dim));
         g.setFont (labelFont());
-        g.drawFittedText (juce::String (spec.label).toUpperCase(), juce::Rectangle<int> (0, 0, getWidth(), kLabelHeight),
-                          juce::Justification::centred, 1, 0.8f);
+        if (pin != nullptr)
+        {
+            const float x = ((float) getWidth() - (nameWidth + (float) (kPinGap + PinButton::width))) * 0.5f;
+            g.drawText (juce::String (spec.label).toUpperCase(), juce::Rectangle<float> (x, 0.0f, nameWidth + 1.0f, (float) kLabelHeight),
+                        juce::Justification::centredLeft, false);
+        }
+        else
+        {
+            g.drawFittedText (juce::String (spec.label).toUpperCase(), juce::Rectangle<int> (0, 0, getWidth(), kLabelHeight),
+                              juce::Justification::centred, 1, 0.8f);
+        }
 
         // the dial (sl-ui-sample.js knob and arcD)
         const auto area = dialBounds().toFloat();
@@ -561,5 +591,177 @@ namespace sl::ui
                 actions.commit (was ? "Lock off" : "Lock on", { params::P::lock });
         }
         syncToParameter();
+    }
+
+    //==============================================================================================
+    PinButton::PinButton (const Theme& t, std::string fieldName, juce::String name)
+        : juce::Button ("Pin " + name), theme (t), field (std::move (fieldName)), pinName (std::move (name))
+    {
+        setClickingTogglesState (false);
+        setTitle ("Pin " + pinName);
+        setSize (width, height);
+        setPinned (false);
+    }
+
+    void PinButton::setPinned (bool on)
+    {
+        // sl-ui-sample.js syncPins: lit and its title say whether Dice leaves the setting alone
+        if (on != getToggleState())
+            setToggleState (on, juce::dontSendNotification);
+        const auto tip = on ? pinName + " is pinned: Dice leaves it alone. Click to unpin." : "Pin " + pinName + " so Dice leaves it alone";
+        if (getTooltip() != tip)
+            setTooltip (tip);
+    }
+
+    void PinButton::paintButton (juce::Graphics& g, bool isMouseOver, bool)
+    {
+        // .sls-pin: no fill at rest (the dim colour at .6), the hover colour and the text colour under the mouse, the accent
+        // with the on-accent colour while pinned (.sls-pin.on); a 4 px corner
+        const bool on = getToggleState();
+        const auto box = getLocalBounds().toFloat().reduced (0.5f);
+        if (on || isMouseOver)
+        {
+            g.setColour (on ? theme (Tok::acc) : theme (Tok::hover));
+            g.fillRoundedRectangle (box, 4.0f);
+        }
+        const auto ink = on ? theme (Tok::onacc) : isMouseOver ? theme (Tok::txt) : theme (Tok::dim).withMultipliedAlpha (0.6f);
+
+        // the prototype's pin: M5 1h6l-1 5 3 3H9.2L8 15l-1.2-6H3l3-3z in a 16-unit box, drawn 10 px
+        juce::Path p;
+        p.startNewSubPath (5.0f, 1.0f);
+        p.lineTo (11.0f, 1.0f);
+        p.lineTo (10.0f, 6.0f);
+        p.lineTo (13.0f, 9.0f);
+        p.lineTo (9.2f, 9.0f);
+        p.lineTo (8.0f, 15.0f);
+        p.lineTo (6.8f, 9.0f);
+        p.lineTo (3.0f, 9.0f);
+        p.lineTo (6.0f, 6.0f);
+        p.closeSubPath();
+        const float unit = 10.0f / 16.0f;
+        const auto c = box.getCentre();
+        g.setColour (ink);
+        g.fillPath (p, juce::AffineTransform::scale (unit).translated (c.x - 5.0f, c.y - 5.0f));
+    }
+
+    //==============================================================================================
+    PinGroup::PinGroup (std::unique_ptr<juce::Component> c, int w, PinButton& p)
+        : control (std::move (c)), controlWidth (w), pin (p)
+    {
+        addAndMakeVisible (*control);
+        addAndMakeVisible (pin);
+    }
+
+    void PinGroup::resized()
+    {
+        control->setBounds (0, 0, juce::jmin (controlWidth, getWidth()), getHeight());
+        pin.setBounds (controlWidth + 4, (getHeight() - PinButton::height) / 2, PinButton::width, PinButton::height);
+    }
+
+    //==============================================================================================
+    RecipeButton::RecipeButton (const Theme& t, int n, const juce::String& name)
+        : FlatButton (t, juce::String()), number (n), recipeName (name)
+    {
+        setTitle ("Recipe " + juce::String (n) + " " + name);
+    }
+
+    int RecipeButton::widthNeeded() const
+    {
+        const auto font = Theme::px (12.0f, true);
+        return (int) std::ceil (Theme::textWidth (font, juce::String (number)) + 3.0f + Theme::textWidth (font, recipeName) + 16.0f);
+    }
+
+    void RecipeButton::paintButton (juce::Graphics& g, bool isMouseOver, bool isButtonDown)
+    {
+        FlatButton::paintButton (g, isMouseOver, isButtonDown);   // the box (no text of its own)
+
+        // .sls-recipes>button: 8 px of padding; the number in the accent (b), 3 px, the name
+        const auto font = Theme::px (12.0f, true);
+        auto r = getLocalBounds().toFloat();
+        if (isButtonDown && isEnabled())
+            r = r.translated (0.0f, 1.0f);
+        const auto num = juce::String (number);
+        const float numW = Theme::textWidth (font, num), nameW = Theme::textWidth (font, recipeName);
+        float x = r.getCentreX() - (numW + 3.0f + nameW) * 0.5f;
+        g.setFont (font);
+        g.setColour (theme (Tok::acc));
+        g.drawText (num, juce::Rectangle<float> (x, r.getY(), numW + 1.0f, r.getHeight()), juce::Justification::centredLeft, false);
+        x += numW + 3.0f;
+        g.setColour (theme (Tok::txt));
+        g.drawText (recipeName, juce::Rectangle<float> (x, r.getY(), nameW + 2.0f, r.getHeight()), juce::Justification::centredLeft, false);
+    }
+
+    //==============================================================================================
+    NoticeBox::NoticeBox (const Theme& t)
+        : theme (t)
+    {
+        setInterceptsMouseClicks (false, false);
+    }
+
+    void NoticeBox::setText (const juce::String& newText)
+    {
+        if (newText == text)
+            return;
+        text = newText;
+        setTitle (text);
+        repaint();
+    }
+
+    juce::AttributedString NoticeBox::attributed (juce::Colour colour) const
+    {
+        juce::AttributedString as;
+        as.setWordWrap (juce::AttributedString::byWord);
+        as.setJustification (juce::Justification::centredLeft);
+        as.append (text, Theme::px (12.0f), colour);
+        return as;
+    }
+
+    int NoticeBox::heightFor (int w) const
+    {
+        // .sls-sugline: padding 5 px 8 px, a 1 px border
+        juce::TextLayout layout;
+        layout.createLayout (attributed (theme (Tok::txt)), (float) juce::jmax (40, w - 18));
+        return (int) std::ceil (layout.getHeight()) + 12;
+    }
+
+    //==============================================================================================
+    SubText::SubText (const Theme& t)
+        : theme (t)
+    {
+        setInterceptsMouseClicks (false, false);
+    }
+
+    void SubText::setText (const juce::String& newText)
+    {
+        if (newText == text)
+            return;
+        text = newText;
+        setTitle (text);
+        repaint();
+    }
+
+    void SubText::paint (juce::Graphics& g)
+    {
+        juce::AttributedString as;
+        as.setWordWrap (juce::AttributedString::byWord);
+        as.setJustification (juce::Justification::centredLeft);
+        as.append (text, Theme::px (11.5f), theme (Tok::dim));
+        juce::TextLayout layout;
+        const auto area = getLocalBounds().toFloat();
+        layout.createLayout (as, area.getWidth());
+        layout.draw (g, area.withSizeKeepingCentre (area.getWidth(), juce::jmin (area.getHeight(), layout.getHeight())));
+    }
+
+    void NoticeBox::paint (juce::Graphics& g)
+    {
+        const auto box = getLocalBounds().toFloat().reduced (0.5f);
+        g.setColour (theme (Tok::panel));
+        g.fillRoundedRectangle (box, 8.0f);
+        g.setColour (theme (Tok::acc));
+        g.drawRoundedRectangle (box, 8.0f, 1.0f);
+        juce::TextLayout layout;
+        const auto area = getLocalBounds().toFloat().reduced (9.0f, 6.0f);
+        layout.createLayout (attributed (theme (Tok::txt)), area.getWidth());
+        layout.draw (g, area);
     }
 }

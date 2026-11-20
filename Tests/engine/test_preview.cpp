@@ -424,9 +424,10 @@ SL_TEST ("engine", previewNeverWhileHostPlays)
         const Song s = song (static_cast<std::int64_t> (i) * 256);
         hostBeats = hostBeats && ! t.previewing && t.start.playing == s.playing && (! s.playing || juce::exactlyEqual (t.start.beat, s.ppq));
     }
+    // the notes at beats 0 to 6: the last block that plays (from sample 143872) runs past beat 6 (sample 144000)
     const auto notes = soundStarts (a.L, a.R).size();
-    check (a.L == b.L && a.R == b.R && notes == 6,
-           fmt ("the switch on while the host plays: the render equals the one with it off, bit for bit (%zu notes in 3 s, 6 expected)", notes));
+    check (a.L == b.L && a.R == b.R && notes == 7,
+           fmt ("the switch on while the host plays: the render equals the one with it off, bit for bit (%zu notes, 7 expected: beats 0 to 6)", notes));
     check (with.ended == 1 && with.previewBlocks == 0 && ! with.previewSwitch && hostBeats,
            fmt ("the switch went off at the first playing block (%d end), no block played the Preview clock, every block played the host's beat",
                 with.ended));

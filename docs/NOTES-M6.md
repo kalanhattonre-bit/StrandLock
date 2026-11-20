@@ -380,6 +380,9 @@ decisions 3 and 4). Branch `m6-sample`, from main dd0aef2 (T2).
 
 ### Progress
 
-- In progress: Preview's clock in `host/HostSync` and the processor's switch, with `Tests/engine/test_preview.cpp`.
-- Next: the pins in UserSettings; Recipes, Dice, the pins and the Preview row on the Sample tab; the M6 table's pictures;
-  the checklist; these notes; the fast-forward of main.
+- Done: Preview's clock in `host/HostSync` and the processor's switch, with `Tests/engine/test_preview.cpp` (024f25c). Run
+  44796391576: every Preview row green on both platforms and under the sanitizers; one count in the test was wrong (7
+  notes, not 6: the last playing block runs past beat 6), fixed.
+- In progress: the Dice pins in UserSettings; Recipes, Dice, the pins, the Preview button and the paused notice on the
+  Sample tab; `Tests/ui/test_recipes_dice.cpp` and the M6 table's pictures (`Tests/ui/test_m6_snapshots.cpp`).
+- Next: a green run, the pictures looked at, the checklist, these notes, the fast-forward of main.

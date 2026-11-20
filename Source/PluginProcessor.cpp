@@ -219,9 +219,11 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         if (transport.previewEnded)
         {
             // Cubase plays (or a clip that does not loop ended): the switch goes off, unless a click changed it after
-            // this block read it (the click count in the upper bits then differs, and the click stands)
+            // this block read it (the click count in the upper bits then differs, and the click stands). Cubase's Play
+            // is counted, so the Sample tab can say why Preview stopped.
             std::uint32_t expected = previewWord;
-            if (previewSwitch.compare_exchange_strong (expected, previewWord & ~1u, std::memory_order_acq_rel, std::memory_order_acquire))
+            const bool off = previewSwitch.compare_exchange_strong (expected, previewWord & ~1u, std::memory_order_acq_rel, std::memory_order_acquire);
+            if (off && transport.start.playing)
                 previewStops.fetch_add (1, std::memory_order_acq_rel);
         }
         const host::MidiSettings settings { nonParam.mod1Cc.load (std::memory_order_relaxed), nonParam.mod2Cc.load (std::memory_order_relaxed) };

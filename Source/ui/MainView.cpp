@@ -315,8 +315,9 @@ namespace sl::ui
 
         auto& apvts = processor.getApvts();
         {
-            // M6 T1: the full Sample and Macros tabs, whose controls fade and explain themselves in the hint line
-            auto sp = std::make_unique<SampleTab> (t, apvts, processor);
+            // M6 T1: the full Sample and Macros tabs, whose controls fade and explain themselves in the hint line; T3: the
+            // Sample tab's recipes draw their notes dashed on the roll
+            auto sp = std::make_unique<SampleTab> (t, apvts, processor, roll);
             auto mp = std::make_unique<MacrosTab> (t, apvts, processor);
             samplePanel = sp.get();
             macrosPanel = mp.get();
@@ -444,6 +445,7 @@ namespace sl::ui
             samplePanel->onLayoutChange = nullptr;
             samplePanel->onHint = nullptr;
             samplePanel->onToast = nullptr;
+            samplePanel->releaseRoll();   // the roll goes before the panels: the recipes' hover hooks let go of its ghosts now
         }
         if (macrosPanel != nullptr)
         {

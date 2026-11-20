@@ -1,9 +1,17 @@
 #include "SampleTab.h"
 
 #include "PluginProcessor.h"
+#include "core/JsCompat.h"
 #include "core/Rates.h"
+#include "model/Recipes.h"
+#include "params/ParamBridge.h"
+#include "params/ParamText.h"
 #include "params/ParameterLayout.h"
+#include "ui/roll/GhostPreview.h"
+#include "ui/roll/RollView.h"
+#include "ui/roll/SelectionBar.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 
@@ -28,6 +36,138 @@ namespace sl::ui
         const juce::String kRevTitle = "Plays what is inside each grain backwards, whichever way the heads travel.";
         const juce::String kRerollBase = "New random spots for Scatter jumps, Spray, Drift, Skip and random Starts (one undo step). They stay the same on every loop until you Re-roll again.";
         const juce::String kRefreshTitle = "How often a head takes a fresh grab of the sound; in between, the last grab repeats. In Tape it repeats the last chunk (stutter, beat repeat).";
+
+        // sl-ui-sample.js buildRecipes and roll (T3)
+        const juce::String kDiceTitle = "Roll new Sample settings within musical limits. Pinned settings stay. Each roll is one undo step and stays put until the next roll.";
+        const juce::String kDiceHint = "Dice: rolls new Sample settings (engine, motion, heads, grain, refresh...) within musical limits. A pinned setting stays. Undo steps back.";
+        const juce::String kUnpinTitle = "Let Dice roll every setting again";
+        const juce::String kNoPins = "Pin a setting (the small pin next to its name) to keep it when you roll.";
+        const juce::String kScopeAll = "One click sets the Sample tab for every note. Some recipes also set Sample lines (Travel, Heads, Grain, Refresh): on every note (select notes to limit that).";
+
+        // Preview (decision 3)
+        const juce::String kPreviewTitle = "Preview: while Cubase is stopped, plays the clip at Cubase's tempo from where Cubase's cursor is. It stops when Cubase plays.";
+        const juce::String kPreviewOnTitle = "Stop preview: Preview is playing the clip while Cubase is stopped. Click to stop it.";
+        const juce::String kPausedText = "Cubase has paused StrandLock while it is stopped, so Preview cannot play. To use Preview, turn off this option in Cubase: "
+                                         "Studio > Studio Setup > VST Plug-ins > \"Suspend VST 3 plug-in processing when no audio signals are received\".";
+        const juce::String kStoppedByCubase = "Cubase is playing, so Preview stopped. Preview plays while Cubase is stopped.";
+
+        /** sl-ui-sample.js RECIPE_TIPS. */
+        const char* recipeTip (int n) noexcept
+        {
+            switch (n)
+            {
+                case 1: return "Plays the sound straight through with one head (Voice).";
+                case 2: return "Plays backwards.";
+                case 3: return "Holds still with 4 slightly detuned heads.";
+                case 4: return "Tape: the heads rock forwards and backwards every 1/8.";
+                case 5: return "Tape: repeats the last 1/16 like a beat repeat.";
+                case 6: return "Cloud at half speed: the heads grow from 1 to more across each note.";
+                case 7: return "Cloud: 3 heads jump to new spots every 1/8 triplet.";
+                case 8: return "Cloud with Lock: 3 heads an octave apart, in tune on anything.";
+                default: return "";
+            }
+        }
+
+        /** sl-ui-sample.js PIN_NAME. */
+        juce::String pinName (const std::string& field)
+        {
+            static const std::pair<const char*, const char*> names[] = {
+                { "engine", "Engine" }, { "lock", "Lock" }, { "motion", "Motion" }, { "speed", "Speed" }, { "heads", "Heads" },
+                { "spread", "Spread" }, { "grain", "Grain" }, { "refresh", "Refresh" }, { "spray", "Spray" }, { "tape", "Tape switch" },
+                { "rev", "Each grain backwards" }, { "drift", "Drift" }, { "headTune", "Head tune" }, { "jump", "Jump every" }
+            };
+            for (const auto& [f, name] : names)
+                if (field == f)
+                    return name;
+            return juce::String (field);
+        }
+
+        /** sl-ui-sample.js recipeLanes: what a recipe does to the notes' Sample lines, in words ("resets the Travel,
+            Heads, Grain and Refresh lines", "puts a pattern on the Travel line", "shapes the Heads line"). */
+        juce::String recipeLanes (const model::Recipe& r)
+        {
+            const auto list = [] (const juce::StringArray& w)
+            {
+                if (w.size() > 1)
+                {
+                    juce::StringArray head (w);
+                    head.remove (head.size() - 1);
+                    return head.joinIntoString (", ") + " and " + w[w.size() - 1] + " lines";
+                }
+                return w[0] + " line";
+            };
+            juce::StringArray reset, shaped, pattern;
+            for (const auto& lane : r.notes)
+            {
+                const juce::String word (core::laneInfo (lane.lane).name);
+                if (lane.action == model::RecipeLane::Action::reset)
+                    reset.add (word);
+                else if (lane.action == model::RecipeLane::Action::shape)
+                    shaped.add (word);
+                else
+                    pattern.add (word);
+            }
+            juce::StringArray out;
+            if (! reset.isEmpty())
+                out.add ("resets the " + list (reset));
+            if (! shaped.isEmpty())
+                out.add ("shapes the " + list (shaped));
+            if (! pattern.isEmpty())
+                out.add ("puts a pattern on the " + list (pattern));
+            return out.joinIntoString (" and ");
+        }
+
+        const model::Recipe* recipeOf (int n)
+        {
+            for (const auto& r : model::recipes())
+                if (r.n == n)
+                    return &r;
+            return nullptr;
+        }
+
+        /** "the 3 selected notes" / "the 1 selected note" / "every note" (sl-ui-sample.js applyRecipeN's sel). */
+        juce::String notesWord (std::size_t selected)
+        {
+            if (selected == 0)
+                return "every note";
+            return "the " + juce::String ((int) selected) + (selected == 1 ? " selected note" : " selected notes");
+        }
+
+        /** The Sample settings a recipe and Dice set (sl-model.js STRAIGHT's keys, which are DICE_FIELDS' too): exactly
+            these parameters change, as the prototype's patch changes exactly these fields. */
+        core::InstPatch samplePatch (const core::Inst& I)
+        {
+            core::InstPatch p;
+            p.engine = I.engine;
+            p.lock = I.lock;
+            p.motion = I.motion;
+            p.speed = I.speed;
+            p.heads = I.heads;
+            p.spread = I.spread;
+            p.grainVoice = I.grainVoice;
+            p.grainCloud = I.grainCloud;
+            p.grainLock = I.grainLock;
+            p.refresh.mode = I.refresh.mode;
+            p.refresh.ms = I.refresh.ms;
+            p.refresh.rate = I.refresh.rate;
+            p.refresh.lockToBeat = I.refresh.lockToBeat;
+            p.refresh.skip = I.refresh.skip;
+            p.spray = I.spray;
+            p.tape = I.tape;
+            p.rev = I.rev;
+            p.drift = I.drift;
+            p.headTune = I.headTune;
+            p.jump = I.jump;
+            return p;
+        }
+
+        std::vector<P> paramsOf (const std::vector<params::ParamChange>& changed)
+        {
+            std::vector<P> out;
+            for (const auto& c : changed)
+                out.push_back (static_cast<P> (c.first));
+            return out;
+        }
 
         /** The rate's words as the parameter lists them ("1/8 triplet"). */
         juce::String rateLabel (const juce::RangedAudioParameter& p)
@@ -99,8 +239,28 @@ namespace sl::ui
     }
 
     //==============================================================================================
-    SampleTab::SampleTab (const Theme& t, juce::AudioProcessorValueTreeState& s, StrandLockProcessor& p)
-        : TabPanel (t, s), processor (p), settings (p)
+    bool PreviewWatch::update (double nowMs, std::uint64_t blocks, bool previewOn) noexcept
+    {
+        if (! previewOn)
+        {
+            on = false;
+            paused = false;
+            return false;
+        }
+        if (! on || blocks != lastBlocks)
+        {
+            // Preview went on, or a block arrived: the 250 ms count from now
+            on = true;
+            lastBlocks = blocks;
+            since = nowMs;
+        }
+        paused = nowMs - since >= pausedAfterMs;
+        return paused;
+    }
+
+    //==============================================================================================
+    SampleTab::SampleTab (const Theme& t, juce::AudioProcessorValueTreeState& s, StrandLockProcessor& p, roll::RollView& r)
+        : TabPanel (t, s), processor (p), roll (r), settings (p), notice (t)
     {
         actions.commit = [this] (const std::string& label, const std::vector<P>& changed)
         {
@@ -111,23 +271,24 @@ namespace sl::ui
             return pushed;
         };
         actions.hint = [this] (const juce::String& text) { hint (text); };
-        actions.toast = [this] (const juce::String& text, int ms)
-        {
-            if (onToast)
-                onToast (text, ms);
-        };
+        actions.toast = [this] (const juce::String& text, int ms) { toast (text, ms); };
         const auto showHint = [this] (const juce::String& text) { hint (text); };
 
-        // Engine and Lock, Motion, Jump every, Re-roll (sl-ui-sample.js buildSampleTab's first row)
+        pins = processor.getUserSettings().dicePins();   // decision 4: the person's pins, from every project before
+
+        // Engine and Lock, Motion, Jump every, Re-roll (sl-ui-sample.js buildSampleTab's first row), and Preview
         engine = addSeg (P::engine, "Engine",
                          { { { "Tape", "Speed and pitch move together, like tape: backwards sounds reversed and slower drops the pitch." } },
                            { { "Voice", "Stays in tune with the key you play and keeps the sound's character, slowed down, frozen or backwards. Best on one clear note." } },
                            { { "Cloud", "Grains that work on anything: chords, songs, noise. Switch Lock on to play any of it in tune." } } },
-                         std::nullopt, -1, std::nullopt).control;
+                         std::nullopt, -1, std::nullopt, "engine").control;
         {
             auto l = std::make_unique<LockToggle> (t, s, actions);
             const int w = l->preferredWidth();
-            lock = &add (std::move (l), w, kControlHeight);
+            lock = l.get();
+            auto group = std::make_unique<PinGroup> (std::move (l), w, makePin ("lock"));
+            const int gw = group->preferredWidth();
+            add (std::move (group), gw, kControlHeight);
             bound (P::lock);
             lockFader = std::make_unique<Fader> (*lock, [this] { return plainHint ("Lock", kLockTitle, fadeOf (Rule::lock)); }, showHint);
         }
@@ -139,11 +300,13 @@ namespace sl::ui
                                   { { "\xe2\x86\x94 Mirror", "Every other head plays backwards (needs 2 heads or more; picking it with 1 head sets Heads to 2)." } },
                                   { { "\xe2\x9d\x84 Freeze", "The heads hold still where the note starts." } },
                                   { { "\xe2\x81\x99 Scatter", "Each head jumps to a new spot every \xe2\x80\x98Jump every\xe2\x80\x99, locked to the beat." } } },
-                                std::nullopt, 4, Rule::freeze);
+                                std::nullopt, 4, Rule::freeze, "motion");
             motion = seg.control;
             motion->onUserChange = [this] (int index) { motionChosen (index); };
         }
         jump = &choice (P::jump, "Jump every", 118);
+        jump->setCaptionAccessory (&makePin ("jump"), PinButton::width);
+        setItemWidth (*jump, jump->preferredWidth());
         jump->onUserChange = [this]
         {
             actions.commit ("Jump every " + rateLabel (jump->getParameter()).toStdString(), { P::jump });
@@ -160,6 +323,20 @@ namespace sl::ui
                 return "Re-roll: " + (st != nullptr && st->faded ? "does nothing now. " + str (st->reason) : kRerollBase);
             }, showHint);
         }
+        {
+            // Preview (U5, decision 3): the prototype's Play, while Cubase is stopped
+            auto b = std::make_unique<FlatButton> (t, "Stop preview", FlatButton::Icon::stop);
+            const int w = b->preferredWidth();   // the wider of its two texts
+            b->setButtonText ("Preview");
+            b->setIcon (FlatButton::Icon::play);
+            b->setTooltip (kPreviewTitle);
+            b->onClick = [this] { togglePreview(); };
+            preview = &add (std::move (b), w, kControlHeight);
+            previewHover = std::make_unique<HoverWatch> (*preview, [this] (bool over)
+            {
+                hint (over ? (processor.isPreviewOn() ? kPreviewOnTitle : kPreviewTitle) : juce::String());
+            });
+        }
 
         // the knobs (the last two belong to Refresh), then M0's Region knobs and the loop crossfade
         newRow();
@@ -170,6 +347,8 @@ namespace sl::ui
                 separator();
             auto k = std::make_unique<SampleKnob> (t, s, id, actions);
             k->onChange = [this] { sync(); };
+            if (const char* field = k->getSpec().pin)
+                k->setPin (&makePin (field));
             const int w = k->preferredWidth();
             knobs[(std::size_t) i] = &add (std::move (k), w, SampleKnob::preferredHeight);
             for (const auto param : rules::knobParams (id))
@@ -196,7 +375,7 @@ namespace sl::ui
                                 { { { "Smooth", "Always fresh: the heads read the sound continuously." } },
                                   { { "Free", "A fresh grab every Refresh time (5 ms to 2 s)." } },
                                   { { "Synced", "A fresh grab every note value (1 bar to 1/64, triplet or dotted)." } } },
-                                std::nullopt, -1, std::nullopt);
+                                std::nullopt, -1, std::nullopt, "refresh");
             refreshMode = seg.control;
             refreshMode->setCaptionTooltip (kRefreshTitle);
         }
@@ -214,11 +393,11 @@ namespace sl::ui
         };
         beatFader = std::make_unique<Fader> (*beatLock, [this] { return plainHint ("Lock to the beat", kBeatTitle, fadeOf (Rule::refreshRate)); }, showHint);
 
-        tape = &toggle (P::tape, "Tape");
+        tape = &pinnedToggle (P::tape, "Tape", "tape");
         tape->onUserChange = [this] { actions.commit (tape->getToggleState() ? "Tape switch on" : "Tape switch off", { P::tape }); };
         tapeFader = std::make_unique<Fader> (*tape, [this] { return plainHint ("Tape", kTapeTitle, fadeOf (Rule::tape)); }, showHint);
 
-        rev = &toggle (P::reverseGrains, "Each grain backwards");
+        rev = &pinnedToggle (P::reverseGrains, "Each grain backwards", "rev");
         rev->onUserChange = [this]
         {
             actions.commit (rev->getToggleState() ? "Each grain backwards on" : "Each grain backwards off", { P::reverseGrains });
@@ -230,27 +409,51 @@ namespace sl::ui
                              { { "Detune", "A gentle detune between the heads." } },
                              { { "Octaves", "Heads an octave apart." } },
                              { { "Fifths", "Heads a fifth and an octave apart." } } },
-                           Rule::headTune, -1, std::nullopt).control;
+                           Rule::headTune, -1, std::nullopt, "headTune").control;
         atEnd = addSeg (P::atEnd, "At the end",
                         { { { "Loop", "At the end of the Region, go round again (with a short crossfade)." } },
                           { { "Hold", "At the end of the Region, stay on the last bit." } },
                           { { "Stop", "At the end of the Region, go quiet." } } },
                         Rule::atEnd, -1, std::nullopt).control;
 
+        // Recipes 1-8 and Dice (sl-ui-sample.js buildRecipes: #recipesBox, under a line)
+        buildRecipes();
+
+        // the notice that Cubase has paused StrandLock (decision 3) sits above the rows while it shows
+        notice.setText (kPausedText);
+        addChildComponent (notice);
+        seenStops = processor.getPreviewStops();
+        processor.getUserSettings().addChangeListener (this);
+
+        syncPins();
         sync (true);
     }
 
     SampleTab::~SampleTab()
     {
+        processor.getUserSettings().removeChangeListener (this);
         for (auto& seg : segs)
         {
             seg->control->onUserChange = nullptr;
             seg->control->onHoverChange = nullptr;
+            seg->control->setCaptionAccessory (nullptr, 0);
         }
+        // the pins go before the controls that show them (the panel's own items go last)
+        jump->setCaptionAccessory (nullptr, 0);
+        for (auto* k : knobs)
+            k->setPin (nullptr);
+        diceHover.reset();
+        previewHover.reset();
+        recipeHooks.reset();
+    }
+
+    void SampleTab::releaseRoll()
+    {
+        recipeHooks.reset();
     }
 
     SampleTab::Seg& SampleTab::addSeg (P p, const juce::String& caption, std::vector<std::array<const char*, 2>> options,
-                                       std::optional<Rule> groupRule, int ruleIndex, std::optional<Rule> optionRule)
+                                       std::optional<Rule> groupRule, int ruleIndex, std::optional<Rule> optionRule, const char* pinField)
     {
         auto seg = std::make_unique<Seg>();
         seg->caption = caption;
@@ -266,6 +469,8 @@ namespace sl::ui
         }
         auto& c = segments (p, caption);
         c.setLabels (labels);
+        if (pinField != nullptr)
+            c.setCaptionAccessory (&makePin (pinField), PinButton::width);   // sl-ui-sample.js group (label, pin, ...)
         setItemWidth (c, c.preferredWidth());
         seg->control = &c;
         auto* raw = seg.get();
@@ -365,6 +570,12 @@ namespace sl::ui
             onHint (text);
     }
 
+    void SampleTab::toast (const juce::String& text, int ms)
+    {
+        if (onToast)
+            onToast (text, ms);
+    }
+
     juce::String SampleTab::rerollTitle() const
     {
         return str (rules::fadeTitle (kRerollBase.toStdString(), fadeOf (Rule::reroll))) + "\n\nRoll " + juce::String (settings.inst().seed);
@@ -380,9 +591,294 @@ namespace sl::ui
         return *knobs[(std::size_t) juce::jlimit (0, 8, static_cast<int> (id))];
     }
 
+    PinButton* SampleTab::getPin (const std::string& field) const noexcept
+    {
+        for (const auto& b : pinButtons)
+            if (b->getField() == field)
+                return b.get();
+        return nullptr;
+    }
+
+    //==============================================================================================
+    // T3: the pins, the recipes, Dice and Preview.
+
+    PinButton& SampleTab::makePin (const char* field)
+    {
+        auto b = std::make_unique<PinButton> (theme, std::string (field), pinName (field));
+        auto* raw = b.get();
+        b->onClick = [this, raw] { setPinned (raw->getField(), ! raw->isPinned()); };
+        pinButtons.push_back (std::move (b));
+        return *raw;
+    }
+
+    ParamToggle& SampleTab::pinnedToggle (P p, const juce::String& text, const char* pinField)
+    {
+        // sl-ui-sample.js toggle ({ pin }): the button and its pin side by side; the pin does not fade with the button
+        auto c = std::make_unique<ParamToggle> (theme, state, idOf (p), text);
+        auto& ref = *c;
+        const int w = c->preferredWidth();
+        auto group = std::make_unique<PinGroup> (std::move (c), w, makePin (pinField));
+        const int gw = group->preferredWidth();
+        add (std::move (group), gw, kControlHeight);
+        bound (p);
+        return ref;
+    }
+
+    void SampleTab::buildRecipes()
+    {
+        // a line across the tab (#recipesBox's border-top), then Recipes 1-8 and what they act on
+        newRow();
+        add (std::make_unique<TabRule> (theme), 100000, 1);
+        newRow();
+        caption ("Recipes", Caption::Style::label);
+        recipeHooks = std::make_unique<roll::HoverHooks> (&roll.getGhosts(), [this] (const juce::String& text) { hint (text); });
+        for (const auto& r : model::recipes())
+        {
+            const int n = r.n;
+            if (n < 1 || n > 8)
+                continue;
+            auto b = std::make_unique<RecipeButton> (theme, n, juce::String (r.name));
+            const auto lanes = r.notes.empty() ? juce::String() : " It also " + recipeLanes (r) + ".";
+            b->setTooltip (juce::String (recipeTip (n)) + lanes);
+            b->onClick = [this, n] { applyRecipe (n); };
+            const int w = b->widthNeeded();
+            auto& ref = add (std::move (b), w, kControlHeight);
+            recipes[(std::size_t) n - 1] = &ref;
+            // the mouse on a recipe: its notes dashed on the roll, and what it does in the hint line (a press takes the
+            // dashed notes away first)
+            recipeHooks->add (ref, [this, n] { return roll.getTools().previewRecipe (n); }, [this, n] { return recipeHint (n); });
+        }
+        {
+            auto t = std::make_unique<SubText> (theme);
+            recipeScope = &add (std::move (t), 640, SubText::twoLines);
+        }
+
+        // Dice, what it keeps, Unpin all
+        newRow();
+        {
+            auto b = std::make_unique<FlatButton> (theme, "Dice", FlatButton::Icon::dice);
+            b->setFontPx (13.0f);   // .sls-dice{font-size:13px}
+            b->setTooltip (kDiceTitle);
+            b->onClick = [this] { rollDice(); };
+            const int w = b->preferredWidth();
+            dice = &add (std::move (b), w, kControlHeight);
+            diceHover = std::make_unique<HoverWatch> (*dice, [this] (bool over) { hint (over ? kDiceHint : juce::String()); });
+        }
+        {
+            auto t = std::make_unique<SubText> (theme);
+            diceInfo = &add (std::move (t), 560, SubText::twoLines);
+        }
+        {
+            auto b = std::make_unique<FlatButton> (theme, "Unpin all");
+            b->setTooltip (kUnpinTitle);
+            b->onClick = [this] { unpinAll(); };
+            const int w = b->preferredWidth();
+            unpin = &add (std::move (b), w, kControlHeight);
+        }
+    }
+
+    juce::String SampleTab::recipeHint (int n) const
+    {
+        // sl-ui-sample.js: the recipe's mouseenter
+        const auto* r = recipeOf (n);
+        if (r == nullptr)
+            return {};
+        const auto on = notesWord (processor.getDocument().rollState().selected.size());
+        return "Recipe " + juce::String (n) + " " + juce::String (r->name) + ": " + recipeTip (n) + " One click sets the Sample tab for every note"
+             + (r->notes.empty() ? juce::String() : " and " + recipeLanes (*r) + " of " + on) + "; the dashed lines preview the notes.";
+    }
+
+    void SampleTab::applyRecipe (int n)
+    {
+        // sl-ui-sample.js applyRecipeN: SLModel.applyRecipe on the selected notes (every note with none selected), the
+        // notes and the instrument as one undo step (commitBoth)
+        const auto* recipe = recipeOf (n);
+        if (recipe == nullptr)
+            return;
+        roll.getGhosts().clear();   // A.setGhost (null), then the recipe
+        const auto ids = roll.getTools().ids();
+        const auto before = processor.getDocument().current();
+        auto result = model::applyRecipe (*before, processor.readInst(), n, ids.empty() ? model::Ids::all() : model::Ids (ids));
+        if (! result.has_value())
+        {
+            toast ("That recipe could not be applied", 2400);
+            return;
+        }
+        const auto out = processor.getDocument().apply (std::move (result->clip));
+        if (! out.accepted)
+        {
+            toast (str (out.message), 3500);
+            return;
+        }
+        const auto changed = params::applyPatch (state, samplePatch (result->inst));
+        actions.commit ("Recipe " + std::to_string (n) + " " + recipe->name, paramsOf (changed));
+        if (processor.getDocument().current() != before)
+            roll.edited();   // the notes changed: the roll and the rows around it show them
+
+        const auto sel = notesWord (ids.size());
+        toast ("Recipe " + juce::String (n) + " " + juce::String (recipe->name) + ": the Sample tab is set for every note"
+                   + (recipe->notes.empty() ? juce::String() : ", and it " + recipeLanes (*recipe) + " of " + sel)
+                   + ". A note keeps what it has in its own Note settings.",
+               5000);
+    }
+
+    void SampleTab::rollDice()
+    {
+        // sl-ui-sample.js roll: a UI seed (the rolled values are stored, so they stay put, Y7), SLModel.dice with the
+        // pins, one undo step "Dice"
+        ++rolls;
+        const auto now = juce::Time::currentTimeMillis();   // Date.now ()
+        lastSeed = core::toInt32 ((double) (now % 1000003) + (double) rolls * 7919.0);
+        const auto rolled = model::dice (processor.readInst(), (double) lastSeed, pins);
+        const auto changed = params::applyPatch (state, samplePatch (rolled));
+        actions.commit ("Dice", paramsOf (changed));
+
+        static const char* const engines[] = { "Tape", "Voice", "Cloud" };
+        static const char* const motions[] = { "Forward", "Backward", "Bounce", "Mirror", "Freeze", "Scatter" };
+        juce::StringArray parts;
+        parts.add (juce::String (engines[juce::jlimit (0, 2, static_cast<int> (rolled.engine))])
+                   + (rolled.engine == core::Engine::cloud && rolled.lock ? " with Lock" : ""));
+        parts.add (motions[juce::jlimit (0, 5, static_cast<int> (rolled.motion))]);
+        parts.add (str (params::text::fmtHeads (rolled.heads)));
+        if (rolled.refresh.mode != core::RefreshMode::smooth)
+            parts.add ("Refresh " + (rolled.refresh.mode == core::RefreshMode::sync ? juce::String (core::rateLabel (rolled.refresh.rate))
+                                                                                    : str (params::text::fmtMs (rolled.refresh.ms))));
+        toast ("Dice: " + parts.joinIntoString (juce::String::fromUTF8 (" \xc2\xb7 ")) + ". Undo steps back.", 3500);
+    }
+
+    void SampleTab::setPinned (const std::string& field, bool pinned)
+    {
+        // sl-ui-sample.js pinBtn's click: kept at once (decision 4: per person, UserSettings)
+        auto list = pins;
+        const auto it = std::find (list.begin(), list.end(), field);
+        if (pinned && it == list.end())
+            list.push_back (field);
+        else if (! pinned && it != list.end())
+            list.erase (it);
+        else
+            return;
+        pins = list;
+        processor.getUserSettings().setDicePins (pins);
+        syncPins();
+    }
+
+    void SampleTab::unpinAll()
+    {
+        if (pins.empty())
+            return;
+        pins.clear();
+        processor.getUserSettings().setDicePins (pins);
+        syncPins();
+    }
+
+    void SampleTab::changeListenerCallback (juce::ChangeBroadcaster*)
+    {
+        // another StrandLock window changed the person's pins
+        const auto now = processor.getUserSettings().dicePins();
+        if (now == pins)
+            return;
+        pins = now;
+        syncPins();
+    }
+
+    void SampleTab::syncPins()
+    {
+        // sl-ui-sample.js syncPins: each pin lit and titled, what Dice keeps (in DICE_FIELDS' order), Unpin all only with
+        // a pin
+        for (const auto& b : pinButtons)
+            b->setPinned (std::find (pins.begin(), pins.end(), b->getField()) != pins.end());
+        juce::StringArray names;
+        for (const char* f : model::kDiceFields)
+            if (std::find (pins.begin(), pins.end(), std::string (f)) != pins.end())
+                names.add (pinName (f));
+        diceInfo->setText (names.isEmpty() ? kNoPins : "Pinned: " + names.joinIntoString (", "));
+        unpin->setVisible (! pins.empty());
+    }
+
+    void SampleTab::syncRecipeScope()
+    {
+        // sl-ui-sample.js syncRecipeScope: what the Sample lines part of a recipe acts on (the text only when it changes)
+        const auto n = processor.getDocument().rollState().selected.size();
+        if (n == scopeShown)
+            return;
+        scopeShown = n;
+        recipeScope->setText (n == 0 ? kScopeAll
+                                     : "One click sets the Sample tab for every note. Some recipes also set Sample lines (Travel, Heads, Grain, Refresh): only on the "
+                                           + juce::String ((int) n) + (n == 1 ? " selected note." : " selected notes."));
+    }
+
+    void SampleTab::togglePreview()
+    {
+        processor.setPreview (! processor.isPreviewOn());
+        syncPreview();
+    }
+
+    void SampleTab::syncPreview()
+    {
+        // Cubase's Play turned Preview off since the last look: say why
+        const auto stops = processor.getPreviewStops();
+        if (stops != seenStops)
+        {
+            seenStops = stops;
+            toast (kStoppedByCubase, 3500);
+        }
+
+        // decision 3: no block for 250 ms while Preview is on means Cubase has paused StrandLock
+        const bool on = processor.isPreviewOn();
+        const double now = clock ? clock() : juce::Time::getMillisecondCounterHiRes();
+        const bool paused = previewWatch.update (now, processor.getBlocksProcessed(), on);
+        const int state = on ? (paused ? 2 : 1) : 0;
+        if (state == previewShown)
+            return;
+        previewShown = state;
+        preview->setToggleState (on, juce::dontSendNotification);
+        preview->setButtonText (on ? "Stop preview" : "Preview");
+        preview->setIcon (on ? FlatButton::Icon::stop : FlatButton::Icon::play);
+        preview->setTooltip (on ? kPreviewOnTitle : kPreviewTitle);
+        showNotice (state == 2);
+    }
+
+    void SampleTab::showNotice (bool show)
+    {
+        if (show == notice.isVisible())
+            return;
+        notice.setVisible (show);
+        if (! show)
+        {
+            setTopInset (0);
+            return;
+        }
+        noticeWidth = juce::jmax (40, getWidth() - 2 * padX);
+        noticeHeight = notice.heightFor (noticeWidth);
+        setTopInset (noticeHeight + rowGap);   // the rows move down under it (and the pane takes the new height)
+    }
+
+    void SampleTab::resized()
+    {
+        if (notice.isVisible())
+        {
+            // the notice wraps at the tab's width: measured again only when that changed
+            const int w = juce::jmax (40, getWidth() - 2 * padX);
+            if (w != noticeWidth)
+            {
+                noticeWidth = w;
+                noticeHeight = notice.heightFor (w);
+            }
+            notice.setBounds (padX, padY, w, noticeHeight);
+            if (getTopInset() != noticeHeight + rowGap)
+            {
+                setTopInset (noticeHeight + rowGap);   // lays the rows out again (and calls this again)
+                return;
+            }
+        }
+        TabPanel::resized();
+    }
+
     //==============================================================================================
     void SampleTab::sync (bool force)
     {
+        syncPreview();
+        syncRecipeScope();
         if (! settings.update (force))
             return;
         applyFades();

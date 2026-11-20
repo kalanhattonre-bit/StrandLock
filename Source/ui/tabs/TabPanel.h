@@ -93,6 +93,12 @@ namespace sl::ui
         /** The panel lays itself out again and calls onLayoutChange. */
         void layoutChanged();
 
+        /** Room kept above the rows, in px with the gap under it (M6: the Sample tab's notice that Cubase has paused
+            StrandLock), 0 for none; it counts as a row of its own. When it changes the panel lays itself out again and
+            calls onLayoutChange. */
+        void setTopInset (int px);
+        int getTopInset() const noexcept { return topInset; }
+
         const Theme& theme;
         juce::AudioProcessorValueTreeState& state;
 
@@ -104,5 +110,6 @@ namespace sl::ui
         std::vector<Knob*> knobs;
         juce::StringArray boundIds;
         bool breakNext = false;
+        int topInset = 0;
     };
 }

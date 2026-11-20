@@ -114,6 +114,9 @@ namespace sl::ui
         /** Called after a gesture changed the value (the tab re-reads the settings at once). */
         std::function<void()> onChange;
 
+        /** Its Dice pin (M6 T3), drawn just after its name: it becomes a child (nullptr takes it away). */
+        void setPin (juce::Component* pinButton);
+
         int preferredWidth() const;
         static constexpr int preferredHeight = 72;
 
@@ -151,6 +154,8 @@ namespace sl::ui
         std::optional<rules::KnobDrag> drag;
         std::unique_ptr<ValueLabel> label;
         std::unique_ptr<HoverWatch> hover;
+        juce::Component* pin = nullptr;   // the Dice pin after the name, or none
+        float nameWidth = 0.0f;           // the name's width, measured when the pin came
     };
 
     //==============================================================================================
@@ -174,5 +179,119 @@ namespace sl::ui
     private:
         TabActions& actions;
         ParamBinding lock, engine;
+    };
+
+    //==============================================================================================
+    /** The small push-pin next to a setting's name (sl-ui-sample.js pinBtn and .sls-pin): Dice leaves a pinned setting
+        alone. It shows the prototype's pin, dim at rest, in the text colour under the mouse, and in the accent's colours
+        while pinned; its tooltip says which. The tab keeps the pins (UserSettings) and lights them (setPinned). */
+    class PinButton final : public juce::Button
+    {
+    public:
+        /** field: a model::kDiceFields name; name: the prototype's PIN_NAME ("Engine", "Tape switch"). */
+        PinButton (const Theme&, std::string field, juce::String name);
+
+        const std::string& getField() const noexcept { return field; }
+        const juce::String& getPinName() const noexcept { return pinName; }
+
+        void setPinned (bool on);
+        bool isPinned() const noexcept { return getToggleState(); }
+
+        void paintButton (juce::Graphics&, bool isMouseOver, bool isButtonDown) override;
+
+        static constexpr int width = 16, height = 14;   // .sls-pin: a 10 px pin with 3 px and 1 px of padding, 2 px more height
+
+    private:
+        const Theme& theme;
+        std::string field;
+        juce::String pinName;
+    };
+
+    /** A switch and its pin side by side, 4 px apart (sl-ui-sample.js toggle with a pin: a span holding the button and
+        the pin; the pin is not faded with the button). It owns the switch; the tab owns the pin. */
+    class PinGroup final : public juce::Component
+    {
+    public:
+        PinGroup (std::unique_ptr<juce::Component> control, int controlWidth, PinButton& pin);
+
+        int preferredWidth() const noexcept { return controlWidth + 4 + PinButton::width; }
+        void resized() override;
+
+    private:
+        std::unique_ptr<juce::Component> control;
+        int controlWidth;
+        PinButton& pin;
+    };
+
+    /** A recipe's button (sl-ui-sample.js buildRecipes, .sls-recipes>button): its number in the accent, then its name. */
+    class RecipeButton final : public FlatButton
+    {
+    public:
+        RecipeButton (const Theme&, int number, const juce::String& name);
+
+        int getNumber() const noexcept { return number; }
+        const juce::String& getRecipeName() const noexcept { return recipeName; }
+
+        /** The number, 3 px, the name, and 8 px of padding each side. */
+        int widthNeeded() const;
+
+        void paintButton (juce::Graphics&, bool isMouseOver, bool isButtonDown) override;
+
+    private:
+        int number;
+        juce::String recipeName;
+    };
+
+    /** A notice at the top of a tab (sl-ui-sample.css .sls-sugline: the panel colour with an accent border, 12 px text
+        that wraps): the Sample tab's message that Cubase has paused StrandLock while it is stopped (M6). */
+    class NoticeBox final : public juce::Component
+    {
+    public:
+        explicit NoticeBox (const Theme&);
+
+        void setText (const juce::String& newText);
+        const juce::String& getText() const noexcept { return text; }
+
+        /** The height it needs at this width (it measures the text: call it when the text or the width changes). */
+        int heightFor (int width) const;
+
+        void paint (juce::Graphics&) override;
+
+    private:
+        juce::AttributedString attributed (juce::Colour colour) const;
+
+        const Theme& theme;
+        juce::String text;
+    };
+
+    /** A dim line of small text that wraps in its box (sl-ui-sample.css .sls-sub, 11.5 px): the recipes' scope and what
+        Dice keeps. Its box is fixed, so a new text only repaints it (nothing is measured on the editor's tick). */
+    class SubText final : public juce::Component
+    {
+    public:
+        explicit SubText (const Theme&);
+
+        void setText (const juce::String& newText);
+        const juce::String& getText() const noexcept { return text; }
+
+        /** Two lines of it. */
+        static constexpr int twoLines = 30;
+
+        void paint (juce::Graphics&) override;
+
+    private:
+        const Theme& theme;
+        juce::String text;
+    };
+
+    /** A thin line across the tab (#recipesBox's border-top, between the Sample settings and the recipes). */
+    class TabRule final : public juce::Component
+    {
+    public:
+        explicit TabRule (const Theme& t) : theme (t) { setInterceptsMouseClicks (false, false); }
+        void paint (juce::Graphics& g) override { g.fillAll (theme (Tok::line)); }
+
+    private:
+        const Theme& theme;
     };
 }

@@ -126,24 +126,35 @@ namespace sl::ui
             onLayoutChange();
     }
 
+    void TabPanel::setTopInset (int px)
+    {
+        const int now = juce::jmax (0, px);
+        if (now == topInset)
+            return;
+        topInset = now;
+        layoutChanged();
+    }
+
     int TabPanel::heightFor (int width) const
     {
-        const auto area = juce::Rectangle<int> (0, 0, juce::jmax (1, width), 100000).reduced (padX, padY);
-        return flowLayout (items, area, gap, rowGap, false) + 2 * padY;
+        const auto area = juce::Rectangle<int> (0, 0, juce::jmax (1, width), 100000).reduced (padX, padY).withTrimmedTop (topInset);
+        return flowLayout (items, area, gap, rowGap, false) + topInset + 2 * padY;
     }
 
     std::vector<int> TabPanel::rowEnds (int width) const
     {
-        const auto area = juce::Rectangle<int> (0, 0, juce::jmax (1, width), 100000).reduced (padX, padY);
+        const auto area = juce::Rectangle<int> (0, 0, juce::jmax (1, width), 100000).reduced (padX, padY).withTrimmedTop (topInset);
         std::vector<int> ends;
         flowLayout (items, area, gap, rowGap, false, &ends);
         for (auto& e : ends)
-            e += 2 * padY;
+            e += topInset + 2 * padY;
+        if (topInset > 0)
+            ends.insert (ends.begin(), topInset - rowGap + 2 * padY);   // the room above the rows ends a row of its own
         return ends;
     }
 
     void TabPanel::resized()
     {
-        flowLayout (items, getLocalBounds().reduced (padX, padY), gap, rowGap, true);
+        flowLayout (items, getLocalBounds().reduced (padX, padY).withTrimmedTop (topInset), gap, rowGap, true);
     }
 }

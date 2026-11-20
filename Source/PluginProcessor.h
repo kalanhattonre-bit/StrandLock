@@ -191,8 +191,8 @@ public:
     void setPreview (bool on);
     bool isPreviewOn() const noexcept { return (previewSwitch.load (std::memory_order_acquire) & 1u) != 0; }
 
-    /** How many times the audio thread turned Preview off itself (Cubase played, or a clip that does not loop
-        ended); the Sample tab says why. Any thread. */
+    /** How many times the audio thread turned Preview off because Cubase played; the Sample tab says why. (At the end
+        of a clip that does not loop it turns off too, as the prototype's Play does, and is not counted.) Any thread. */
     std::uint32_t getPreviewStops() const noexcept { return previewStops.load (std::memory_order_acquire); }
 
     /** The audio thread's last block played the Preview clock. Any thread. */

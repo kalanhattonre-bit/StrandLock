@@ -140,7 +140,7 @@ namespace sl::ui
     class FlatButton : public juce::Button
     {
     public:
-        enum class Icon { none, sun, moon, keys, folder, notes, nodes, chevronDown, chevronUp, copy, padlock };
+        enum class Icon { none, sun, moon, keys, folder, notes, nodes, chevronDown, chevronUp, copy, padlock, play, stop, dice };
 
         FlatButton (const Theme&, const juce::String& buttonText, Icon icon = Icon::none);
 
@@ -255,11 +255,19 @@ namespace sl::ui
         juce::String getSegmentTooltip (int index) const { return segmentTips[index]; }
         juce::String getTooltip() override { return hovered >= 0 ? segmentTips[hovered] : captionTip; }
 
+        /** A small component of its own just after the caption, width px wide and as high as it is now (the Sample tab's
+            Dice pins, M6): it becomes a child, centred on the caption, and the segments start after it. nullptr takes it
+            away. */
+        void setCaptionAccessory (juce::Component* accessory, int width);
+
+        void resized() override;
+
     private:
         void setHovered (int index);
 
         int segmentAt (juce::Point<float> position) const;
         float captionWidth() const;
+        float segmentsStart() const;   // the caption, and the accessory after it
         std::vector<float> segmentWidths() const;
 
         const Theme& theme;
@@ -270,6 +278,8 @@ namespace sl::ui
         std::vector<float> alphas;   // per segment (empty: all 1)
         juce::StringArray segmentTips;
         juce::String captionTip;
+        juce::Component* accessory = nullptr;
+        int accessoryWidth = 0, accessoryHeight = 0;
         ParamBinding binding;
     };
 
@@ -295,6 +305,10 @@ namespace sl::ui
         /** Called after the user picked another item and the parameter took it (the strip makes an undo step). */
         std::function<void()> onUserChange;
 
+        /** A small component of its own just after the caption, width px wide and as high as it is now (the Sample tab's
+            Dice pins, M6): it becomes a child, centred on the caption, and the box starts after it. nullptr takes it away. */
+        void setCaptionAccessory (juce::Component* accessory, int width);
+
     private:
         float captionWidth() const;
 
@@ -304,6 +318,8 @@ namespace sl::ui
         juce::ComboBox box;
         ParamBinding binding;
         bool syncing = false;
+        juce::Component* accessory = nullptr;
+        int accessoryWidth = 0, accessoryHeight = 0;
     };
 
     //==============================================================================================

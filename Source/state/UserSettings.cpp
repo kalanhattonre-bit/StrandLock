@@ -2,6 +2,10 @@
 
 #include "StateChunks.h"
 
+#include "model/Recipes.h"
+
+#include <algorithm>
+#include <iterator>
 #include <mutex>
 
 namespace sl::state
@@ -11,6 +15,20 @@ namespace sl::state
         const char* const kThemeKey = "theme";
         const char* const kUiScaleKey = "uiScalePercent";
         const char* const kKeysKey = "keysDefault";
+        const char* const kPinsKey = "dicePins";   // the Dice fields pinned, comma separated (M6)
+
+        /** The names that are Dice fields, each once, in their order. */
+        std::vector<std::string> onlyDiceFields (const std::vector<std::string>& names)
+        {
+            std::vector<std::string> out;
+            for (const auto& n : names)
+            {
+                const bool field = std::find (std::begin (model::kDiceFields), std::end (model::kDiceFields), n) != std::end (model::kDiceFields);
+                if (field && std::find (out.begin(), out.end(), n) == out.end())
+                    out.push_back (n);
+            }
+            return out;
+        }
 
         juce::PropertiesFile::Options options()
         {
@@ -103,6 +121,27 @@ namespace sl::state
     void UserSettings::setKeysDefault (bool on)
     {
         properties->setValue (kKeysKey, on);
+        changed();
+    }
+
+    std::vector<std::string> UserSettings::dicePins() const
+    {
+        juce::StringArray parts;
+        parts.addTokens (properties->getValue (kPinsKey), ",", "");
+        parts.trim();
+        parts.removeEmptyStrings();
+        std::vector<std::string> names;
+        for (const auto& p : parts)
+            names.push_back (p.toStdString());
+        return onlyDiceFields (names);
+    }
+
+    void UserSettings::setDicePins (const std::vector<std::string>& pins)
+    {
+        juce::StringArray parts;
+        for (const auto& p : onlyDiceFields (pins))
+            parts.add (juce::String (p));
+        properties->setValue (kPinsKey, parts.joinIntoString (","));
         changed();
     }
 
