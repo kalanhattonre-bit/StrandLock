@@ -9,6 +9,8 @@
 //   that value's float (plan 1.6 #12), so its readout is the prototype's. A knob with nothing to do now is faded (.42, .6
 //   under the mouse); the Grain knob in Tape with no grain notes is off ("—", a press only says why).
 // - LockToggle: Lock lights only with Cloud; on another engine a click switches to Cloud with Lock in one undo step.
+// - T3: PinButton (a setting's Dice pin), PinGroup (a switch with its pin), RecipeButton, SubText (dim text that wraps in a
+//   box), NoticeBox (the paused-host notice) and TabRule (the line above the recipes).
 //
 // They write their parameters on the message thread through ParamBinding (no attachment, plan 7.4 decision 1) and the
 // editor's 30 Hz timer moves them (ParamSynced). Each finished gesture is one undo step through TabActions::commit

@@ -23,6 +23,7 @@ namespace sl::ui
         using rules::Rule;
 
         constexpr int kControlHeight = 26;   // a button or select at this window height (TabPanel's)
+        constexpr int kDiceInfoMax = 560;    // what Dice keeps: at most this wide, then two lines
         constexpr float kFadedAlpha = 0.42f, kFadedOnAlpha = 0.6f;
 
         juce::String str (const std::string& s) { return juce::String::fromUTF8 (s.c_str()); }
@@ -649,8 +650,9 @@ namespace sl::ui
             recipeHooks->add (ref, [this, n] { return roll.getTools().previewRecipe (n); }, [this, n] { return recipeHint (n); });
         }
         {
+            // the whole width of the tab (the flow makes a wider item as wide as the row), two lines at most
             auto t = std::make_unique<SubText> (theme);
-            recipeScope = &add (std::move (t), 640, SubText::twoLines);
+            recipeScope = &add (std::move (t), 100000, SubText::twoLines);
         }
 
         // Dice, what it keeps, Unpin all
@@ -666,7 +668,7 @@ namespace sl::ui
         }
         {
             auto t = std::make_unique<SubText> (theme);
-            diceInfo = &add (std::move (t), 560, SubText::twoLines);
+            diceInfo = &add (std::move (t), kDiceInfoMax, SubText::twoLines);
         }
         {
             auto b = std::make_unique<FlatButton> (theme, "Unpin all");
@@ -791,8 +793,15 @@ namespace sl::ui
         for (const char* f : model::kDiceFields)
             if (std::find (pins.begin(), pins.end(), std::string (f)) != pins.end())
                 names.add (pinName (f));
-        diceInfo->setText (names.isEmpty() ? kNoPins : "Pinned: " + names.joinIntoString (", "));
+        const auto text = names.isEmpty() ? kNoPins : "Pinned: " + names.joinIntoString (", ");
+        diceInfo->setText (text);
         unpin->setVisible (! pins.empty());
+
+        // Unpin all right after the text (the prototype's inline row): the box takes the text's width, at most 560 px (two
+        // lines). Measured here, on a pin's click, never on the editor's tick.
+        const int w = juce::jlimit (40, kDiceInfoMax, (int) std::ceil (Theme::textWidth (Theme::px (11.5f), text)) + 4);
+        if (resizeItem (*diceInfo, w))
+            layoutChanged();
     }
 
     void SampleTab::syncRecipeScope()

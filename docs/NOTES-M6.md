@@ -380,9 +380,208 @@ decisions 3 and 4). Branch `m6-sample`, from main dd0aef2 (T2).
 
 ### Progress
 
-- Done: Preview's clock in `host/HostSync` and the processor's switch, with `Tests/engine/test_preview.cpp` (024f25c). Run
-  44796391576: every Preview row green on both platforms and under the sanitizers; one count in the test was wrong (7
-  notes, not 6: the last playing block runs past beat 6), fixed.
-- In progress: the Dice pins in UserSettings; Recipes, Dice, the pins, the Preview button and the paused notice on the
-  Sample tab; `Tests/ui/test_recipes_dice.cpp` and the M6 table's pictures (`Tests/ui/test_m6_snapshots.cpp`).
-- Next: a green run, the pictures looked at, the checklist, these notes, the fast-forward of main.
+- Done: Preview's clock in `host/HostSync` and the processor's switch, with `Tests/engine/test_preview.cpp` (024f25c).
+- Done: the Dice pins in UserSettings; Recipes, Dice, the pins, the Preview button and the paused notice on the Sample
+  tab; `Tests/ui/test_recipes_dice.cpp` and the M6 table's pictures (`Tests/ui/test_m6_snapshots.cpp`) (a16cdfb, then
+  92f3798: three checks that asked the wrong thing, and the checklist). Run 44805727952 on 92f3798 is green on every job
+  and step (figures below).
+- Done: every picture of that run that T3 changed looked at beside the prototype's (sample.png, fresh1100tab.png, ns.png,
+  strip-play.png): the 20 `m6_table_*` pictures, T1's and T2's `m6_*` review shots, and the M0-M5 pictures with the
+  Sample tab open. Nothing clipped or overlapping; the pins, recipes, Dice and Preview as the prototype draws them.
+- Done: Dice's text now takes its own width, so Unpin all follows it (it sat after a fixed 560 px box), and the
+  recipes' scope runs the tab's width; `docs/CUBASE-CHECKLIST.md` has the M6 section; these notes.
+- Next: a green run on this head, its pictures looked at, then the fast-forward of main (main is still dd0aef2).
+
+### Files
+
+- `Source/host/HostSync`: Preview's clock. `setPreview` (the switch, set before each block), `isPreviewing`,
+  `previewBeat`; `plan` takes the clip's length in beats (a clip that does not loop ends Preview there) and says in
+  `BlockTransport` whether the block played the Preview clock (`previewing`) and whether it turned the switch off
+  itself (`previewEnded`).
+- `Source/PluginProcessor`: the Preview switch (`setPreview`, `isPreviewOn`), `getPreviewStops` (how many times
+  Cubase's Play turned it off), `isPreviewPlaying`, `getBlocksProcessed`. processBlock reads the switch every block,
+  turns it off when HostSync ended a Preview (a compare-and-swap, below) and counts its blocks. No allocation, lock or
+  wait: atomics only.
+- `Source/doc/CommandQueue.h`: a comment only (previewStart / previewStop are taken and ignored, below).
+- `Source/state/UserSettings`: `dicePins` / `setDicePins` (decision 4).
+- `Source/ui/Controls`: FlatButton's `play`, `stop` and `dice` icons; `SegmentedControl::setCaptionAccessory` and
+  `ChoiceBox::setCaptionAccessory` (a small control after the caption: the pins).
+- `Source/ui/tabs/TabPanel`: `setTopInset` (room above the rows: the paused notice).
+- `Source/ui/tabs/SampleControls`: `PinButton` (sl-ui-sample.js pinBtn and .sls-pin), `PinGroup` (a switch and its
+  pin), `RecipeButton` (.sls-recipes>button), `SubText` (.sls-sub in a fixed box), `NoticeBox` (.sls-sugline),
+  `TabRule` (#recipesBox's border-top); `SampleKnob::setPin`.
+- `Source/ui/tabs/SampleTab`: the pins, the recipes (with their hover through the roll's ghosts), Dice, the Preview
+  button and the paused notice; `PreviewWatch`, the paused-host check.
+- `Source/ui/MainView`: hands the roll to the Sample tab, and lets the recipes' hover hooks go in its destructor (the
+  roll is destroyed before the panels).
+- Tests: `Tests/engine/test_preview.cpp` (the M6 table's Preview row and an allocation row), `Tests/ui/test_recipes_dice.cpp`
+  (recipes, Dice, the pins, the paused notice), `Tests/ui/test_m6_snapshots.cpp` (the M6 table's pictures).
+- `docs/CUBASE-CHECKLIST.md`: the M6 section.
+
+### Decisions and deviations
+
+- **Preview's switch is an atomic word, not the CommandQueue's previewStart / previewStop.** The audio thread turns
+  Preview off itself when Cubase plays, so the switch has two writers. The word holds the on bit and a count of clicks
+  above it; the audio thread clears the bit with a compare-and-swap on the word it read at the start of its block, so a
+  click made after that never gets undone. The two command kinds stay in the queue, taken and ignored (plan 1.3 lists
+  them).
+- **The Preview start is Cubase's position** (where its cursor stands) less the clip's offset, or beat 0 when Cubase
+  gives none. The plan names "the Preview start" without saying what it is. The prototype's Play starts at its own
+  marker on its ruler; in the plugin the ruler's marker follows Cubase (M4), so Cubase's cursor is the start. Moving the
+  cursor while Preview plays starts it again there (the prototype's setStartBeat while playing). A tempo change carries
+  on from the beat reached, as the engine's own clock does.
+- **Preview turns off when Cubase plays, and stays off when Cubase stops.** Otherwise pressing Stop in Cubase would
+  start StrandLock playing by itself. A toast says why ("Cubase is playing, so Preview stopped. Preview plays while
+  Cubase is stopped."). With the clip's loop off, Preview stops at the clip's end, as the prototype's Play does (no
+  toast; the button goes back to Preview).
+- **The Preview button is at the end of the Sample tab's first row.** Decision 3 puts its message on the Sample tab,
+  and the first row shows whenever the tab is open, even in a short window (at 1100 px it sits on the row's second line
+  beside Re-roll, as the prototype's Jump every and Re-roll do). It reads "Preview" with a play triangle, and "Stop
+  preview" with a square, lit, while on.
+- **The paused notice is a box at the top of the Sample tab** (where the prototype shows its engine suggestion,
+  .sls-sugline), shown only while Cubase has paused StrandLock; the rows move down under it and back when it goes. The
+  check runs on the editor's timer: no new block for 250 ms while the switch is on (the count starts again at every
+  block and when Preview goes on). The audio thread only counts blocks. Its words: "Cubase has paused StrandLock while
+  it is stopped, so Preview cannot play. To use Preview, turn off this option in Cubase: Studio > Studio Setup > VST
+  Plug-ins > "Suspend VST 3 plug-in processing when no audio signals are received"."
+- **A recipe is one undo step for the notes and the Sample settings** (sl-ui-sample.js commitBoth): the notes through
+  `ClipDocument::apply` (no step of their own), the settings through `params::applyPatch`, then `pushUndoStep` with the
+  parameters that changed. Only the Sample settings (sl-model.js STRAIGHT's fields, which are DICE_FIELDS' too) are
+  patched, so a recipe changes exactly the parameters the prototype's patch changes. A recipe that changes nothing makes
+  no step, as the prototype's History does.
+- **Dice** uses the prototype's UI seed, ((Date.now () % 1000003) + rolls x 7919) | 0, and one undo step "Dice"; the
+  tab keeps the last seed for the tests.
+- **Pins** are stored in UserSettings as a comma-separated list ("dicePins"), Dice fields only and each once (the
+  prototype filters the same way). Another StrandLock window's change reaches the tab through UserSettings' change
+  message. Each pin sits where the prototype's does: after the caption (Engine, Motion, Jump every, Refresh, Head tune),
+  after the knob's name, and after the switch (Lock, Tape, Each grain backwards). A pin inside a faded group fades with
+  it; a switch's pin does not (the prototype's span).
+- **Icons are drawn, not emoji**: the dice and Preview's triangle and square are FlatButton icons (an emoji keeps its own
+  colours in both themes: T1's reason for the padlock).
+- **The recipes' scope and Dice's text are dim 11.5 px text in two-line boxes.** The scope's box is the tab's whole
+  width, so the selection changing its text only repaints it; Dice's box takes its text's width (at most 560 px), measured
+  on a pin's click, so Unpin all follows the text as in the prototype. Nothing is measured on the editor's tick (T2's
+  hand-off point 3). The tick count of `alloc/hostChangesWithEditorOpen` in the Debug-CRT run stayed at 1028
+  (T2: 1027).
+- **The recipe test compares notes with the fixture's own tolerance** (plan 5.3 for model/presets.json: exact, node
+  values within 1e-12). On Linux glibc's pow rounds a few Strand Demo nodes 1 ulp from V8's, in the clip preset itself
+  (model/presetsFixture counts 98 of 105 bit for bit there); on Windows every case is bit for bit.
+- **The M6 table's pictures are new** (`m6_table_*`, 20 of them); T1's and T2's `m6_*` pictures stay as review shots.
+  The Sample tab's is 1100 x 1200: MainView shows a whole tab only within 2/5 of the room, and the tab is taller now.
+- **Not built:** the raw-file audition outside the Region (sl-ui.js rawAuditionStart; T2's note): it needs a player of
+  its own on the audio thread, which is engine work, not M6's.
+
+### For the architect
+
+- **CommandQueue's previewStart and previewStop are unused** (plan 1.3 lists Preview start and stop as commands). The
+  switch has to be written by both threads, so it is an atomic word (above). The two kinds could go from the queue at
+  the next contract change, or stay for a later use.
+- **The raw-file audition outside the Region** (sl-ui.js rawAuditionStart) is still open from T2: holding the mouse on the
+  strip outside the Region would play the file itself. It needs a small player on the audio thread and a command for it.
+- **Preview is not on the Diagnostics page.** The page shows Cubase's transport; the Copy report does not say whether
+  Preview was on. Kalan's answer to the checklist's step 11 says what Cubase does.
+- **The Sample tab is taller now** (the recipes, Dice and their texts: 323 px at 1100 wide), so at 1100 x 680 the pane
+  shows its first three rows and scrolls for the rest, as the prototype's does (sample.png). The first row wraps at 1100
+  px (the pins take 74 px), as the prototype's wraps.
+- **Timing figures, printed (plan's timing rule).** M4's full repaint of 512 notes in run 44805727952: Windows software
+  renderer 33.9 ms, Direct2D 44.1 ms; Linux 25.9 ms (target 50, gate 250). In run 44801399260 Direct2D took 54.3 ms, over
+  the 50 ms target (T2 saw 67.9 once): the runner has no GPU. The display slot's 10,000 blocks: 1352 ms on Windows (its
+  longest block 12.9 ms, against 33.3 ms of real time: a pause of the shared runner) and 1163 ms on Linux (0.33 ms).
+
+### Hand-off for the review and the Fix pass
+
+- **Preview** lives in `HostSync::plan` (the clock) and `StrandLockProcessor::processBlock` / `setPreview` (the switch).
+  `test_preview.cpp` drives HostSync, MidiRouter and the real Engine as processBlock does; `previewThroughTheProcessor`
+  and `alloc/previewAllocatesNothing` go through the processor.
+- **The Sample tab's T3 parts** are in `SampleTab::buildRecipes`, `applyRecipe`, `rollDice`, `setPinned` / `syncPins`,
+  `togglePreview` / `syncPreview` / `showNotice`; `sync ()` runs `syncPreview` and `syncRecipeScope` on every tick (atomics,
+  a clock read, the selection's size: nothing is measured there).
+- **The pins** are `PinButton`s the tab owns; the controls only show them (a caption accessory, a knob's pin, a
+  `PinGroup`). The tab's destructor takes them off the controls first.
+- **The recipes' hover hooks hold the roll's ghosts**: MainView's destructor calls `SampleTab::releaseRoll ()` before the
+  roll goes. A new owner of a SampleTab must do the same.
+- **Tests that click pins** leave the per-run UserSettings file with no pin (`resetUserSettings` in
+  `test_recipes_dice.cpp` clears them); the M6 table's Sample tab picture pins Engine and Grain and unpins them after.
+
+### CI results
+
+- Run 44796391576 on 024f25c (Preview's clock): every Preview row green on both platforms and under the sanitizers; red
+  on one check of `previewNeverWhileHostPlays`, which expected 6 notes in 3 s: the last block that plays (from sample
+  143872) runs past beat 6, so 7 is right. Fixed in a16cdfb.
+- Run 44801399260 on a16cdfb (the Sample tab): red on 10 of 1986 checks on Linux and 9 of 1994 on Windows, all in three
+  checks that asked the wrong thing, fixed in 92f3798: the Sample mode picture read the note simulations before the
+  drawing that makes them; the Sample tab picture was 900 high, where the pane shows only part of the taller tab; the
+  hover test expected no would-be clip for recipes 7 and 8 (the roll is handed one, and draws none of its notes); and on
+  Linux the recipe test compared Strand Demo's notes bit for bit, where glibc's pow rounds a few preset nodes 1 ulp from
+  V8's (the fixture's own tolerance is 1e-12). Every other job and step green: the Debug-CRT allocation run 40 checks in
+  8 tests (0 JUCE assertions), the Debug pictures 0 JUCE assertions, pluginval strictness 10 SUCCESS.
+- Run 44805727952 on 92f3798, green on every job and step: Windows Release 1994 checks in 346 tests and Linux Release
+  1986 in 346 (T2's head had 1918 and 1910 in 334); the sanitizers' groups (contract, model, engine) 840 checks in 144
+  tests and (state) 142 in 20; the Debug-CRT allocation run 40 checks in 8 tests, 0 JUCE assertions; the Debug pictures
+  0 JUCE assertions; pluginval strictness 10 SUCCESS; the fixture check passed (26 files, 4,958,478 bytes: T3 added no
+  fixture, 41.5 KB of the budget is left). The M6 rows:
+  - Preview, note starts: with the host stopped, 12 of 12 starts in 3 loop passes within [0, 1) sample of the Preview
+    clock's beat at 120, 87 and 133 bpm, from ppq 0, from ppq 2.5 and from ppq 6.5 with a 4-beat offset (9 renders,
+    blocks of 333, 512 and 61), and from beat 0 at 120 bpm when the host gives no position; measured against a clock
+    from beat 0 the 2.5 starts fail (negative control); with the switch off a stopped host plays nothing. A Preview from
+    ppq 1.3 renders Strand Demo on the Saw bit for bit as the host playing from ppq 1.3 does (8 s, rms 0.272). A tempo
+    change 120 -> 90 at beat 2.5: 12 starts on the clock that carried on from 2.5; the position moved to ppq 0.5: the
+    clock starts again there; loop off: the 4 notes once, then Preview ends at the clip's end.
+  - Preview never runs while the host plays: with the switch on the render equals the one with it off bit for bit (7
+    notes), the switch goes off at the first playing block, every block plays the host's beat; Preview for 100 blocks
+    then the host from ppq 8: that block plays beat 8. Through the processor: the frame says playing at beat 1.920 after
+    0.96 s of Preview (rms 0.24); Cubase's Play turns it off at once and counts it; a click while Cubase plays is undone
+    at the next block; a click after Cubase stops stands. 20 s with Preview on and off, Cubase stopped and playing,
+    tempo changes and cursor moves (11,250 Preview blocks, 10 stops by Cubase's Play): 0 allocations and 0 frees in
+    processBlock, in Release and in the Debug-CRT run.
+  - The paused notice: none at 249 ms without a block while Preview is on; at 250 ms the notice above the rows (the first
+    row moved from 6 to 51 px), naming Studio > Studio Setup > VST Plug-ins > "Suspend VST 3 plug-in processing when no
+    audio signals are received"; it goes when a block arrives; none with Preview off after 5 s; Cubase's Play turns the
+    button off with the toast.
+  - Recipes: 16 of 16 cases of model/presets.json through the buttons gave the fixture's clip (node values within
+    1e-12; 16 bit for bit on Windows, 10 on Linux) and its instrument within (double)(float); 16 of 16 one undo step with
+    the prototype's label (one case changed nothing and made none, as the prototype's History) and its toast; Undo
+    brought back the clip's bytes and every parameter. The hovers: 8 of 8 would-be clips the bytes of
+    model::applyRecipe, the prototype's hint, 0 undo steps, 0 snapshots published.
+  - Dice: 134 of 134 rolls (each of the 14 pins alone, then 120 seeded sets) gave model::dice of the instrument before with
+    the pins and the roll's seed, within (double)(float); 134 left every pinned field as it was; the unpinned fields
+    changed 1105 times in 1473 (negative control). Pins: kept at once, read back from a fresh read of the file, shown
+    again after closing and reopening and in another project; Unpin all empties the file.
+  - The M6 table's pictures: 20 of 20 at their size and in their theme (mean luminance 0.179-0.211 dark, 0.898-0.914
+    light): Sample mode with 18 note simulations drawn as chevrons and thumbnails; the Sample tab whole in its 323 px pane
+    with 13 faded controls and the Engine and Grain pins on; the Macros tab; the heads overlay with 5 heads of the fed
+    frame (561 pixels in the heads' colour at 100 %); Note settings with 3 groups saying "mixed".
+  - The editor's tick: `alloc/hostChangesWithEditorOpen` 1028 ticks in the Debug-CRT run (T2: 1027), 1594 in Windows
+    Release, 1710 on Linux.
+
+## M6 summary
+
+M6 (PLUGIN-PLAN 4 "M6 Sample mode 8, the Sample tab and Preview", 7.8) is built in three parts on branch `m6-sample`,
+each fast-forwarded to main when green: T1 (the Sample tab's rules and readouts, the full Sample tab, the Macros tab with
+the 5 offsets), T2 (mode 8's chips, chevrons and per-note thumbnails, the live heads on the strip, the strip click that
+sets Start, the Note settings tab with "mixed", Try this), T3 (Recipes 1-8, Dice with pins, Preview while Cubase is
+stopped, the M6 table's pictures, the checklist).
+
+What Kalan gets: Sample mode on the roll with the Travel, Heads, Grain and Refresh chips, and every note's chevrons and
+picture of the sound it plays; the playheads and grains moving on the waveform; a click on the waveform to set where the
+selected notes start; every Sample tab control as the prototype's, faded with the reason when it does nothing now; the
+Macros tab and its offsets; Recipes 1-8 and Dice with pins kept per person; Note settings with "mixed"; Try this in the
+hint bar; and Preview, which plays the clip at Cubase's tempo while Cubase is stopped and says so when Cubase has paused
+StrandLock. The checklist's "M6: the Sample tab" walks through all of it.
+
+Where the M6 table's rows run:
+- fade rules: `test_sample_rules.cpp` (T1); readouts: `test_readouts.cpp` (T1); knobs: `test_sample_rules.cpp` and
+  `test_sample_tab.cpp` (T1);
+- recipes and Dice: `test_recipes_dice.cpp` (T3);
+- display slot: `test_heads_overlay.cpp` (`displaySlotNeverWaits`, T2);
+- snapshots: `test_m6_snapshots.cpp` (`m6TablePictures` and the 20 `m6_table_*` writers, T3);
+- Preview: `Tests/engine/test_preview.cpp` (T3), and the paused notice in `test_recipes_dice.cpp`.
+
+Deviations, each with its reason in its part's section: the decorations in every mode with the prototype's alphas (T2,
+decision 5); the Note settings tab keeps its controls while nothing is selected (T2); the Lock padlock and the dice and
+Preview icons drawn, not emoji (T1, T3); Preview's switch an atomic word, not the queue's commands (T3); the Preview start
+is Cubase's cursor (T3); the raw-file audition outside the Region not built (T2, T3).
+
+For the architect, from all three parts: core/JsMath could take jsLog (T1); the Region knobs and Loop fade drag as M0's
+slider (T1); the decorations' cost and a cheaper redraw key (T2); plan 1.5's noteIdHash unused by the strip (T2); the
+queue's unused Preview commands, the raw-file audition and Preview on the Diagnostics page (T3).
