@@ -585,3 +585,132 @@ is Cubase's cursor (T3); the raw-file audition outside the Region not built (T2,
 For the architect, from all three parts: core/JsMath could take jsLog (T1); the Region knobs and Loop fade drag as M0's
 slider (T1); the decorations' cost and a cheaper redraw key (T2); plan 1.5's noteIdHash unused by the strip (T2); the
 queue's unused Preview commands, the raw-file audition and Preview on the Diagnostics page (T3).
+
+## Fix
+
+The M6 fix pass: the ten findings of the three reviews of main 5bacb3b (sample parity M6R-PAR-1 and M6R-PAR-2, the UI
+against the prototype R6UI-1 to R6UI-3, tests and threads F1 to F5). Two pairs are one finding each: M6R-PAR-1 and
+R6UI-1 (the knob boxes' keys), M6R-PAR-2 and R6UI-3 (the audition outside the Region). Branch `m6-fixes`, from main
+5bacb3b. Each finding was checked against the code, the JUCE 8.0.15 source and the prototype before it was fixed.
+
+### Progress
+
+- Done: every finding read and confirmed (none rejected). Fixed, each with a check that fails without the fix: F1
+  (high), M6R-PAR-1 with R6UI-1, F2, F3 (medium), F4 and F5 (low). Fixed in the checklist: R6UI-2 and the checklist
+  half of R6UI-3. Deferred to the architect: M6R-PAR-2 (the raw-file audition, also R6UI-3's other half).
+- Done: the fixes in c218018 (Preview), 702e6cc (the knob boxes' keys) and 2b925e7 (the Dice test). Run 44823807017
+  on 2b925e7 is green on every job and step the first time (figures below); its 127 pictures are byte for byte main's.
+- Done: the checklist (steps 4, 5 and 11), these notes, and the 8.08-beat hand-over case's negative control (the run
+  skipped it: the test asked for cases under 4.5 beats instead of all but 4.5).
+- Next: a green run on this head, then the fast-forward of main and CI on main.
+
+### The findings
+
+- **F1 (high), fixed: Cubase's Play after a Preview could keep Preview's clock.** Confirmed by reading `HostSync::plan`
+  and `Engine::setTransport`, and by running the prototype engine (it has the same rule) on HostSync's transports. On
+  Cubase's first playing block the engine was already playing Preview's clock, so it took its playing-to-playing
+  branch: a beat within 0.1 beat of its own clock (modulo the clip) with the same tempo changes nothing. With Preview's
+  clock 0.05 beat off Cubase's beat, every note then played 0.05 beat (1200 samples at 120 bpm) off Cubase's grid until
+  Cubase stopped. Now HostSync marks that block `restart` (`BlockTransport::restart`, set when the last block played
+  the Preview clock), and `MidiRouter::renderBlock` sends a stopped transport before the start. The engine releases
+  Preview's voices, anchors at Cubase's beat and chases there, as on a Play from stopped (the prototype's rechase
+  does the same: stop, then start at the beat). The same rule covers a cursor move while Preview plays: HostSync
+  started its own clock again at the new place, but the engine ignored a move within 0.1 beat, so its notes left the
+  Preview clock's beat, which the M6 Preview row asks for. No engine change. Tests: `previewHandsOverOnTheBeat`
+  (Preview for 4.05, 3.95, 8.08 and 4.5 beats on a 1-bar clip, then Cubase from ppq 0, at 120 and 87 bpm; and a
+  cursor move that lands 0.05 beat behind Preview's clock; each with a negative control on the clock carried on),
+  `previewRestartStopsFirst` (when HostSync sets the flag, and the stopped transport before the start), and the flag
+  in `previewNeverWhileHostPlays`. The same test logic run in node on the prototype engine (a scratch script): with
+  the fix every case on Cubase's beat; without it 4.05, 3.95, 8.08 and the cursor move 1200 to 2647 samples off, and
+  4.5 (a jump) right both ways.
+- **M6R-PAR-1 and R6UI-1 (medium), fixed: Ctrl+Z, Ctrl+Y and Ctrl+D typed into a Sample tab knob's box ran the
+  roll's Undo, Redo and Duplicate with Keys on.** Confirmed: the knob's value box is a juce::Label whose TextEditor
+  returns false for these keys (nothing of its own to undo or redo; no Ctrl+D), so they went up the parents to the
+  editor, and M4's guard (`inspector.isEditing`) knew only the inspector's six boxes. `MainView::isTyping` now looks
+  for any juce::Label in the view that shows its box, so the inspector's, the 9 knobs' and any box a later tab adds
+  are covered by one rule. With Keys off the key now stays with StrandLock too, as M4's F2 does for the inspector
+  (Cubase never got it anyway: the Label is modal while it is typed in, and JUCE's window then reports every key as
+  used). Test `sampleKnobTypingKeepsKeys`: each of the 9 boxes open in turn, with Keys on and off, with an undo step,
+  a redo step and a selected note at hand: the four keys change neither the clip, the history nor any parameter, and
+  the box stays open; with the boxes closed Ctrl+D duplicates the note again. `SampleKnob::finishTyping` closes a box
+  for the test (JUCE closes it on Enter through a posted message, which the runner does not deliver).
+- **F2 (medium), fixed: the Preview offset case could not fail.** Confirmed: the offset (4 beats) was one clip length,
+  so a Preview that ignored it played the same starts. The case is now ppq 6.5 with offset 4 on a 2-bar clip whose
+  second bar is empty (ignoring the offset would start in the empty bar), and a pre-roll case is added: ppq 2.5 with
+  offset 4 on the 1-bar clip, silent until the clip's beat 0, then every start in [0, 1) sample. Each offset case has
+  a negative control: measured with the offset left out, its starts fail. (The review's other suggestion, offset 1
+  on the 1-bar clip, would not have failed either: its notes fall on every beat, so a 1-beat shift looks the same.)
+- **F3 (medium), fixed: the Dice step check passed a roll that pushed no step.** Confirmed: the check allowed zero
+  steps, and no test undid a roll. A roll that changes a setting must now make exactly one step "Dice" (and the
+  processor's undo label says "Dice"); one that changes nothing makes none, as the prototype's History. Every 9th
+  roll is undone (every parameter and the instrument as before the roll) and redone (as after it).
+- **F4 (low), fixed: no test could tell the switch's compare-and-swap from a plain store.** Confirmed: the processor
+  test's three clicks came before a block, so the audio thread never tried to turn the switch off. The word logic is
+  now `host::PreviewSwitch` (set, read, turnOffIf), which processBlock and setPreview use, and
+  `previewSwitchKeepsLaterClicks` tests it directly: a block that read the switch on cannot turn it off after a later
+  click; the next block can; the click count stays in the word. The processor test's comment now says what it checks.
+- **F5 (low), fixed: the allocation run never changed the tempo while Preview ran or Cubase played.** Confirmed with
+  the review's schedule (every tempo flip fell on a fresh Preview start). The tempo now changes every 433 blocks, and
+  the test counts and checks what it reached: tempo changes while Preview runs and while Cubase plays, cursor moves
+  while Preview runs, and Cubase's Play right after a Preview block (the F1 restart). A node run of the schedule gave
+  25, 9, 10 and 10.
+- **R6UI-2 (low), fixed in the checklist: step 5 said every knob takes Shift, typing and a hint.** Confirmed: Region
+  start, Region end and Loop fade are M0's knobs (Ctrl for fine steps, no value box, no hint or tooltip). Step 5 now
+  says so. Making them prototype knobs stays T1's architect item (the prototype has no such knobs to copy).
+- **R6UI-3 (low), fixed in the checklist; the audition deferred with M6R-PAR-2.** Step 4 now says that holding the
+  mouse plays the spot inside the Region, and that outside it nothing plays in this build.
+- **M6R-PAR-2 (low), deferred: holding the mouse on the waveform outside the Region plays nothing** (sl-ui.js
+  rawAuditionStart plays the file itself there). Known since T2. It needs a small player on the audio thread and a
+  CommandQueue command, which is engine work; the review leaves it to the architect.
+
+### Decisions and deviations
+
+- **A cursor move while Preview plays starts the engine's clock again, however small the move.** The prototype's
+  ruler click while playing sends the beat with playing on, so a click within 0.1 beat of the playhead changes
+  nothing there. In the plugin the Preview clock is HostSync's, and it starts again at the cursor, so the engine
+  follows it exactly; otherwise the notes leave the Preview clock's beat.
+- **The restart is a stopped transport and then the start, sent by MidiRouter, not an engine change** (the engine is
+  not M6's). The engine's clock and its control grid start again at the block's first sample, as on any Play.
+- **The typing guard looks for a juce::Label showing its box anywhere in the view**, not for a list of boxes, so the
+  next box a tab adds is covered without a change here. It walks the view's components on each key the editor gets,
+  which is cheap at the rate keys come.
+
+### For the architect
+
+- **The raw-file audition outside the Region** (M6R-PAR-2, R6UI-3): still open from T2 and T3. It needs a small player
+  on the audio thread and a command for it.
+- **The Region knobs and Loop fade** (R6UI-2): still M0's knobs; the checklist now says how they differ (T1's item).
+- **A transport restart in the engine itself** (F1): MidiRouter sends a stop and a start at the same sample. A flag on
+  `engine::Transport` would say it in one call, at the next engine change.
+
+### CI results
+
+- Run 44823807017 on 2b925e7 (the three fix commits), green on every job and step: Windows Release 2032 checks in 350
+  tests and Linux Release 2024 in 350 (main had 1994 and 1986 in 346); the sanitizers' groups (contract, model, engine)
+  870 checks in 146 tests (840 in 144) and (state) 142 in 20; the Debug-CRT allocation run 41 checks in 8 tests (40),
+  0 JUCE assertions; the Debug pictures 0 JUCE assertions; pluginval strictness 10 SUCCESS; the fixture check passed
+  (26 files, 4,958,478 bytes: the fix pass adds no fixture). No new compiler warning in a changed file.
+- The pictures: 127, all byte for byte the ones of main's run 44813514344 (T3's, looked at): the fix pass changes no
+  drawing. The Sample tab's (`m6_table_sample_tab_dark_100`) looked at again.
+- F1 (`previewHandsOverOnTheBeat`, both platforms): at 120 and 87 bpm, after 4.05, 3.95, 8.08 and 4.5 beats of Preview,
+  every start after Cubase's Play in [0, 1) sample of Cubase's beat (7 or 8 starts each), one restart each; the cursor
+  move to 0.05 beat behind Preview's clock: 7 starts on the new clock's beat; the negative controls (the clock carried
+  on, for 4.05, 3.95 and the cursor move; 8.08's from the next run) fail as they should.
+  `previewRestartStopsFirst`: the flag only on Cubase's first playing block after a Preview
+  block and on a cursor move while Preview plays; that block sends a stopped transport, then the start at beat 0, both
+  before it renders. `previewNeverWhileHostPlays`: the block at ppq 8 restarts, once.
+- M6R-PAR-1 and R6UI-1 (`sampleKnobTypingKeepsKeys`): 18 of 18 boxes (9 knobs, Keys on and off) kept the four keys,
+  with the clip, the undo step "Speed", the redo step "Speed" and every parameter unchanged, and stayed open; with the
+  boxes closed Ctrl+D made 3 notes, undo "Duplicate".
+- F2 (`previewNoteStarts`): from ppq 6.5 with offset 4 on the 2-bar clip, 5 starts on the clock from beat 2.5; from ppq
+  2.5 with offset 4, 11 starts from beat -1.5 and none before the clip's beat 0; at 120, 87 and 133 bpm; measured with
+  the offset left out, both fail (as they should).
+- F3 (`diceKeepsPinnedSettings`): 134 rolls, 134 changed a setting and made exactly one step "Dice"; 14 of 14 Undos put
+  every parameter back and the Redos the roll.
+- F4 (`previewSwitchKeepsLaterClicks`): the block that read the switch on could not turn it off after a later click;
+  the next block could, and the click count stayed.
+- F5 (`previewAllocatesNothing`, Release and Debug-CRT): 15000 blocks, 11250 of Preview, 10 stops by Cubase's Play; 25
+  tempo changes while Preview ran, 9 while Cubase played, 10 cursor moves while Preview ran, 10 hand-overs to Cubase's
+  Play (each a restart); 0 allocations and 0 frees in processBlock.
+- The editor's tick: `alloc/hostChangesWithEditorOpen` 1016 ticks in the Debug-CRT run, 1593 in Windows Release, 1716
+  on Linux (T3: 1028, 1594, 1710).

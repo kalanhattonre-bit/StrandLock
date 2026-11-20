@@ -553,14 +553,20 @@ What is new, and where it is:
 4. **Clicking the waveform to set where notes start.** Select three notes. Click once (a short click) on the waveform
    inside the Region. A message says something like "Start set for 3 notes at 40% of the Region", and small markers
    show the spot on the strip. Press Play: do those three notes now start at that spot? Hold the mouse down on the
-   waveform instead: you hear that spot while you hold. A click outside the Region changes nothing and says why.
+   waveform inside the Region instead: you hear that spot while you hold. (Outside the Region, holding the mouse plays
+   nothing in this build. The prototype plays the file itself there; that part is not built yet.) A click outside the
+   Region changes nothing and says why.
 
 5. **Every control on the Sample tab.** Let the clip play (or hold a note) and try each control on **Tape**, on
    **Voice**, on **Cloud**, and on **Cloud** with **Lock** on. Clicking **Lock** while the engine is Tape or Voice
    switches to Cloud with Lock (a message says so). For the knobs: drag up or down (hold Shift for fine steps),
    double-click to put the default back, or click the value under the knob and type one (for example, with Lock on,
    type 4.3 into **GRAIN**: it stays 4.3). After each change click **Undo** once: does each change undo in one step?
-   Hold the mouse over each control: does the hint bar say what it does?
+   Hold the mouse over each control: does the hint bar say what it does? Three knobs work the older way:
+   **REGION START**, **REGION END** and **LOOP FADE** take Ctrl (not Shift) for fine steps, have no value to type
+   into, and show nothing in the hint bar. With **Keys** on, click a knob's value so its box opens and press Ctrl+Z
+   and Ctrl+D: nothing happens on the roll while the box is open (as in the inspector's boxes, M4 step 10). After
+   Enter they work again.
 
 6. **What the faded controls mean.** On the default settings (**Voice**, **HEADS** at 1, **REFRESH** on **Smooth**,
    **▶ Forward**) several controls are faded: **SPREAD** and **HEAD TUNE** (one head), **SPRAY** (Voice), **REFRESH
@@ -597,7 +603,9 @@ What is new, and where it is:
     row, or on the line under it). StrandLock plays its own clip at Cubase's tempo from where Cubase's cursor is, and
     the button now says **Stop preview**. Click in Cubase's ruler to move the cursor: does Preview jump there? Turn a
     knob while it plays: do you hear it? Press Play in Cubase: Preview stops, and a message says "Cubase is playing,
-    so Preview stopped". Now turn on Cubase's option **Studio > Studio Setup > VST Plug-ins > "Suspend VST 3 plug-in
+    so Preview stopped". From that moment StrandLock follows Cubase: with Cubase's metronome (click) on, do its notes
+    land on the clicks from the first beat? Try it a few times, pressing Play at different moments of the Preview.
+    Now turn on Cubase's option **Studio > Studio Setup > VST Plug-ins > "Suspend VST 3 plug-in
     processing when no audio signals are received"**, stop Cubase and click **Preview** again. If Cubase pauses
     StrandLock, a box at the top of the Sample tab says so within a second and names that option. What happens on
     your computer with the option on, and with it off?
