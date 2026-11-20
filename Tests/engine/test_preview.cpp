@@ -547,8 +547,8 @@ SL_TEST ("engine", previewHandsOverOnTheBeat)
                         "restart of the engine's clock) %s", bpm, previewBeats, got.size(), why.c_str()));
 
             // a no-op is not a pass: Preview's own clock carried on (the engine kept it before the fix whenever Cubase's beat was
-            // within 0.1 beat of it) puts these starts elsewhere
-            if (previewBeats < 4.5)
+            // within 0.1 beat of it) puts these starts elsewhere; 4.5 beats is half a beat away, a jump either way
+            if (! juce::exactlyEqual (previewBeats, 4.5))
             {
                 std::vector<double> carried;
                 for (const double at : clockStarts (kFourBeats, 4.0, 0.0, spb, n))
