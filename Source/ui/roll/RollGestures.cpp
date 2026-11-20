@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <limits>
 #include <map>
 #include <unordered_map>
@@ -55,6 +56,17 @@ namespace sl::ui::roll
         std::string notesText (std::size_t n)
         {
             return std::to_string (n) + (n == 1 ? " note" : " notes");
+        }
+
+        /** How many notes of src (in time order) have a copy that starts before the clip's end T when every copy moves
+            by off: sl-ui.js duplicateSel keeps those and leaves the others out. A copy starts at max (0, s + off), which
+            never falls as s grows, so the copies kept are always the first ones in time order. */
+        std::size_t copiesBeforeEnd (const std::vector<model::NotePtr>& src, double off, double T) noexcept
+        {
+            std::size_t k = 0;
+            while (k < src.size() && std::max (0.0, src[k]->s + off) < T)
+                ++k;
+            return k;
         }
 
         /** sl-ui.js fmtBeats: '1 beat', '1.5 beats' (to 3 decimals). */
@@ -228,24 +240,27 @@ namespace sl::ui::roll
         return d;
     }
 
-    void RollGestures::show (model::Clip c)
+    bool RollGestures::show (model::Clip c)
     {
         model::EditResult r;
         r.clip = std::move (c);
-        show (std::move (r));
+        return show (std::move (r));
     }
 
-    void RollGestures::show (model::EditResult r)
+    bool RollGestures::show (model::EditResult r)
     {
         const auto out = host.doc.apply (std::move (r));
         if (out.refused)
             toast (out.message);
         geo.setClip (clip());
+        return ! out.refused;
     }
 
     bool RollGestures::setClipLabelled (model::Clip c, const std::string& label)
     {
-        show (std::move (c));
+        // a cap refused it: its toast stays, and the clip and the history are as they were
+        if (! show (std::move (c)))
+            return false;
         return host.commit ? host.commit (label) : false;
     }
 
@@ -1233,7 +1248,27 @@ namespace sl::ui::roll
         const auto ids = selectionInTimeOrder();
         if (ids.empty())
             return;
-        const auto r = model::duplicateNotes (*clip(), ids);
+        const auto c = clip();
+        const auto src = model::timeOrder (model::selected (*c, ids));
+        if (src.empty())
+            return;
+        // The model is asked only for the copies that start before the clip's end, the ones placeCopies keeps, so the
+        // 4096 cap counts only the notes the edit makes (review P3: a copy left out never counts). They are the first
+        // ones in time order, moved by the whole selection's offset (its length, as model::duplicateNotes works it
+        // out), so their ids, links and places are those of the whole call: the ids come from each note's place in
+        // time order and the offset, and a link to a copy left out is dropped either way.
+        double s0 = src.front()->s, s1 = src.front()->s + src.front()->l;
+        for (const auto& n : src)
+        {
+            s0 = std::min (s0, n->s);
+            s1 = std::max (s1, n->s + n->l);
+        }
+        const double off = s1 - s0;
+        std::vector<std::string> fit;
+        const std::size_t kept = copiesBeforeEnd (src, off, total());
+        for (std::size_t k = 0; k < kept; ++k)
+            fit.push_back (src[k]->id);
+        const auto r = model::duplicateNotes (*c, fit, off);
         if (r.refused)
         {
             toast (doc::ClipDocument::refusalText (r, false, 0));
@@ -1285,7 +1320,14 @@ namespace sl::ui::roll
             return;
         }
         sync();
-        const auto r = model::pasteNotes (*clip(), copiedNotes, beat);
+        // as Duplicate: the model is asked only for the copies that start before the clip's end (review P3). The copied
+        // notes are in time order, and every copy moves so the earliest starts at beat.
+        double s0 = copiedNotes.front()->s;
+        for (const auto& n : copiedNotes)
+            s0 = std::min (s0, n->s);
+        const std::size_t kept = copiesBeforeEnd (copiedNotes, beat - s0, total());
+        const std::vector<model::NotePtr> fit (copiedNotes.begin(), copiedNotes.begin() + (std::ptrdiff_t) kept);
+        const auto r = model::pasteNotes (*clip(), fit, beat);
         if (r.refused)
         {
             toast (doc::ClipDocument::refusalText (r, false, 0));
@@ -1300,9 +1342,9 @@ namespace sl::ui::roll
             return;
         }
         host.doc.setSelection (*keep, keep->front());
-        toast (keep->size() == r.ids.size() ? "Pasted " + notesText (keep->size())
-                                            : "Pasted " + std::to_string (keep->size()) + " of " + notesText (r.ids.size())
-                                                  + ": the rest would start after the clip's end");
+        toast (keep->size() == copiedNotes.size() ? "Pasted " + notesText (keep->size())
+                                                  : "Pasted " + std::to_string (keep->size()) + " of " + notesText (copiedNotes.size())
+                                                        + ": the rest would start after the clip's end");
     }
 
     void RollGestures::deleteSelection()
@@ -1360,7 +1402,12 @@ namespace sl::ui::roll
             toast ("Select the notes to paste onto");
             return;
         }
-        setClipLabelled (model::pasteLanes (*clip(), ids, *clipboard), "Paste lanes");
+        // the lanes the clipboard holds grow every note they go on, so the document's 32 MiB cap can refuse a paste onto
+        // many notes: then the cap's toast stays and nothing changed (review P2); the prototype has no cap
+        if (! show (model::pasteLanes (*clip(), ids, *clipboard)))
+            return;
+        if (host.commit)
+            host.commit ("Paste lanes");
         toast ("Pasted onto " + std::to_string (ids.size()) + (ids.size() == 1 ? " note" : " notes"));
     }
 

@@ -24,6 +24,7 @@
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "core/Lanes.h"
+#include "core/Seeds.h"
 #include "model/ClipCodec.h"
 #include "model/ClipEdit.h"
 #include "model/Generators.h"
@@ -613,6 +614,187 @@ SL_TEST ("ui", copyPasteRefusedPast4096)
                fmt ("in the editor, the tab's Duplicate and Paste notes past 4096: \"%s\" in the window, the clip unchanged, nothing submitted",
                     e.view().getToastText().toRawUTF8()));
     }
+}
+
+SL_TEST ("ui", copyPasteLanesRefusedBySize)
+{
+    section ("Paste lanes past the 32 MiB cap (review P2): a fully drawn note's lanes pasted onto 1100 notes would make the clip larger than 32 "
+             "MiB; the document refuses it, the cap's toast stays (no \"Pasted onto\"), and nothing changes (0 bytes, 0 undo steps, 0 clip "
+             "versions); onto 3 notes it pastes");
+
+    // one note with 128 nodes on each of its 10 lanes (about 32 KB encoded) and 1100 plain notes, in 64 bars
+    model::Clip c = model::newClip (64.0);
+    {
+        auto full = model::mkNote (60.0, 0.0, 1.0, "full");
+        for (int li = 0; li < core::kNumLanes; ++li)
+        {
+            model::NodeList nodes;
+            for (int k = 0; k < 128; ++k)
+                nodes.push_back (model::mkNode ((double) k / 127.0, 0.5 + 0.4 * std::sin (0.7 * (double) k),
+                                                k % 3 == 0 ? model::NodeShape::bend : model::NodeShape::smooth, k % 3 == 0 ? 0.3 : 0.0));
+            full.lane (static_cast<LaneId> (li)) = std::move (nodes);
+        }
+        c.notes.push_back (ptrOf (std::move (full)));
+    }
+    std::vector<std::string> targets;
+    for (int i = 0; i < 1100; ++i)
+    {
+        targets.push_back ("p" + std::to_string (i));
+        c.notes.push_back (ptrOf (model::mkNote (48.0 + (double) (i % 24), 1.0 + (double) (i % 250), 0.5, targets.back())));
+    }
+
+    ToolRig t (c);
+    auto& r = t.rig;
+    auto& g = r.gestures();
+    r.doc.setSelection ({ "full" }, std::string ("full"));
+    g.copyLanes();
+    const auto clipboard = model::copyLanes (*c.notes.front(), allLanes());
+    const std::size_t directBytes = model::encodeClip (model::pasteLanes (c, targets, clipboard)).size();
+    r.doc.setSelection (targets, std::string ("p0"));
+    const auto bytes0 = t.bytes();
+    const auto version0 = r.doc.version();
+    const int versions0 = t.versions;
+    g.pasteLanes();
+    const auto toast = r.lastToast().value_or ("");
+    check (directBytes > model::kMaxClipBytes && t.bytes() == bytes0 && r.doc.version() == version0 && t.versions == versions0 && r.steps == 0
+               && toast.rfind ("That would make the clip", 0) == 0,
+           fmt ("Paste lanes onto 1100 notes (the direct call encodes to %.1f MB): refused, \"%s\"; the bytes, the version and the history "
+                "unchanged (%d undo steps)", (double) directBytes / (1024.0 * 1024.0), toast.c_str(), r.steps));
+
+    const std::vector<std::string> three { "p0", "p1", "p2" };
+    r.doc.setSelection (three, std::string ("p0"));
+    g.pasteLanes();
+    check (r.steps == 1 && lastLabel (r) == "Paste lanes" && r.lastToast().value_or ("") == "Pasted onto 3 notes"
+               && t.bytes() == model::encodeClip (model::pasteLanes (c, three, clipboard)),
+           fmt ("onto 3 notes: one undo step \"%s\", \"%s\", the bytes of model::pasteLanes", lastLabel (r).c_str(), r.lastToast().value_or ("").c_str()));
+}
+
+SL_TEST ("ui", copyPasteCopiesPastTheEndDoNotCount)
+{
+    section ("Duplicate and Paste notes near the 4096 cap (review P3): copies that would start after the clip's end are left out before the "
+             "cap counts, so 100 notes near the end of a 4000-note clip make 87 copies (4087 notes, the whole call's copies); a refusal names "
+             "the count the edit would make; a seeded sweep: the bytes of the whole model call with the copies past the end taken out");
+
+    // 3900 short notes early in 64 bars (256 beats), then 100 in beats 200 to 230 (the review's clip); alone: the 100 by themselves
+    model::Clip big = model::newClip (64.0), alone = model::newClip (64.0);
+    for (int i = 0; i < 3900; ++i)
+        big.notes.push_back (ptrOf (model::mkNote (40.0 + (double) (i % 40), (double) (i % 1950) * 0.1, 0.05, "f" + std::to_string (i))));
+    std::vector<std::string> sel;
+    for (int i = 0; i < 100; ++i)
+    {
+        sel.push_back ("s" + std::to_string (i));
+        auto n = ptrOf (model::mkNote (60.0 + (double) (i % 12), 200.0 + (double) i * 0.3, 0.25, sel.back()));
+        big.notes.push_back (n);
+        alone.notes.push_back (n);
+    }
+    // what the prototype's duplicateSel makes on the big clip (it has no cap): the copies the whole call makes on the 100 notes
+    // alone (the copies' ids are 'n...' ids, so the other notes' 'f' ids cannot take them), less those past the end
+    const auto bigWith = [&big] (const model::Clip& made, std::size_t first)
+    {
+        std::vector<model::NotePtr> notes = big.notes;
+        for (std::size_t k = first; k < made.notes.size(); ++k)
+            notes.push_back (made.notes[k]);
+        return model::withNotes (big, std::move (notes));
+    };
+
+    // Duplicate
+    {
+        ToolRig t (big);
+        auto& r = t.rig;
+        r.doc.setSelection (sel, std::string ("s0"));
+        r.gestures().duplicateSelection();
+        const auto c = r.doc.current();
+        const auto want = bigWith (placedCopies (model::duplicateNotes (alone, sel)), alone.notes.size());
+        check (c->notes.size() == 4087 && want.notes.size() == 4087 && model::encodeClip (*c) == model::encodeClip (want) && r.steps == 1
+                   && lastLabel (r) == "Duplicate" && r.doc.rollState().selected.size() == 87,
+               fmt ("Duplicate of 100 notes in beats 200 to 230 of a 4000-note clip: %d notes (4087: 87 copies start before beat 256), the "
+                    "bytes of the prototype's Duplicate, one undo step, the copies selected (%d)", (int) c->notes.size(),
+                    (int) r.doc.rollState().selected.size()));
+    }
+
+    // Paste notes of the same 100, with nothing selected (they go right after where the copied notes end, beat 229.95)
+    {
+        ToolRig t (big);
+        auto& r = t.rig;
+        auto& g = r.gestures();
+        r.doc.setSelection (sel, std::string ("s0"));
+        g.copyNotes();
+        r.doc.setSelection ({}, std::string());
+        g.pasteNotes();
+        const auto c = r.doc.current();
+        const double at = 200.0 + 99.0 * 0.3 + 0.25;
+        const auto want = bigWith (placedCopies (model::pasteNotes (alone, g.noteClipboard(), at)), alone.notes.size());
+        check (c->notes.size() == 4087 && model::encodeClip (*c) == model::encodeClip (want) && r.steps == 1
+                   && r.lastToast().value_or ("") == "Pasted 87 of 100 notes: the rest would start after the clip's end",
+               fmt ("Paste notes of the 100: %d notes, the bytes of the whole paste with the copies past the end left out; \"%s\"",
+                    (int) c->notes.size(), r.lastToast().value_or ("").c_str()));
+    }
+
+    // past the cap even so: the toast names the notes the edit would make (4050 + 87), not the copies it leaves out
+    {
+        model::Clip over = big;
+        for (int i = 0; i < 50; ++i)
+            over.notes.push_back (ptrOf (model::mkNote (30.0, (double) i, 0.5, "x" + std::to_string (i))));
+        ToolRig t (over);
+        auto& r = t.rig;
+        const auto bytes0 = t.bytes();
+        r.doc.setSelection (sel, std::string ("s0"));
+        r.gestures().duplicateSelection();
+        check (t.bytes() == bytes0 && r.steps == 0 && r.lastToast().value_or ("") == "That would make 4137 notes; the limit is 4096.",
+               fmt ("on 4050 notes: refused, \"%s\" (the 13 copies past the end do not count), nothing changed", r.lastToast().value_or ("").c_str()));
+    }
+
+    // the sweep: seeded selections and paste places on a clip with links, where some copies start after the end
+    model::Clip clip = model::newClip (8.0);   // 32 beats
+    for (int i = 0; i < 14; ++i)
+    {
+        auto n = model::mkNote (50.0 + 2.0 * (double) i, 2.25 * (double) i, 1.0 + (double) (i % 3), "w" + std::to_string (i));
+        if (i % 2 == 0 && i + 1 < 14)
+            n.glideTo = "w" + std::to_string (i + 1);
+        clip.notes.push_back (ptrOf (std::move (n)));
+    }
+    int runs = 0, same = 0, cut = 0;
+    std::uint32_t seed = 917;
+    for (int k = 0; k < 60; ++k)
+    {
+        std::vector<std::string> pick;
+        for (const auto& n : clip.notes)
+            if (core::rand01 (core::hash32 ((std::int32_t) seed, (std::int32_t) pick.size(), (std::int32_t) n->p)) < 0.45)
+                pick.push_back (n->id);
+        ++seed;
+        if (pick.empty())
+            pick.push_back (clip.notes.back()->id);
+        const auto ids = inTimeOrder (clip, pick);
+
+        // Duplicate
+        {
+            RollRig r (clip);
+            r.doc.setSelection (pick, pick.front());
+            r.gestures().duplicateSelection();
+            const auto whole = model::duplicateNotes (clip, ids);
+            const auto want = placedCopies (whole);
+            ++runs;
+            same += model::encodeClip (*r.doc.current()) == model::encodeClip (want) ? 1 : 0;
+            cut += want.notes.size() < whole.clip.notes.size() ? 1 : 0;
+        }
+        // Paste notes at a seeded beat
+        {
+            RollRig r (clip);
+            auto& g = r.gestures();
+            r.doc.setSelection (pick, pick.front());
+            g.copyNotes();
+            const double at = std::floor (core::rand01 (core::hash32 ((std::int32_t) seed, 77)) * 34.0 * 4.0) / 4.0;
+            g.pasteNotesAt (at);
+            const auto whole = model::pasteNotes (clip, g.noteClipboard(), at);
+            const auto want = placedCopies (whole);
+            ++runs;
+            same += model::encodeClip (*r.doc.current()) == model::encodeClip (want) ? 1 : 0;
+            cut += want.notes.size() < whole.clip.notes.size() ? 1 : 0;
+        }
+    }
+    check (runs == 120 && same == runs && cut >= 20,
+           fmt ("%d of %d seeded Duplicates and Paste notes give the bytes of the whole model call with the copies past the end taken out (%d of "
+                "them left some out)", same, runs, cut));
 }
 
 SL_TEST ("ui", copyPasteTabInTheEditor)

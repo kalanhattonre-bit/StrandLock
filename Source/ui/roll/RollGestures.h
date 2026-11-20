@@ -231,8 +231,13 @@ namespace sl::ui::roll
         model::LaneCtx formatCtx (const model::Note* n) const;
 
         bool isDouble (double x, double y, int what, double now);
-        void show (model::Clip c);
-        void show (model::EditResult r);
+
+        /** The document applies the clip (a drag's step, a finished edit): false when a cap refused it, with the cap's
+            toast and the clip unchanged. */
+        bool show (model::Clip c);
+        bool show (model::EditResult r);
+
+        /** show, then one undo step called label; a refused edit pushes none. Returns whether a step was pushed. */
         bool setClipLabelled (model::Clip c, const std::string& label);
         void toast (const std::string& text) const;
         void audition (double p) const;
