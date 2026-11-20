@@ -173,10 +173,11 @@ namespace sl::ui
         bool isFaded() const noexcept { return faded; }
         const juce::String& getReason() const noexcept { return reason; }
 
+        /** Nothing selected: faded, and the mouse goes through it (.slp-idle: opacity .45, no pointer events). */
         void setAsleep (bool shouldSleep)
         {
             asleep = shouldSleep;
-            setEnabled (! shouldSleep);
+            setInterceptsMouseClicks (! shouldSleep, ! shouldSleep);
             updateAlpha();
         }
 
@@ -744,7 +745,7 @@ namespace sl::ui
             return o.engine == I.engine && o.lock == I.lock && o.motion == I.motion && o.tape == I.tape && o.rev == I.rev && o.jump == I.jump
                 && juce::exactlyEqual (o.region.start, I.region.start) && juce::exactlyEqual (o.region.end, I.region.end);
         };
-        if (! force && seen.valid && seen.clip == clip && seen.ids == ids && seen.primary == st.primary && sameInst (seen.inst, I)
+        if (! force && seen.valid && seen.clip == clip && seen.ids == ids && seen.primary == st.primary && sameInst (seen.inst)
             && juce::exactlyEqual (seen.seconds, secs))
             return;
         seen.clip = clip;
@@ -773,7 +774,8 @@ namespace sl::ui
                 seg->setSelected (-1);
             for (juce::Component* c : { (juce::Component*) spot, (juce::Component*) range, (juce::Component*) reroll })
             {
-                c->setEnabled (false);
+                c->setEnabled (true);
+                c->setInterceptsMouseClicks (false, false);
                 c->setAlpha (kAsleep);
             }
             spotMixed = rangeMixed = velMixed = false;
@@ -865,14 +867,16 @@ namespace sl::ui
             const auto mode = mx->startMode.value;
             const bool spotWorks = modeMixed || mode == model::StartMode::region || mode == model::StartMode::random;
             const bool randomOnly = ! modeMixed && mode == model::StartMode::random;
+            // a control that does nothing for this Start is faded (a slider) or greyed (Re-roll's own look), and takes no drag
+            for (juce::Component* c : { (juce::Component*) spot, (juce::Component*) range, (juce::Component*) reroll })
+                c->setInterceptsMouseClicks (true, true);
             spot->setEnabled (spotWorks);
             spot->setAlpha (spotWorks ? 1.0f : 0.5f);
             titles[spot] = spotWorks ? kSpotTitle : kSpotOnly;
-            for (juce::Component* c : { (juce::Component*) range, (juce::Component*) reroll })
-            {
-                c->setEnabled (randomOnly);
-                c->setAlpha (randomOnly ? 1.0f : 0.5f);
-            }
+            range->setEnabled (randomOnly);
+            range->setAlpha (randomOnly ? 1.0f : 0.5f);
+            reroll->setEnabled (randomOnly);
+            reroll->setAlpha (1.0f);
             titles[range] = randomOnly ? kRangeTitle : kRandomOnly;
             titles[reroll] = randomOnly ? kRerollTitle : kRandomOnly;
             reroll->setTooltip (titles[reroll]);

@@ -20,7 +20,6 @@ namespace sl::ui
 
         /** sl-ui.js clamp. */
         double clampd (double v, double a, double b) noexcept { return v < a ? a : v > b ? b : v; }
-        float clampf (float v, float a, float b) noexcept { return v < a ? a : v > b ? b : v; }
 
         /** " · " (the prototype's file line separator, written as a code point so the source stays ASCII). */
         juce::String dot()

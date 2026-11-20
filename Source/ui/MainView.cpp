@@ -659,9 +659,9 @@ namespace sl::ui
             const auto clip = processor.getDocument().current();
             const model::Note* primary = nullptr;
             if (clip != nullptr && ! st.primary.empty())
-                for (const auto& n : clip->notes)
-                    if (n->id == st.primary)
-                        primary = n.get();
+                for (const auto& note : clip->notes)
+                    if (note->id == st.primary)
+                        primary = note.get();
             hintBar.setTryThis (tryThis (st.mode, st.subLane, primary, processor.readInst()));
         }
     }
