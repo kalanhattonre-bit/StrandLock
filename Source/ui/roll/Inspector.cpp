@@ -13,6 +13,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <map>
+#include <string>
 #include <utility>
 
 namespace sl::ui::roll
@@ -316,10 +318,54 @@ namespace sl::ui::roll
         const auto st = processor.getDocument().rollState();
         const auto lane = st.activeLane();
         const auto& nd = st.activeNode;
-        if (! nd || ! lane || nd->lane != *lane || ! st.isSelected (nd->id))
-            return std::nullopt;
         const auto c = clip();
         if (c == nullptr)
+            return std::nullopt;
+
+        // sl-ui-panels.js pickedNodes: two or more picked nodes of the selected notes on this lane are one group, shown
+        // by the inspector's node when it is one of them, else by the first one picked
+        if (lane && ! st.picks.empty())
+        {
+            NodeCtx g;
+            g.lane = *lane;
+            for (const auto& pick : st.picks)
+            {
+                if (! st.isSelected (pick.id))
+                    continue;
+                for (const auto& n : c->notes)
+                {
+                    if (n->id != pick.id)
+                        continue;
+                    const int len = (int) model::noteLane (*n, *lane).size();
+                    std::vector<int> ks;
+                    for (const int k : pick.ks)
+                        if (k >= 0 && k < len)
+                            ks.push_back (k);
+                    if (! ks.empty())
+                    {
+                        g.groupCount += (int) ks.size();
+                        g.group.emplace_back (n, std::move (ks));
+                    }
+                    break;
+                }
+            }
+            if (g.groupCount >= 2)
+            {
+                g.note = g.group.front().first;
+                g.k = g.group.front().second.front();
+                if (nd)
+                    for (const auto& entry : g.group)
+                        if (entry.first->id == nd->id && std::find (entry.second.begin(), entry.second.end(), nd->k) != entry.second.end())
+                        {
+                            g.note = entry.first;
+                            g.k = nd->k;
+                            break;
+                        }
+                return g;
+            }
+        }
+
+        if (! nd || ! lane || nd->lane != *lane || ! st.isSelected (nd->id))
             return std::nullopt;
         for (const auto& n : c->notes)
         {
@@ -341,13 +387,15 @@ namespace sl::ui::roll
         const bool note = P != nullptr;
         const auto c = note ? nodeCtx() : std::nullopt;
         const bool node = c.has_value();
-        const bool layoutChanged = note != hasNote || node != hasNode;
+        const bool group = node && c->groupCount >= 2;
+        const bool layoutChanged = note != hasNote || node != hasNode || (node && ! group) != hasTime;
         hasNote = note;
         hasNode = node;
+        hasTime = node && ! group;
 
         for (auto* f : { &start, &length, &pitch, &velocity })
             f->setVisible (note);
-        nodeTime.setVisible (node);
+        nodeTime.setVisible (hasTime);
         nodeValue.setVisible (node);
 
         if (note)
@@ -367,14 +415,27 @@ namespace sl::ui::roll
             const int last = (int) nodes.size() - 1;
             const bool ends = c->k == 0 || c->k == last;
             const auto& q = nodes[(std::size_t) c->k];
-            caption = "Node (" + str (core::laneInfo (c->lane).name) + ")";
-            nodeTime.setEnabled (! ends);
-            nodeTime.setTooltipText (ends ? "The first and last nodes stay at the start and end of the note"
-                                          : "How far into the note the node sits, in beats (or a note value such as 1/16)");
-            nodeTime.setValue (c->k == 0 ? juce::String ("start") : c->k == last ? juce::String ("end") : str (fmtNum (q.t * n.l, 3)));
             const auto ctx = model::formatCtx (processor.readInst(), bpm, &n);
-            nodeValue.setValue (str (laneText (c->lane, q.v, ctx)));
-            fitValueBox();
+            if (group)
+            {
+                // several picked nodes: one value box types them all, and the time box goes (sl-ui-panels.js syncInspector)
+                caption = juce::String (c->groupCount) + " nodes (" + str (core::laneInfo (c->lane).name) + ")";
+                nodeValue.setTooltipText ("Type one value for all " + juce::String (c->groupCount)
+                                          + " picked nodes, in real units (e.g. +3 st, -6 dB, 2.4 kHz, 0.5x backwards, 3 heads)");
+                nodeValue.setValue (str (laneText (c->lane, q.v, ctx)));
+                fitValueBox();
+            }
+            else
+            {
+                nodeValue.setTooltipText ("Type the value in real units, e.g. +3 st, -6 dB, 2.4 kHz, 0.5x backwards, 3 heads");
+                caption = "Node (" + str (core::laneInfo (c->lane).name) + ")";
+                nodeTime.setEnabled (! ends);
+                nodeTime.setTooltipText (ends ? "The first and last nodes stay at the start and end of the note"
+                                              : "How far into the note the node sits, in beats (or a note value such as 1/16)");
+                nodeTime.setValue (c->k == 0 ? juce::String ("start") : c->k == last ? juce::String ("end") : str (fmtNum (q.t * n.l, 3)));
+                nodeValue.setValue (str (laneText (c->lane, q.v, ctx)));
+                fitValueBox();
+            }
         }
         if (caption != nodeCaption)
         {
@@ -402,7 +463,7 @@ namespace sl::ui::roll
         int w = start.preferredWidth() + length.preferredWidth() + pitch.preferredWidth() + velocity.preferredWidth() + 3 * fieldGap;
         if (hasNode)
             w += fieldGap + 1 + 8 + (int) std::ceil (Theme::textWidth (captionFont(), nodeCaption.toUpperCase())) + 2 + fieldGap
-               + nodeTime.preferredWidth() + fieldGap + nodeValue.preferredWidth();
+               + (hasTime ? nodeTime.preferredWidth() + fieldGap : 0) + nodeValue.preferredWidth();
         return w;
     }
 
@@ -421,7 +482,7 @@ namespace sl::ui::roll
             return;
         // On a short line (a narrow window) the small boxes give way first, down to 52 px, then the value box.
         InspectorField* const boxes[] = { &start, &length, &pitch, &velocity, &nodeTime };
-        const int count = hasNode ? 5 : 4;
+        const int count = hasTime ? 5 : 4;
         for (int i = 0; i < count; ++i)
             boxes[i]->setBoxWidth (kMinValueBox);
         if (hasNode)
@@ -443,7 +504,8 @@ namespace sl::ui::roll
         nodeCaptionX = x;
         nodeCaptionWidth = (int) std::ceil (Theme::textWidth (captionFont(), nodeCaption.toUpperCase())) + 2;
         x += nodeCaptionWidth + fieldGap;
-        place (nodeTime);
+        if (hasTime)
+            place (nodeTime);
         const int room = getWidth() - x - (nodeValue.preferredWidth() - nodeValue.getBoxWidth());
         if (room < nodeValue.getBoxWidth())
             nodeValue.setBoxWidth (juce::jmax (40, room));
@@ -597,6 +659,28 @@ namespace sl::ui::roll
         const auto c = nodeCtx();
         if (! c)
             return;
+        if (c->groupCount >= 2)
+        {
+            // one value for every picked node, each note reading it with its own Travel kind (sl-ui-panels.js commitNodeVal)
+            std::map<std::string, model::NodeList> byId;
+            for (const auto& entry : c->group)
+            {
+                const auto ctxOf = model::formatCtx (processor.readInst(), bpm, entry.first.get());
+                const auto rOf = laneValueFromText (c->lane, text.toStdString(), ctxOf);
+                if (! rOf.ok)
+                {
+                    toast (str (rOf.text), 3500);
+                    sync (bpm);
+                    return;
+                }
+                model::NodeList nd = model::noteLane (*entry.first, c->lane);
+                for (const int k : entry.second)
+                    nd[(std::size_t) k].v = rOf.v;
+                byId[entry.first->id] = std::move (nd);
+            }
+            act (model::setLaneNodesMany (*clip(), c->lane, byId), "Type value for " + std::to_string (c->groupCount) + " nodes");
+            return;
+        }
         const auto ctx = model::formatCtx (processor.readInst(), bpm, c->note.get());
         const auto r = laneValueFromText (c->lane, text.toStdString(), ctx);
         if (! r.ok)

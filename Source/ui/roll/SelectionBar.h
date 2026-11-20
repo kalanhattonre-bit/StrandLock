@@ -501,6 +501,7 @@ namespace sl::ui::roll
             std::vector<std::string> ids;
             int lane = -1;
             double bpm = 0.0, seconds = 0.0, regionStart = 0.0, regionEnd = 0.0;
+            int scope = 0;   // Each note or Across (a menu can change it while the Shapes drawer is open)
 
             bool operator== (const Seen& o) const noexcept;
         };

@@ -21,6 +21,7 @@
 #include "core/Seeds.h"
 #include "model/ClipCodec.h"
 #include "model/Clip.h"
+#include "model/LaneFormat.h"
 #include "model/Node.h"
 #include "support/Check.h"
 #include "support/TestRegistry.h"
@@ -28,6 +29,8 @@
 #include "ui/MainView.h"
 #include "ui/Theme.h"
 #include "ui/roll/BoxSelect.h"
+#include "ui/roll/Inspector.h"
+#include "ui/roll/InspectorText.h"
 #include "ui/roll/RollGeometry.h"
 #include "ui/roll/RollGestures.h"
 #include "ui/roll/RollView.h"
@@ -694,6 +697,84 @@ SL_TEST ("ui", boxSelectInTheEditor)
                && nodes == juce::String::fromUTF8 ("SAMPLE (8) \xc2\xb7 HEADS \xc2\xb7 NODES: drag a box around nodes of the selected notes, then drag one "
                                                    "of them to move them together (Shift adds, Ctrl toggles)."),
            "the hints: Build says drag on empty space = box select; the Nodes switch's line is the prototype's");
+}
+
+SL_TEST ("ui", boxSelectNodesInspector)
+{
+    section ("The Nodes switch and the inspector (sl-ui-panels.js activeNodeCtx with a group): two or more picked nodes show as one value box "
+             "that types them all (one undo step), the time box goes; one picked node shows as in M4");
+
+    StrandLockProcessor proc;
+    {
+        auto& s = proc.getUserSettings();
+        s.setTheme (state::Theme::dark);
+        s.setUiScalePercent (100);
+        s.setKeysDefault (false);
+    }
+    {
+        StrandLockEditor editor (proc);
+        auto& view = editor.getView();
+        auto& doc = proc.getDocument();
+        auto& insp = view.getInspector();
+        view.getRoll().setMenusShown (false);
+        view.setFolded (true);
+
+        // two notes with three Volume nodes each
+        model::Clip clip = model::newClip (4.0);
+        for (int i = 0; i < 2; ++i)
+        {
+            auto n = model::mkNote (60.0 + 4.0 * i, 2.0 * i, 2.0, "nv-" + std::to_string (i));
+            n.lane (core::LaneId::amp) = model::NodeList { model::mkNode (0.0, 0.8, model::NodeShape::smooth, 0.0),
+                                                           model::mkNode (0.5, 0.6, model::NodeShape::smooth, 0.0),
+                                                           model::mkNode (1.0, 0.8, model::NodeShape::smooth, 0.0) };
+            clip.notes.push_back (std::make_shared<const model::Note> (std::move (n)));
+        }
+        proc.editClip ("Start", clip);
+        const auto start = doc.current();
+        view.setMode (3);
+        doc.setSelection ({ "nv-0", "nv-1" }, std::string ("nv-0"));
+        doc.setNodePicks ({ doc::NodePick { "nv-0", { 1 }, -1 }, doc::NodePick { "nv-1", { 0, 2 }, -1 } });
+        view.syncRollControls();
+        const bool group = insp.showsNode() && insp.getNodeCaption() == "3 nodes (Volume)" && ! insp.getNodeTime().isVisible()
+                           && insp.getNodeValue().isVisible();
+
+        // one value for the three: each picked node gets it, the others keep theirs; one undo step
+        insp.getNodeValue().type ("-6 dB");
+        const auto want = ui::roll::laneValueFromText (core::LaneId::amp, "-6 dB", model::formatCtx (proc.readInst(), 120.0, nullptr));
+        const auto now = doc.current();
+        auto nodesOf = [] (const model::ClipPtr& c, const std::string& id) -> model::NodeList
+        {
+            for (const auto& n : c->notes)
+                if (n->id == id)
+                    return model::noteLane (*n, core::LaneId::amp);
+            return {};
+        };
+        const auto a = nodesOf (now, "nv-0"), b = nodesOf (now, "nv-1");
+        const bool typed = want.ok && a.size() == 3 && b.size() == 3 && juce::exactlyEqual (a[1].v, want.v) && juce::exactlyEqual (b[0].v, want.v)
+                           && juce::exactlyEqual (b[2].v, want.v) && juce::exactlyEqual (a[0].v, 0.8) && juce::exactlyEqual (a[2].v, 0.8)
+                           && juce::exactlyEqual (b[1].v, 0.6) && proc.undoLabel().value_or ("") == "Type value for 3 nodes";
+        proc.undo();
+        const bool oneStep = model::encodeClip (*doc.current()) == model::encodeClip (*start) && proc.undoLabel().value_or ("") == "Start";
+        check (group && typed && oneStep,
+               fmt ("three picked Volume nodes on two notes: the inspector shows \"%s\" with no time box (%d); \"-6 dB\" sets all three to %.4f and "
+                    "no other (%d), one undo step \"Type value for 3 nodes\" (%d)",
+                    insp.getNodeCaption().toRawUTF8(), (int) group, want.v, (int) typed, (int) oneStep));
+
+        // a text it cannot read: the toast says why, nothing changes
+        doc.setSelection ({ "nv-0", "nv-1" }, std::string ("nv-0"));
+        doc.setNodePicks ({ doc::NodePick { "nv-0", { 1 }, -1 }, doc::NodePick { "nv-1", { 0, 2 }, -1 } });
+        view.syncRollControls();
+        const auto before = doc.current();
+        insp.getNodeValue().type ("loud");
+        const bool refused = doc.current() == before && view.isToastShown() && view.getToastText().isNotEmpty();
+        // one picked node: the single node, with its time box
+        doc.setNodePicks ({ doc::NodePick { "nv-1", { 2 }, -1 } });
+        doc.setActiveNode (doc::ActiveNode { "nv-1", core::LaneId::amp, 2, 0 });
+        view.syncRollControls();
+        const bool single = insp.getNodeCaption() == "Node (Volume)" && insp.getNodeTime().isVisible() && insp.getNodeTime().getValue() == "end";
+        check (refused && single, fmt ("\"loud\" toasts \"%s\" and changes nothing (%d); one picked node shows \"%s\" with its time box (%d)",
+                                       view.getToastText().toRawUTF8(), (int) refused, insp.getNodeCaption().toRawUTF8(), (int) single));
+    }
 }
 
 //==================================================================================================

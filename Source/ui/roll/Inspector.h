@@ -20,6 +20,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 class StrandLockProcessor;
@@ -123,12 +124,15 @@ namespace sl::ui::roll
         static constexpr int fieldGap = 10;
 
     private:
-        /** The node the inspector shows (sl-ui-panels.js activeNodeCtx, one node: picking several is M5's). */
+        /** The node the inspector shows (sl-ui-panels.js activeNodeCtx). With two or more nodes picked by the Nodes
+            switch (M5) it is one of them, and group holds them all per note: the value box then types them all. */
         struct NodeCtx
         {
             model::NotePtr note;
             core::LaneId lane = core::LaneId::pitch;
             int k = 0;
+            std::vector<std::pair<model::NotePtr, std::vector<int>>> group;   // empty for one node
+            int groupCount = 0;
         };
 
         model::ClipPtr clip() const;
@@ -154,7 +158,7 @@ namespace sl::ui::roll
         StrandLockProcessor& processor;
         InspectorField start, length, pitch, velocity, nodeTime, nodeValue;
         juce::String nodeCaption, emptyText;
-        bool hasNote = false, hasNode = false;
+        bool hasNote = false, hasNode = false, hasTime = false;   // hasTime: the node's "at" box shows (one node)
         double bpm = 120.0;
         int nodeLineX = -1;   // the line before the node's part
         int nodeCaptionX = 0, nodeCaptionWidth = 0;

@@ -180,3 +180,103 @@ Box select and the selection bar's direct actions (plan 7.7 S1). Branch `m5-sele
   and Walk's panel open, the drawer's box is 62 px, its 88 px of contents scroll in a 48 px view, the scroll bar is
   shown and 48 px long, and the roll's canvas keeps 75 px. Its pictures against run 44306677829's: 68 of 69 the same
   pixel for pixel; the 900 x 560 Walk picture now shows the drawer's scroll bar thumb at its right edge.
+
+## S2
+
+The drawers, the lane-button menus and the hover ghosts (plan 7.7 S2). Branch `m5-select`, from S1's 71b9fe7 (main).
+
+### Progress
+
+- Done: the work of the paused session (11/18, uncommitted in the worktree) read through and committed (3e79077):
+  `ui/roll/Drawers` (Shapes, Pattern, Random), `ui/roll/LaneMenu`, `ui/roll/GhostPreview`, the bar's Turn into
+  nodes, the hint bar's hover text, and `Tests/ui/test_ghost.cpp`. It compiled on both platforms the first time
+  (run 44675856276); two of its checks were wrong in the test, not in the code (below).
+- Done: the tests of the M5 table's S2 rows in `test_selection_tools.cpp` (f3db408): the drawers and lane menus
+  through the UI layer, live sliders, seeded Random and Re-roll, the lane menu's items, the drawers in the editor,
+  and pictures of the Shapes, Pattern and Random drawers.
+- Done: the inspector's one value for several picked nodes (S1's open item), with its test in `test_box_select.cpp`.
+- In progress: CI on these commits, the pictures, then the fast-forward of main.
+- Next: S3 (the Copy / Paste and Slides tabs, the M5 snapshots, the checklist), from the hand-off below.
+
+### Files
+
+- `Source/ui/roll/Drawers`: `ShapesDrawer` (sl-ui-panels.js DRAWERS.shapes) and `GenDrawer` (DRAWERS.pattern and
+  DRAWERS.random in one class: the generator's kind picks which controls it has), `RatePicker::setRate`, the
+  controls' hover hooks (`Drawer::getHooks`, `ToolPanel::getHooks`), `Drawer::findButton`.
+- `Source/ui/roll/SelectionBar`: `SelectionTools` gained the lane drawers' half: `shapeKeys`, `shapeOpts`, `scope`,
+  `applyShape`, `putGen`, `drawerGen`, `primaryGen`, `anyGen`, `isEditing`, `genChanged`, `applyGen`, `rerollGen`,
+  `removeGen`, `bake`, `loadGenValues`, `openDrawer`, `showLane`, and one `preview...` per control (each the model call
+  the click makes, never applied). `act` is public (the lane menu acts through it). The live session's key is the
+  prototype's string ("walk", "hum", "gen:pattern:tone"). `ToolSettings` holds `pat`, `rnd` and `shapeSeed`
+  (sl-ui-panels.js S.pat, S.rnd, S.shapeSeed). The JUCE bar builds the three drawers, gives Shapes, Pattern, Random
+  and Turn into nodes their clicks, rebuilds a lane drawer when its lane (or, on Travel, the notes' kind) changes,
+  and hooks its buttons for the hint bar; `showDrawer` opens a drawer from a menu.
+- `Source/ui/roll/LaneMenu`: `laneMenu` (sl-ui-panels.js openLaneMenu's items, actions and ghosts) and
+  `openLaneMenu` (the roll shows the lane, then the menu under the arrow, or the toast with nothing selected).
+- `Source/ui/roll/GhostPreview`: `GhostPreview` (which preview is drawn and who owns it: sl-ui-panels.js ghost,
+  clearGhost and ghostOwner) and `HoverHooks` (ghostOn and hintOn: a `juce::MouseListener` on each control).
+- `Source/ui/roll/RollView`: owns the `GhostPreview` and draws through `setGhost`; `menuHover` gives a menu item's
+  ghost (the lane menus' and the right-click menu's shapes); `openMenuAt` takes the items' ghosts; `showHint` and
+  `onHint`; `setScope`.
+- `Source/ui/roll/RollGestures`: the right-click menu's shapes have ghosts (`MenuItem::hover`, `menuItemGhost`).
+- `Source/ui/roll/Inspector`: two or more picked nodes show as one value box (sl-ui-panels.js activeNodeCtx with a
+  group, commitNodeVal).
+- `Source/ui/HintBar`: `setHelp` (sl-ui.js setHint), and a lane mode's line points at the lane button's menu again.
+- `Source/ui/MainView`: the lane buttons' arrows open their menus; `getLaneArrow`; the roll's hints go to the hint bar.
+- Tests: `Tests/ui/ToolRig.h` (S1's rig, shared, now counting clip versions and ghosts), `test_ghost.cpp`, and in
+  `test_selection_tools.cpp` the S2 tests and pictures; `test_box_select.cpp` (`boxSelectNodesInspector`);
+  `test_roll_live.cpp` (the hint's words).
+
+### Decisions and deviations
+
+- **Every drawer action is one model call and one undo step** (decision 1), through `SelectionTools::act` or a
+  live session: a shape is `model::applyShape`, Apply is the prototype's putGen (`model::makeGen` and `normalizeGen` on
+  each note through `model::editNotes`), Re-roll `model::reroll`, Remove `model::clearGen`, Turn into nodes
+  `model::bakeGen`. The labels are the prototype's: "Swell (Tone)", "Pattern (Tone)", "Random (Tone)", "Re-roll
+  (Tone)", "Remove pattern (Tone)", "Turn into nodes (Tone)"; a live control adds its word: "Pattern depth (Tone)",
+  "Random amount (Tone)".
+- **Pattern and Random are live once the primary note has that kind of generator** (decision 2; sl-ui-panels.js
+  genChanged and isEditing). Apply starts the session; from then on every slider move is a new clip version sent to
+  the engine with no undo step, and the release is one step; a chip, the rate, Lock to the beat and Same or
+  Different are one step each. Before Apply a control's change only draws a ghost, which the open drawer owns: it
+  stays while the mouse goes from one control to another and goes when the mouse leaves the drawer (the prototype's
+  D.drawer mouseleave). Walk's and Humanize's sliders before their first click now draw their ghosts too.
+- **Random stays put until Re-roll** (decision 3): Apply keeps each note's own seed and 'Different' key (and its
+  invert when it had the same kind), as putGen does, so changing Amount or the rate never deals new values; only
+  Re-roll moves every selected note's seed on by one. The Random shape (Shapes) deals new values on each click, as
+  the prototype's does: its seed is the bar's and each click moves it on by one; the nodes it makes then stay.
+- **The drawers read the primary note's generator** into their settings whenever the clip, the selection, the
+  primary note or the lane changes (sl-ui-panels.js loadGenValues). The prototype skips it after the bar's own edits;
+  here it reads then too, which gives the same values (the bar's own edits write the drawer's values into the
+  primary note, or remove the generator, which reads nothing).
+- **A drawer is never rebuilt by its own controls** (S1's rule). A lane drawer is built for its lane, and Shapes on
+  Travel for the notes' kind; the bar rebuilds it when either changes (the Lane list, a mode, a selection of the
+  other kind), as the prototype's renderDrawer does on every change. Everything else changes in place. The open
+  drawer also follows Each note / Across when a menu changes it.
+- **The lane menus are sl-ui-panels.js openLaneMenu** (the panels' version, which replaces sl-ui.js's basic one):
+  the header "Formant on 4 notes" in the lane's colour, Each note / Across (the menu stays open), the lane's shapes
+  (on Travel those of the notes' kind, both kinds' when mixed), then the drawers' pattern and random with their
+  settings in the label ("Pattern: squiggle 1/16 triplet", "Random 1/16 triplet"), Pattern settings... and Random
+  settings... (they open that drawer on this lane), Re-roll the random, Remove pattern / random and Turn into nodes
+  (greyed while no selected note has a pattern or random on the lane). It opens 4 px under the arrow in the roll's
+  own menu panel (M4 fix pass: no JUCE menu, so no key is held). The roll shows the lane first; with nothing
+  selected it says "Select notes first: click one, or drag a box on empty space".
+- **The menus' items have no tooltips.** The prototype's lane menu gives some items a title (the shapes' sentences,
+  "Rate, shape, depth, Lock to the beat"); M4's menu panel has no tooltips, and the Shapes drawer's buttons carry the
+  same sentences.
+- **Ghosts are drawn, never applied** (decision 2): every preview is the click's own model call made off to the
+  side, handed to `RollView::setGhost`; it never reaches the ClipDocument. Owners as in the prototype: a control (its
+  preview goes when the mouse leaves it), the open drawer, the open menu (its item's preview goes with the mouse, a
+  click or the menu closing). A click takes any preview away before it acts. The right-click menu's shapes have
+  ghosts too (sl-ui.js shapeItems). Recipes: `SelectionTools::previewRecipe` is the hover of M6's recipe buttons
+  (`model::applyRecipe` on the selected notes, or every note), tested here.
+- **The hint bar shows a control's text while the mouse is on it** (sl-ui.js setHint): its tooltip, or a slider's
+  title, over the bar the way a cut hint shows whole, changing no size. A lane mode's line says "▾ on the lane button
+  = shapes for every selected note" again, the prototype's words.
+- **The inspector's value for several picked nodes** (S1's open item, sl-ui-panels.js activeNodeCtx with a group):
+  with two or more nodes picked the inspector shows "3 nodes (Volume)" and one value box (no time box); a typed value
+  goes to every picked node, each note reading it with its own Travel kind, one undo step "Type value for 3 nodes"
+  (`model::setLaneNodesMany`).
+- **Two test errors in the paused session's test_ghost.cpp, fixed in the test:** the lane menu's ghosts read the
+  scope at hover time and the shapes before them in the list had left it on Across; and the editor test skipped
+  every control, because a test editor has no window, so `isShowing ()` is false.

@@ -58,15 +58,15 @@ namespace
     using ui::roll::ToolSettings;
     using Make = GhostPreview::Make;
 
-    /** c and its parents up to root are visible (a test editor has no window, so isShowing () is false). */
+    /** c and its parents below root are visible (a test editor has no window, so isShowing () is false). */
     bool shownIn (const juce::Component& c, const juce::Component& root)
     {
         for (auto* p = &c; p != nullptr; p = p->getParentComponent())
         {
+            if (p == &root)
+                return true;   // the editor itself is never made visible in a test
             if (! p->isVisible())
                 return false;
-            if (p == &root)
-                return true;
         }
         return false;
     }

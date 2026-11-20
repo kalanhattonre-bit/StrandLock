@@ -1229,7 +1229,7 @@ namespace sl::ui::roll
     bool SelectionBar::Seen::operator== (const Seen& o) const noexcept
     {
         return clip == o.clip && ids == o.ids && lane == o.lane && juce::exactlyEqual (bpm, o.bpm) && juce::exactlyEqual (seconds, o.seconds)
-            && juce::exactlyEqual (regionStart, o.regionStart) && juce::exactlyEqual (regionEnd, o.regionEnd);
+            && juce::exactlyEqual (regionStart, o.regionStart) && juce::exactlyEqual (regionEnd, o.regionEnd) && scope == o.scope;
     }
 
     void SelectionBar::sync()
@@ -1275,7 +1275,8 @@ namespace sl::ui::roll
             // the drawer follows the clip, the selection, the lane, the tempo and the sound; the editor's timer calls
             // this too, so it is synced again only when one of them changed
             const auto& rs = tools.rollSettings();
-            Seen now { tools.clip(), ids, core::laneIndex (tools.lane()), rs.bpm, rs.sampleSeconds, rs.inst.region.start, rs.inst.region.end };
+            Seen now { tools.clip(), ids, core::laneIndex (tools.lane()), rs.bpm, rs.sampleSeconds, rs.inst.region.start, rs.inst.region.end,
+                       static_cast<int> (rs.scope) };
             if (rebuilt || ! (now == seen))
             {
                 seen = std::move (now);
