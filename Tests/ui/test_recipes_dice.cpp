@@ -450,17 +450,18 @@ SL_TEST ("ui", recipeHoverDrawsAndChangesNothing)
 
 SL_TEST ("ui", diceKeepsPinnedSettings)
 {
-    section ("Dice through its button: model::dice with the pins and the seed it used, one undo step \"Dice\"; a pinned setting never changes "
-             "(each of the 14 pins alone, and 120 seeded sets of them)");
+    section ("Dice through its button: model::dice with the pins and the seed it used, exactly one undo step \"Dice\", which Undo takes back whole; "
+             "a pinned setting never changes (each of the 14 pins alone, and 120 seeded sets of them)");
 
     Rig rig;
     auto& tab = rig.tab();
     const auto& fields = model::kDiceFields;
     check (tab.getPinButtons().size() == std::size (fields), fmt ("a pin for each of the %zu Dice fields (%zu)", std::size (fields), tab.getPinButtons().size()));
-    int matched = 0, pinnedKept = 0, oneStep = 0, rolls = 0;
+    int matched = 0, pinnedKept = 0, oneStep = 0, rolls = 0, changedRolls = 0, undoTried = 0, undone = 0;
     int unpinnedChanged = 0, unpinnedSeen = 0;
     std::string firstFail;
     juce::Random rng (2024);
+    const auto sameValues = [] (const Values& a, const Values& b) { return std::memcmp (a.data(), b.data(), sizeof (float) * a.size()) == 0; };
 
     const auto roll = [&] (const std::vector<std::string>& wanted)
     {
@@ -474,10 +475,12 @@ SL_TEST ("ui", diceKeepsPinnedSettings)
         const auto pins = tab.getPins();
         const auto before = rig.proc.readInst();
         const auto beforeJson = core::instToJson (before);
+        const auto valuesBefore = valuesOf (rig.proc);
         const auto steps = tab.getSteps().size();
         tab.getDice().onClick();
         ++rolls;
         const auto after = core::instToJson (rig.proc.readInst());
+        const auto valuesAfter = valuesOf (rig.proc);
         const auto expected = core::instToJson (model::dice (before, (double) tab.getLastDiceSeed(), pins));
         std::string why;
         const bool same = instWithinFloat (after, expected, "inst", why);
@@ -494,11 +497,27 @@ SL_TEST ("ui", diceKeepsPinnedSettings)
                     ++unpinnedSeen;
                     unpinnedChanged += core::toJson (after[key]) != core::toJson (beforeJson[key]) ? 1 : 0;
                 }
-        const bool step = tab.getSteps().size() <= steps + 1 && (tab.getSteps().size() == steps || tab.getSteps().back() == "Dice");
+        // exactly one undo step "Dice" when the roll changed a setting (fix pass F3); none when it changed nothing, as the
+        // prototype's History keeps no step equal to the one before (with 14 fields rolled that practically never happens)
+        const bool changed = core::toJson (after) != core::toJson (beforeJson);
+        changedRolls += changed ? 1 : 0;
+        const bool step = changed ? tab.getSteps().size() == steps + 1 && tab.getSteps().back() == "Dice" && rig.proc.undoLabel().value_or ("") == "Dice"
+                                  : tab.getSteps().size() == steps;
         oneStep += step ? 1 : 0;
-        if (firstFail.empty() && ! (same && kept && step))
-            firstFail = fmt ("roll %d (seed %d): %s%s%s", rolls, (int) tab.getLastDiceSeed(), same ? "" : why.c_str(), kept ? "" : " a pinned field changed",
-                             step ? "" : " not one step");
+        // every 9th roll: one Undo puts every parameter back as it was before the roll, and Redo brings the roll back
+        bool undoOk = true;
+        if (changed && rolls % 9 == 0)
+        {
+            ++undoTried;
+            rig.proc.undo();
+            const bool back = sameValues (valuesOf (rig.proc), valuesBefore) && core::toJson (core::instToJson (rig.proc.readInst())) == core::toJson (beforeJson);
+            rig.proc.redo();
+            undoOk = back && sameValues (valuesOf (rig.proc), valuesAfter);
+            undone += undoOk ? 1 : 0;
+        }
+        if (firstFail.empty() && ! (same && kept && step && undoOk))
+            firstFail = fmt ("roll %d (seed %d): %s%s%s%s", rolls, (int) tab.getLastDiceSeed(), same ? "" : why.c_str(), kept ? "" : " a pinned field changed",
+                             step ? "" : " not exactly one step \"Dice\"", undoOk ? "" : " Undo or Redo did not give the settings back");
     };
 
     // each pin alone, then seeded sets of pins, from two instruments
@@ -513,9 +532,11 @@ SL_TEST ("ui", diceKeepsPinnedSettings)
                 some.push_back (f);
         roll (some);
     }
-    check (rolls == 134 && matched == rolls && pinnedKept == rolls && oneStep == rolls,
-           fmt ("%d rolls: %d gave model::dice of the instrument before with the pins and the roll's seed, %d left every pinned field as it was, %d "
-                "were at most one undo step \"Dice\" %s", rolls, matched, pinnedKept, oneStep, firstFail.c_str()));
+    check (rolls == 134 && matched == rolls && pinnedKept == rolls && oneStep == rolls && changedRolls > rolls / 2 && undoTried >= 10
+               && undone == undoTried,
+           fmt ("%d rolls: %d gave model::dice of the instrument before with the pins and the roll's seed, %d left every pinned field as it was; %d "
+                "changed a setting, and %d of the %d rolls were exactly one undo step \"Dice\" (none when nothing changed); %d of %d Undos put every "
+                "parameter back and Redo the roll %s", rolls, matched, pinnedKept, changedRolls, oneStep, rolls, undone, undoTried, firstFail.c_str()));
     // a no-op is not a pass: the unpinned settings do change
     check (unpinnedChanged > unpinnedSeen / 3, fmt ("the unpinned fields changed %d times in %d (Dice rolls them)", unpinnedChanged, unpinnedSeen));
 
