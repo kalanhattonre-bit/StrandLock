@@ -187,7 +187,13 @@ namespace sl::ui
                 write();
             repaint();
         };
-        slider.onDragEnd = [this] { binding.endGesture(); repaint(); };
+        slider.onDragEnd = [this]
+        {
+            binding.endGesture();
+            repaint();
+            if (onGestureEnd)
+                onGestureEnd();
+        };
         slider.setTitle (displayName);
         addAndMakeVisible (slider);
 
@@ -431,6 +437,21 @@ namespace sl::ui
                 break;
             }
 
+            case Icon::padlock:
+            {
+                // the Lock switch (M6): a shackle over a body with a keyhole
+                const auto body = juce::Rectangle<float> (s * 0.74f, s * 0.5f).withCentre ({ c.x, a.getY() + s * 0.7f });
+                juce::Path shackle;
+                shackle.addCentredArc (c.x, body.getY(), s * 0.24f, s * 0.26f, 0.0f, -juce::MathConstants<float>::halfPi, juce::MathConstants<float>::halfPi, true);
+                g.strokePath (shackle, thin);
+                g.drawLine (c.x - s * 0.24f, body.getY() - 0.5f, c.x - s * 0.24f, body.getY() + 1.0f, 1.3f);
+                g.drawLine (c.x + s * 0.24f, body.getY() - 0.5f, c.x + s * 0.24f, body.getY() + 1.0f, 1.3f);
+                g.fillRoundedRectangle (body, 1.5f);
+                g.setColour (background);
+                g.fillEllipse (juce::Rectangle<float> (s * 0.14f, s * 0.14f).withCentre (body.getCentre()));
+                break;
+            }
+
             case Icon::copy:
             {
                 const auto back = juce::Rectangle<float> (s * 0.6f, s * 0.7f).withPosition (a.getX() + s * 0.08f, a.getY() + s * 0.06f);
@@ -456,7 +477,10 @@ namespace sl::ui
     void ParamToggle::clicked()
     {
         // The button has already toggled itself (clickingTogglesState): the parameter follows, as one gesture.
+        const float before = binding.plain();
         binding.setAsCompleteGesture (getToggleState() ? 1.0f : 0.0f);
+        if (onUserChange && ! juce::exactlyEqual (before, binding.plain()))
+            onUserChange();
     }
 
     bool ParamToggle::syncToParameter()
@@ -548,6 +572,44 @@ namespace sl::ui
         selected = index;
         binding.setAsCompleteGesture ((float) index);
         repaint();
+        if (onUserChange)
+            onUserChange (index);
+    }
+
+    void SegmentedControl::setLabels (const juce::StringArray& newLabels)
+    {
+        if (newLabels.size() != labels.size())
+            return;   // the same segments in other words, never another count
+        labels = newLabels;
+        repaint();
+    }
+
+    void SegmentedControl::setSegmentAlpha (int index, float alpha)
+    {
+        if (index < 0 || index >= labels.size())
+            return;
+        if (alphas.size() != (std::size_t) labels.size())
+            alphas.assign ((std::size_t) labels.size(), 1.0f);
+        if (! juce::exactlyEqual (alphas[(std::size_t) index], alpha))
+        {
+            alphas[(std::size_t) index] = alpha;
+            repaint();
+        }
+    }
+
+    float SegmentedControl::getSegmentAlpha (int index) const noexcept
+    {
+        return index >= 0 && (std::size_t) index < alphas.size() ? alphas[(std::size_t) index] : 1.0f;
+    }
+
+    void SegmentedControl::setHovered (int index)
+    {
+        if (index == hovered)
+            return;
+        hovered = index;
+        repaint();
+        if (onHoverChange)
+            onHoverChange (index);
     }
 
     float SegmentedControl::captionWidth() const
@@ -616,13 +678,14 @@ namespace sl::ui
             const bool on = i == selected;
             const bool first = i == 0, last = i == labels.size() - 1;
             const auto shape = roundedBox (seg, Theme::corner, ! first, ! last);
+            const float alpha = getSegmentAlpha (i);
 
-            g.setColour (on ? theme (Tok::acc) : (i == hovered ? theme (Tok::hover) : theme (Tok::btn)));
+            g.setColour ((on ? theme (Tok::acc) : (i == hovered ? theme (Tok::hover) : theme (Tok::btn))).withMultipliedAlpha (alpha));
             g.fillPath (shape);
-            g.setColour (on ? theme (Tok::acc) : theme (Tok::btnb));
+            g.setColour ((on ? theme (Tok::acc) : theme (Tok::btnb)).withMultipliedAlpha (alpha));
             g.strokePath (shape, juce::PathStrokeType (1.0f));
 
-            g.setColour (on ? theme (Tok::onacc) : theme (Tok::txt));
+            g.setColour ((on ? theme (Tok::onacc) : theme (Tok::txt)).withMultipliedAlpha (alpha));
             g.setFont (font);
             g.drawFittedText (labels[i], seg.toNearestInt(), juce::Justification::centred, 1, 0.75f);
         }
@@ -635,18 +698,12 @@ namespace sl::ui
 
     void SegmentedControl::mouseMove (const juce::MouseEvent& e)
     {
-        const int index = segmentAt (e.position);
-        if (index != hovered)
-        {
-            hovered = index;
-            repaint();
-        }
+        setHovered (segmentAt (e.position));
     }
 
     void SegmentedControl::mouseExit (const juce::MouseEvent&)
     {
-        hovered = -1;
-        repaint();
+        setHovered (-1);
     }
 
     //==============================================================================================

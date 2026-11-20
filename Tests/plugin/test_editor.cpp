@@ -21,6 +21,8 @@
 #include "support/TestRegistry.h"
 #include "ui/Logo.h"
 #include "ui/Theme.h"
+#include "ui/tabs/MacrosTab.h"
+#include "ui/tabs/SampleTab.h"
 #include "ui/tabs/TabPanel.h"
 
 #include <algorithm>
@@ -375,8 +377,20 @@ SL_TEST ("ui", editorTabsBoundToParameters)
 
     const std::set<juce::String> wantMacros { "macro1", "macro2", "macro3", "macro4", "macro5", "macro6", "macro7", "macro8",
                                               "ampOffset", "vibOffset", "toneOffset", "formantOffset", "hollowOffset" };
-    check (idsOf (macros->getBoundIds()) == wantMacros && macros->getBoundIds().size() == 13 && macros->getKnobs().size() == 13,
-           fmt ("Macros: the 8 macros and the 5 offsets, as 13 knobs (%d)", (int) macros->getKnobs().size()));
+    auto& macrosTab = view.getMacrosTab();
+    auto& sampleTab = view.getSampleTab();
+    std::vector<ui::SampleKnob*> sampleKnobs;   // M6: the prototype's knobs on the Sample and Macros tabs
+    for (int i = 0; i < 9; ++i)
+        sampleKnobs.push_back (&sampleTab.getKnob (static_cast<ui::rules::KnobId> (i)));
+    for (int i = 0; i < 8; ++i)
+        sampleKnobs.push_back (&macrosTab.getMacro (i));
+    for (int i = 0; i < 5; ++i)
+        sampleKnobs.push_back (&macrosTab.getOffset (i));
+    int macroKnobs = 0;
+    for (int i = 9; i < 22; ++i)
+        macroKnobs += idsOf (macros->getBoundIds()).count (params::spec (sampleKnobs[(std::size_t) i]->getSpec().param).id) == 1 ? 1 : 0;
+    check (idsOf (macros->getBoundIds()) == wantMacros && macros->getBoundIds().size() == 13 && macroKnobs == 13 && macros->getKnobs().empty(),
+           fmt ("Macros: the 8 macros and the 5 offsets, as 13 of the prototype's knobs (%d)", macroKnobs));
 
     // Every parameter has a control, except the host's bypass: from M5 the Slides tab holds Auto slide and Slide time
     // (plan 7.7 decision 4).
@@ -421,8 +435,28 @@ SL_TEST ("ui", editorTabsBoundToParameters)
                 firstFailure = param.getParameterID();
             param.setValueNotifyingHost (param.getDefaultValue());
         }
-    check (moved == total && total == 13 + 14 + 7,
-           fmt ("all %d knobs move their own parameter from 0 to 1 (%d did)%s%s", total, moved,
+    sampleTab.sync (true);
+    for (auto* knob : sampleKnobs)
+    {
+        ++total;
+        const auto& s = knob->getSpec();
+        auto& param = proc.getParam (s.param);
+        knob->press (300.0);
+        knob->dragTo (300.0 - 400.0, false);
+        knob->release();
+        const float atMax = params::plainValueOf (param);
+        knob->press (300.0);
+        knob->dragTo (300.0 + 800.0, false);
+        knob->release();
+        const float atMin = params::plainValueOf (param);
+        const bool ok = juce::exactlyEqual (atMax, (float) s.range.max) && juce::exactlyEqual (atMin, (float) s.range.min);
+        moved += ok ? 1 : 0;
+        if (! ok && firstFailure.isEmpty())
+            firstFailure = params::spec (s.param).id;
+        param.setValueNotifyingHost (param.getDefaultValue());
+    }
+    check (moved == total && total == 0 + 3 + 7 + 22,
+           fmt ("all %d knobs move their own parameter from end to end (M0's from 0 to 1, the prototype's across their dial; %d did)%s%s", total, moved,
                 firstFailure.isEmpty() ? "" : "; first that did not: ", firstFailure.toRawUTF8()));
 
     // A bipolar knob lights its arc from twelve o'clock, so its default must sit there; otherwise the knob shows
@@ -439,17 +473,23 @@ SL_TEST ("ui", editorTabsBoundToParameters)
                 if (std::abs (at - 0.5) > 1.0e-4)
                     offCentre << param.getParameterID() << " (" << juce::String (at, 3) << ") ";
             }
+    for (auto* knob : sampleKnobs)
+        if (knob->getSpec().bipolar)
+        {
+            ++bipolar;
+            const double at = ui::rules::toNorm (knob->getSpec().range, knob->getSpec().range.def);
+            if (std::abs (at - 0.5) > 1.0e-12)
+                offCentre << params::spec (knob->getSpec().param).id << " (" << juce::String (at, 3) << ") ";
+        }
     check (bipolar == 15 && offCentre.isEmpty(),
            fmt ("the 15 bipolar knobs (8 macros, 5 offsets, Pitch, Cents) have their default at twelve o'clock (%d bipolar; off centre: %s)",
                 bipolar, offCentre.isEmpty() ? "none" : offCentre.toRawUTF8()));
 
-    // A knob shows the parameter's own readout (once the editor's timer has moved the knobs back to their defaults).
+    // A knob shows the prototype's readout (once the editor's timer has moved the knobs back to their defaults).
     view.syncControls();
-    auto* speedKnob = sample->getKnobs().empty() ? nullptr : sample->getKnobs().front();
-    check (speedKnob != nullptr && speedKnob->getParameter().getParameterID() == "speed"
-               && speedKnob->getSlider().getTextFromValue (speedKnob->getSlider().getValue()) == "1x",
-           fmt ("the Sample tab's first knob is Speed reading \"%s\"",
-                speedKnob != nullptr ? speedKnob->getSlider().getTextFromValue (speedKnob->getSlider().getValue()).toRawUTF8() : ""));
+    auto& speedKnob = sampleTab.getKnob (ui::rules::KnobId::speed);
+    check (speedKnob.getSpec().param == params::P::speed && speedKnob.readout() == "1x",
+           fmt ("the Sample tab's first knob is Speed reading \"%s\"", speedKnob.readout().toRawUTF8()));
 
     // Tabs: a click opens one; a click on the open one folds the pane; the choice is in the project.
     auto& tabs = view.getTabStrip();

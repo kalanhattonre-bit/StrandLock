@@ -12,6 +12,7 @@
 #include "params/ParameterLayout.h"
 #include "support/Check.h"
 #include "support/TestRegistry.h"
+#include "ui/tabs/SampleTab.h"
 #include "ui/tabs/TabPanel.h"
 
 #include <cmath>
@@ -69,51 +70,50 @@ SL_TEST ("ui", controlsFollowTheTimerNotAttachments)
     auto& view = editor.getView();
 
     // Every control bound to a parameter is in the timer's list: the four tabs' (M5's Slides tab: Auto slide and Slide
-    // time) and the strip's At the end.
+    // time) and the strip's At the end. The Sample tab's Grain knob (M6) shows three parameters (Voice, Cloud and Lock
+    // grain, as the engine asks), so the timer has two controls fewer than bound parameters.
     int bound = 0;
     for (int tab : { MainView::macrosTab, MainView::sampleTab, MainView::soundTab, MainView::slidesTab })
         if (auto* panel = view.getTabPanel (tab))
             bound += panel->getBoundIds().size();
-    check (bound == 13 + 25 + 9 + 2 && (int) view.getSyncedControls().size() == bound + 1,
-           fmt ("the timer moves %d controls: the tabs' %d and the strip's At the end", (int) view.getSyncedControls().size(), bound));
+    check (bound == 13 + 25 + 9 + 2 && (int) view.getSyncedControls().size() == bound - 2 + 1,
+           fmt ("the timer moves %d controls: the tabs' (%d parameters) and the strip's At the end", (int) view.getSyncedControls().size(), bound));
     check (view.syncControls() == 0, "with nothing changed, the timer moves nothing");
 
     // A knob: the host's change waits for the timer, then shows (an attachment would have moved it at once).
-    auto* speed = findControl<ui::Knob> (view, params::P::speed);
-    check (speed != nullptr, "the Speed knob");
-    if (speed == nullptr)
-        return;
+    auto& speed = view.getSampleTab().getKnob (ui::rules::KnobId::speed);
     auto& speedParam = proc.getParam (params::P::speed);
     hostSets (speedParam, 4.0f);
-    const double before = speed->getSlider().getValue();
+    const juce::String readBefore = speed.readout();
     const int moved = view.syncControls();
-    check (std::abs (before - 1.0) < 1e-9 && std::abs (speed->getSlider().getValue() - (double) params::plainValueOf (speedParam)) < 1e-9 && moved == 1
-               && std::abs (params::plainValueOf (speedParam) - 4.0f) < 1e-4f,
-           fmt ("host Speed 4x: the knob still reads 1x until the timer (%.3f), then %.3f (%d control moved)", before, speed->getSlider().getValue(), moved));
+    check (readBefore == "1x" && speed.readout() == "4x" && moved == 1,
+           fmt ("host Speed 4x: the knob still reads "%s" until the timer, then "%s" (%d control moved)", readBefore.toRawUTF8(),
+                speed.readout().toRawUTF8(), moved));
 
     // While the user drags the knob, the timer leaves it alone; when the drag ends it catches up.
     {
         ParamWatch w (speedParam);
-        speed->getSlider().onDragStart();
-        speed->getSlider().setValue (2.0, juce::sendNotificationSync);
+        speed.press (300.0);
+        speed.dragTo (300.0 + 40.0, false);   // down: slower
         const float during = params::plainValueOf (speedParam);
+        const auto readDuring = speed.readout();
         hostSets (speedParam, 8.0f);
         const int movedDuring = view.syncControls();
-        const double shownDuring = speed->getSlider().getValue();
-        speed->getSlider().onDragEnd();
+        const auto shownDuring = speed.readout();
+        speed.release();
         const int movedAfter = view.syncControls();
-        check (juce::exactlyEqual (during, 2.0f) && movedDuring == 0 && std::abs (shownDuring - 2.0) < 1e-9 && movedAfter == 1
-                   && std::abs (speed->getSlider().getValue() - (double) params::plainValueOf (speedParam)) < 1e-9 && w.begins == 1 && w.ends == 1,
-               fmt ("a drag to 2x writes the exact plain value in one gesture (%d / %d); the host's 8x waits until the drag ends (%d, then %d moved)",
-                    w.begins, w.ends, movedDuring, movedAfter));
+        check (during < 4.0f && movedDuring == 0 && shownDuring == readDuring && movedAfter == 1 && speed.readout() == "8x" && w.begins == 1
+                   && w.ends == 1,
+               fmt ("a drag down writes its value in one gesture (%d / %d, %.4g); the host's 8x waits until the drag ends (%d, then %d moved)",
+                    w.begins, w.ends, (double) during, movedDuring, movedAfter));
     }
 
-    // A value set on the knob outside a drag (a test, a typed value) is one whole gesture.
+    // A value typed into the knob is one whole gesture.
     {
         ParamWatch w (speedParam);
-        speed->getSlider().setValue (3.0, juce::sendNotificationSync);
+        speed.type ("3");
         check (juce::exactlyEqual (params::plainValueOf (speedParam), 3.0f) && w.begins == 1 && w.ends == 1,
-               fmt ("set from code: 3x in one gesture (%d / %d)", w.begins, w.ends));
+               fmt ("typed: 3x in one gesture (%d / %d)", w.begins, w.ends));
     }
 
     // A switch, a row of segments and a drop-down: the same rule.

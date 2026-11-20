@@ -119,6 +119,10 @@ namespace sl::ui
         const ParamBinding& getBinding() const noexcept { return binding; }
         const juce::String& getDisplayName() const noexcept { return name; }
 
+        /** Called when a gesture on the knob ends (a drag, a wheel step, a double-click): the Sample tab's Region knobs
+            make their undo step then (M6, plan 7.8 decision 1). */
+        std::function<void()> onGestureEnd;
+
     private:
         void write();
 
@@ -136,7 +140,7 @@ namespace sl::ui
     class FlatButton : public juce::Button
     {
     public:
-        enum class Icon { none, sun, moon, keys, folder, notes, nodes, chevronDown, chevronUp, copy };
+        enum class Icon { none, sun, moon, keys, folder, notes, nodes, chevronDown, chevronUp, copy, padlock };
 
         FlatButton (const Theme&, const juce::String& buttonText, Icon icon = Icon::none);
 
@@ -176,6 +180,9 @@ namespace sl::ui
         bool syncToParameter() override;
         juce::RangedAudioParameter& getParameter() noexcept { return binding.parameter(); }
 
+        /** Called after a click switched it and the parameter took it (the Sample tab makes the undo step, M6). */
+        std::function<void()> onUserChange;
+
     protected:
         using FlatButton::clicked;   // keeps the other overload visible (GCC -Woverloaded-virtual)
         void clicked() override;
@@ -206,7 +213,7 @@ namespace sl::ui
     //==============================================================================================
     /** A choice parameter as a row of joined buttons (the prototype's .sls-seg) with its caption on the left;
         click one to select it. */
-    class SegmentedControl final : public juce::Component, public ParamSynced
+    class SegmentedControl final : public juce::Component, public juce::TooltipClient, public ParamSynced
     {
     public:
         SegmentedControl (const Theme&, juce::RangedAudioParameter&, const juce::StringArray& labels, const juce::String& caption);
@@ -227,7 +234,30 @@ namespace sl::ui
         /** The area of segment i (for the tests). */
         juce::Rectangle<int> segmentBounds (int index) const;
 
+        /** Other words for the segments, in the parameter's order (the Sample tab's Motion row with its arrows, M6). */
+        void setLabels (const juce::StringArray& newLabels);
+        const juce::StringArray& getLabels() const noexcept { return labels; }
+
+        /** Draws segment i at this opacity (a faded option, sl-ui-sample.css .sls-seg>button.sls-faded); 1 by default. */
+        void setSegmentAlpha (int index, float alpha);
+        float getSegmentAlpha (int index) const noexcept;
+
+        /** Called after the user picked another segment and the parameter took it (the Sample tab makes the undo step). */
+        std::function<void (int)> onUserChange;
+
+        /** Called when the segment under the mouse changes (-1: none), for the hint line. */
+        std::function<void (int)> onHoverChange;
+        int getHovered() const noexcept { return hovered; }
+
+        /** A tooltip per segment (the one under the mouse shows), and the caption's; empty: none. */
+        void setSegmentTooltips (const juce::StringArray& tips) { segmentTips = tips; }
+        void setCaptionTooltip (const juce::String& tip) { captionTip = tip; }
+        juce::String getSegmentTooltip (int index) const { return segmentTips[index]; }
+        juce::String getTooltip() override { return hovered >= 0 ? segmentTips[hovered] : captionTip; }
+
     private:
+        void setHovered (int index);
+
         int segmentAt (juce::Point<float> position) const;
         float captionWidth() const;
         std::vector<float> segmentWidths() const;
@@ -237,6 +267,9 @@ namespace sl::ui
         juce::String caption;
         int selected = 0;
         int hovered = -1;
+        std::vector<float> alphas;   // per segment (empty: all 1)
+        juce::StringArray segmentTips;
+        juce::String captionTip;
         ParamBinding binding;
     };
 

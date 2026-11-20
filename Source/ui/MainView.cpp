@@ -315,8 +315,21 @@ namespace sl::ui
             addAndMakeVisible (roll.getZoomButton (i));
 
         auto& apvts = processor.getApvts();
-        panels[sampleTab] = std::make_unique<SampleTab> (t, apvts);
-        panels[macrosTab] = std::make_unique<MacrosTab> (t, apvts);
+        {
+            // M6 T1: the full Sample and Macros tabs, whose controls fade and explain themselves in the hint line
+            auto sp = std::make_unique<SampleTab> (t, apvts, processor);
+            auto mp = std::make_unique<MacrosTab> (t, apvts, processor);
+            samplePanel = sp.get();
+            macrosPanel = mp.get();
+            samplePanel->onHint = [this] (const juce::String& text) { hintBar.setHelp (text); };
+            samplePanel->onToast = [this] (const juce::String& text, int ms) { showToast (text, ms); };
+            samplePanel->onLayoutChange = [this] { resized(); };
+            macrosPanel->onHint = [this] (const juce::String& text) { hintBar.setHelp (text); };
+            macrosPanel->onToast = [this] (const juce::String& text, int ms) { showToast (text, ms); };
+            macrosPanel->onLayoutChange = [this] { resized(); };
+            panels[sampleTab] = std::move (sp);
+            panels[macrosTab] = std::move (mp);
+        }
         panels[soundTab] = std::make_unique<SoundTab> (t, apvts);
         {
             // M5 S3: the Slides and Copy / Paste tabs act on the roll's notes
@@ -415,6 +428,18 @@ namespace sl::ui
 
     MainView::~MainView()
     {
+        if (samplePanel != nullptr)
+        {
+            samplePanel->onLayoutChange = nullptr;
+            samplePanel->onHint = nullptr;
+            samplePanel->onToast = nullptr;
+        }
+        if (macrosPanel != nullptr)
+        {
+            macrosPanel->onLayoutChange = nullptr;
+            macrosPanel->onHint = nullptr;
+            macrosPanel->onToast = nullptr;
+        }
         if (slides != nullptr)
             slides->onLayoutChange = nullptr;
         if (copyPaste != nullptr)
@@ -591,6 +616,12 @@ namespace sl::ui
             slides->sync();
         if (copyPaste != nullptr)
             copyPaste->sync();
+
+        // the Sample and Macros tabs (M6 T1): what each control does with the settings and the notes now
+        if (samplePanel != nullptr)
+            samplePanel->sync();
+        if (macrosPanel != nullptr)
+            macrosPanel->sync();
 
         // Undo and Redo (sl-ui.js historyChanged): enabled when there is a step, the step's name in the tooltip
         const auto undoLabel = processor.undoLabel(), redoLabel = processor.redoLabel();
