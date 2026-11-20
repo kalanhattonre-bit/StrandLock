@@ -156,3 +156,19 @@ The Sample tab's rules and readouts, the full Sample tab and the Macros tab (pla
   while they moved), 81 of 81 control gestures changed exactly their own parameters with one undo step and its label
   (and Undo put every parameter back), Lock Grain typed 4.3 holds 4.30000019 and plays 4 taps (a 10 px drag from 4
   lands on 5 and plays 5); the timer test: a host change shows only on the timer, never during a drag.
+
+## T2
+
+Sample mode 8 in the roll (the chevrons and per-note thumbnails, the own-settings dot and the slide warning), the
+Sample editor strip's live heads (ui/strip/HeadsOverlay), the strip click that sets the selected notes' Start, the
+Note settings panel (S7) and the "Try this" line (U3) (plan 7.8 T2, decisions 5 and 6). Branch `m6-sample`, from main
+10dc52a (T1).
+
+### Progress
+
+- In progress: `ui/roll/NoteDecor` (sl-ui-panels.js tabAt, simulate, peakBins and thumbAmps, ported line by line) and
+  its fixture test `noteDecorHelpersMatchFixture` (the 30 cases of `ui/inspector.json` that M4 left for M6), pushed
+  first so CI checks them while the rest is written.
+- Next: the decorations drawn through RollPainter and the NoteLayerCache; HeadsOverlay and the strip click; the Note
+  settings tab; Try this; the tests in `test_heads_overlay.cpp`, `test_note_settings.cpp` and `test_note_decor.cpp`;
+  pictures to look at.
