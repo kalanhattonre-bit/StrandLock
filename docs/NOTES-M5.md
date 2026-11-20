@@ -399,9 +399,10 @@ Branch `m5-select`, from S2's a84a8b4 (main).
 - Done: run 44695294607 on ba326b7 (the decision 6 test made font-independent, the box picture in Tone), green on
   every job and step (below). Its list of folded tabs showed Copy / Paste folding on the smallest window (its chips'
   line wrapped), so the tab now keeps Copy and Paste on its second line; run 44697009302 (notes) was cancelled for it.
-- In progress: CI on the fourth push (the Copy / Paste tab in two rows, a check that it and Slides show at 900 x 560,
-  these notes).
-- Next: the final run's figures and the M5 summary, then the merge to main.
+- Done: run 44698619192 on 578967f (the Copy / Paste tab in two rows, a check that it and Slides show at 900 x 560),
+  green on every job and step; its 5 changed pictures looked at (below).
+- Done: the M5 summary (the end of this file).
+- In progress: CI on this commit (notes only), then the fast-forward of main.
 
 ### Files
 
@@ -435,11 +436,11 @@ Branch `m5-select`, from S2's a84a8b4 (main).
 ### Decisions and deviations
 
 - **Every paste and duplicate is one model call and one undo step** (decisions 1 and 5): Paste lanes is
-  `model::pasteLanes` with `model::copyLanes` of the primary note and the chips' lanes, Duplicate `model::duplicateNotes`,
-  Paste notes `model::pasteNotes`; each is one `ClipDocument` edit and one step ("Paste lanes", "Duplicate", "Paste
-  notes"). Past 4096 notes the model refuses it, the toast says "That would make 4097 notes; the limit is 4096." and
-  nothing changes (no bytes, no step, no clip version); the document's own caps (32 MiB, the snapshot budget) refuse
-  the same way.
+  `model::pasteLanes` with `model::copyLanes` of the primary note and the chips' lanes, Duplicate
+  `model::duplicateNotes`, Paste notes `model::pasteNotes`; each is one `ClipDocument` edit and one step ("Paste
+  lanes", "Duplicate", "Paste notes"). Past 4096 notes the model refuses it, the toast says "That would make 4097
+  notes; the limit is 4096." and nothing changes (no bytes, no step, no clip version); the document's own caps (32
+  MiB, the snapshot budget) refuse the same way.
 - **Paste notes is new, so its place is chosen to match Duplicate.** The prototype pastes only lanes (M1 added
   `model::pasteNotes` for the plan's cap). The copies start where the selected notes end (where Duplicate puts its
   copies), or right after the copied notes when nothing is selected, so Copy notes then Paste notes again and again
@@ -471,6 +472,11 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   slide ("Slide: jump": glide 0) are one step each, through `SelectionTools::act`.
 - **No hover ghosts on the two tabs.** The prototype's Slides and Copy / Paste panes preview nothing (U6 is shapes,
   patterns and recipes); their buttons explain themselves in tooltips, as the M0 tabs' do.
+- **The slide warning on the roll stays with M6.** S1 left the Connect drawer's "(red mark on the roll)" to M6 and
+  the Slides work. The prototype draws that mark in sl-ui-panels.js decorate, note by note on the roll, with the
+  chevrons and the thumbnails (UI4-9, handed to M6) and the own-settings dot (S7, M6's Note settings), so it goes with
+  them; the Slides tab changes slides and draws nothing on the roll. The drawer's sentence still says what happens to
+  the note.
 - **Decision 6, a first open:** a new instance's UIST starts with the tabs folded (the processor sets it; the state
   format's default is unchanged). The prototype folds on a first open in a window under 900 px high; a new StrandLock
   window is always 680 px high, so it always folds. A project keeps the fold it was saved with.
@@ -482,7 +488,7 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   the window taller and the tab opens by itself." The prototype instead cuts the row (its pane's least share is 60 px,
   fresh1100tab.png cuts the knob row). Which tab folds where depends on the fonts: on Windows the Sample tab folds at
   900 x 560 (a whole knob row would leave the roll under 110 px); Linux's wider fonts wrap its first line, so two whole
-  rows show there. Of 180 cases (5 tabs, 900 and 1100 wide, 560 to 900 high) 4 fold on Windows and 2 on Linux.
+  rows show there. Of 180 cases (5 tabs, 900 and 1100 wide, 560 to 900 high) 3 fold on Windows and 1 on Linux.
 - **Decision 6, the 75 px roll at 900 x 560 with a drawer open** (S1's and S2's note): with the tabs folded and a drawer
   open, a window too short for the roll's floor gives the inspector's line to the roll (`isInspectorFolded`): at 900 x
   560 the roll has 137 px (a 107 px canvas) instead of 105 (75). The inspector comes back when the drawer closes or the
@@ -497,7 +503,7 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   sits right above the roll on a first open (the tabs folded), near where the buttons were; the top bar and the
   selection row have no room for them at 900 px.
 - **The M5 table's pictures** are `m5_table_shapes_drawer_*` (the Shapes drawer on Volume), `m5_table_hover_ghost_*`
-  (the mouse on Ramp up: its ghost and its words in the hint bar), `m5_table_box_select_*` (a Shift box in Build
+  (the mouse on Ramp up: its ghost and its words in the hint bar), `m5_table_box_select_*` (a Shift box in Tone
   adding to two selected notes, held), `m5_tab_copy_paste_*` and `m5_tab_slides_*`, dark and light at 100 %; S1's
   `m5_box_select_*` and S2's `m5_ghost_*` stay. `m5SnapshotPictures` checks what each must show, so the table's
   snapshot row is gated too.
@@ -552,11 +558,12 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   slide ("jump") and Auto ("auto") one step each; Undo walks back to the clip before the drag.
 - Decision 6: a new instance folded (UIST 1, the roll 352 px at 1100 x 680); the Sample tab opened gives the pane 148
   px and the roll 204; a project saved with Macros open opens with it open. 180 tab and window cases (5 tabs, 900 and
-  1100 wide, 560 to 900 high): on Windows 176 show whole rows and 4 fold, on Linux 178 and 2; 0 cut a row, 0 leave the
-  roll under 110 px. At 900 x 560 with the banner the tabs show folded and UIST keeps the Sample tab open; at 900 x 640
-  the pane scrolls whole rows with its thumb (116 px of 282 on Windows, 70 of 392 on Linux). The zoom buttons: 4 of 4
-  in the tab row, 0 over the ruler, the ruler reaching the canvas's right edge (876 >= 866 at 900 x 560), H+ 1.3
-  times. With Walk's panel open at 900 x 560 the roll's canvas has 107 px on both platforms (S1 and S2: 75).
+  1100 wide, 560 to 900 high): on Windows 177 show whole rows and 3 fold, on Linux 179 and 1 (run 44698619192; with
+  the Copy / Paste tab in one wrapping line 176 and 4, 178 and 2); 0 cut a row, 0 leave the roll under 110 px, 0 fold
+  where a whole row fits. At 900 x 560 with the banner the tabs show folded and UIST keeps the Sample tab open; at 900
+  x 640 the pane scrolls whole rows with its thumb (116 px of 282 on Windows, 70 of 392 on Linux). The zoom buttons:
+  4 of 4 in the tab row, 0 over the ruler, the ruler reaching the canvas's right edge (876 >= 866 at 900 x 560), H+
+  1.3 times. With Walk's panel open at 900 x 560 the roll's canvas has 107 px on both platforms (S1 and S2: 75).
 - The pictures (run 44692540376's artifact, 88), compared pixel for pixel with S2's (run 44681435341): 10 new, 76
   changed, 2 the same (the Diagnostics pages: the tab hides the zoom buttons). The changes are the ones meant: the zoom
   buttons in the tab row (every picture with the roll; at 900 x 560 bar 4's number now shows), the first view centred
@@ -573,9 +580,62 @@ Branch `m5-select`, from S2's a84a8b4 (main).
 - Run 44695294607 on ba326b7, green on every job and step: Windows Release 1797 checks in 303 tests, Linux Release
   1789 in 303, the sanitizers' groups 808 in 139 and 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE
   assertions), the Debug pictures 0 JUCE assertions, pluginval strictness 10 SUCCESS, the fixture check passed (4.87 MB
-  of the 5 MB budget; S3 adds no fixtures). The  group: 92 tests, 457 checks on both platforms (S3 added 8 tests
+  of the 5 MB budget; S3 adds no fixtures). The `ui` group: 92 tests, 457 checks on both platforms (S3 added 8 tests
   and 49 checks). Decision 6's sweep: 0 cut rows, 0 rolls under 110 px, 0 needless folds; folded on Windows: 900 x 560
   Sample, Macros and Copy / Paste, 900 x 580 Sample; on Linux: 900 x 560 Macros and Copy / Paste. The first folded
   tab's click said the sentence and kept the choice, and at 900 x 900 the tab opened by itself. With Walk's panel open,
   900 x 560 to 760 in 8 px steps: the inspector's line went to the roll at 1 height (560: the roll 137 px) and stayed
   at 25, 0 wrong, on both platforms.
+- Run 44698619192 on 578967f (the Copy / Paste tab in two rows), green on every job and step, with the same counts:
+  Windows Release 1797 checks in 303 tests, Linux Release 1789 in 303, the `ui` group 92 tests and 457 checks on both
+  platforms, the sanitizers' groups 808 in 139 and 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE
+  assertions), the Debug pictures 0 JUCE assertions, pluginval strictness 10 SUCCESS, the fixture check passed (4.87
+  MB of the 5 MB budget). Decision 6's sweep: on Windows 177 of 180 cases show whole rows and 3 fold (900 x 560
+  Sample and Macros, 900 x 580 Sample), on Linux 179 and 1 (900 x 560 Macros); 0 cut a row, 0 leave the roll under
+  110 px, 0 fold where a whole row fits; Copy / Paste and Slides show at 900 x 560 on both. The first folded tab's
+  click (Sample on Windows, Macros on Linux) said the sentence and kept the choice, and at 900 x 900 the tab opened by
+  itself (258 and 186 px). The inspector's line and the zoom buttons as in run 44695294607.
+- Its pictures against run 44692540376's: 83 of 88 the same, 5 changed, the 5 meant, each looked at. The Copy / Paste
+  tab (dark and light): LANES TO COPY and the ten chips on the first row; Copy, Paste, HOLDING: 8 LANES, a line,
+  NOTES, Copy notes, Paste notes, Duplicate and HOLDING: 1 NOTE on the second, the toast "Copied 1 note" over the
+  roll. The box select (dark and light): in Tone, a Shift box held across the notes, the selection row reading 6 notes
+  selected. Chop refused (light): the warning in the drawer and the notes in view under it. Nothing cut, overlapping
+  or off-palette.
+
+## M5 summary
+
+M5 (the selection tools) is built in three parts on `m5-select`, each fast-forwarded to main when green: S1 box select
+and the selection bar's direct actions; S2 the drawers, the lane buttons' menus and the hover ghosts; S3 the Copy /
+Paste and Slides tabs, M4's layout leftovers (decision 6), the M5 pictures and the checklist. What Kalan gets: a box
+on empty space that selects the notes it meets in every mode (Shift adds, Ctrl toggles) and, with the Nodes switch,
+picks the selected notes' nodes to drag together; the selection bar under the selection row (LANE, Shapes with Each
+note / Across, Pattern, Random with Re-roll, Turn into nodes, Connect with Nearest / Furthest / Random / Re-roll /
+Disconnect, Tools with Walk, Chop, Reverse, Flip, More, Less, Select similar, Humanize, Strum and Legato); the lane
+buttons' menus (▾); a dashed preview of what a shape, pattern or tool would do while the mouse is on it; the
+Copy / Paste tab (the lanes to copy, Copy and Paste lanes, Copy notes, Paste notes and Duplicate) and the Slides tab
+(Auto slide, Slide time, and the selected notes' own slide time); a new instance with the tabs folded, tabs that fold
+rather than cut a row on a short window, and the zoom buttons in the tab row.
+
+- **The plan's M5 table, where each row is checked.** Tools through the UI layer: S1's `selectionToolsFixtureCases`
+  and `selectionToolsSweep` (71 of 71 tools.json cases and 378 of 378 sweep runs the bytes of the direct model call)
+  and S2's `selectionToolsDrawerSweep` (6075 of 6075). Box select: S1's `boxSelectSeededBoxes` (160 of 160 seeded
+  boxes, plain, Shift and Ctrl). Ghosts: S2's `ghostsChangeNothing` (8769 hovers, 0 undo steps, 0 clip versions) and
+  `ghostsInTheEditor` (0 submits to the SnapshotPublisher). Live sliders: S2's `selectionToolsGenLive` (a Pattern
+  slider live, 1 undo step on release) and S3's `slidesTabSelectedNotes` (the slide time slider the same way). Copy /
+  paste: S3's `copyPasteLanesStretch`, `copyPasteNotesKeepLinks`, `copyPasteRefusedPast4096` and
+  `copyPasteTabInTheEditor`. Snapshots: S3's ten `m5_table_*` and `m5_tab_*` pictures, checked by
+  `m5SnapshotPictures`, with S1's and S2's pictures beside them.
+- **Decisions 1 to 6** (plan 7.7): every tool one model call and one undo step (S1, S2, S3); ghosts drawn, never
+  applied (S2); Random stays put until Re-roll (S1, S2); Auto slide and Slide time bound the M2 way (S3,
+  `slidesTabAutoSlideAndTime`); the 4096 cap on paste and duplicate (S3); M4's layout leftovers (S3,
+  `decisionSixLayout`).
+- **Deviations from the plan and the prototype, all in the parts' notes:** the Connect drawer's warning without its
+  red mark (S1; the mark waits for M6, S3); the menus' items without tooltips (S2); a drawer's least room 62 px, not
+  60 (S1); Paste notes, which the prototype does not have, placed as Duplicate places its copies, and Paste notes here
+  in the right-click menu (S3); the Copy / Paste tab in two rows (S3); the tabs folding on a short window where the
+  prototype cuts a row, and the inspector's line giving way to an open drawer there (S3); the zoom buttons in the tab
+  row (S3).
+- **For the architect:** see S1, S2 and S3's lists; a key for Paste notes is still open (S3).
+- **Handed to M6:** the recipe buttons' hover (`SelectionTools::previewRecipe`, hooked with `HoverHooks`); the
+  per-note decorations of sl-ui-panels.js decorate (UI4-9's chevrons and thumbnails, the own-settings dot, and the
+  warning mark where a slide goes into a note that starts well inside the one before it); the Note settings tab.
