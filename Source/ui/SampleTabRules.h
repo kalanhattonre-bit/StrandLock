@@ -15,6 +15,7 @@
 #include "params/ParamIds.h"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -275,5 +276,5 @@ namespace sl::ui::rules
     std::optional<double> dragTo (const KnobSpec& s, KnobDrag& d, double y, bool fine);
 
     /** The release: true when the drag moved and ended away from where it started (one undo step). */
-    inline bool dragCommits (const KnobDrag& d) noexcept { return d.moved && d.last != d.v0; }
+    inline bool dragCommits (const KnobDrag& d) noexcept { return d.moved && std::islessgreater (d.last, d.v0); }
 }

@@ -87,7 +87,7 @@ SL_TEST ("ui", controlsFollowTheTimerNotAttachments)
     const juce::String readBefore = speed.readout();
     const int moved = view.syncControls();
     check (readBefore == "1x" && speed.readout() == "4x" && moved == 1,
-           fmt ("host Speed 4x: the knob still reads "%s" until the timer, then "%s" (%d control moved)", readBefore.toRawUTF8(),
+           fmt ("host Speed 4x: the knob still reads \"%s\" until the timer, then \"%s\" (%d control moved)", readBefore.toRawUTF8(),
                 speed.readout().toRawUTF8(), moved));
 
     // While the user drags the knob, the timer leaves it alone; when the drag ends it catches up.

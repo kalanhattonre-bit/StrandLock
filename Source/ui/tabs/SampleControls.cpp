@@ -114,21 +114,21 @@ namespace sl::ui
 
         void applyColours()
         {
-            const auto& theme = owner.theme;
+            const auto& th = owner.theme;
             const auto clear = juce::Colours::transparentBlack;
-            setColour (juce::Label::textColourId, theme (Tok::txt));
+            setColour (juce::Label::textColourId, th (Tok::txt));
             setColour (juce::Label::backgroundColourId, clear);
             setColour (juce::Label::outlineColourId, clear);
-            setColour (juce::Label::textWhenEditingColourId, theme (Tok::txt));
-            setColour (juce::Label::backgroundWhenEditingColourId, theme (Tok::btn));
-            setColour (juce::Label::outlineWhenEditingColourId, theme (Tok::acc));
-            setColour (juce::TextEditor::textColourId, theme (Tok::txt));
-            setColour (juce::TextEditor::backgroundColourId, theme (Tok::btn));
-            setColour (juce::TextEditor::outlineColourId, theme (Tok::acc));
-            setColour (juce::TextEditor::focusedOutlineColourId, theme (Tok::acc));
-            setColour (juce::TextEditor::highlightColourId, theme (Tok::acc).withAlpha (0.35f));
-            setColour (juce::TextEditor::highlightedTextColourId, theme (Tok::txt));
-            setColour (juce::CaretComponent::caretColourId, theme (Tok::txt));
+            setColour (juce::Label::textWhenEditingColourId, th (Tok::txt));
+            setColour (juce::Label::backgroundWhenEditingColourId, th (Tok::btn));
+            setColour (juce::Label::outlineWhenEditingColourId, th (Tok::acc));
+            setColour (juce::TextEditor::textColourId, th (Tok::txt));
+            setColour (juce::TextEditor::backgroundColourId, th (Tok::btn));
+            setColour (juce::TextEditor::outlineColourId, th (Tok::acc));
+            setColour (juce::TextEditor::focusedOutlineColourId, th (Tok::acc));
+            setColour (juce::TextEditor::highlightColourId, th (Tok::acc).withAlpha (0.35f));
+            setColour (juce::TextEditor::highlightedTextColourId, th (Tok::txt));
+            setColour (juce::CaretComponent::caretColourId, th (Tok::txt));
         }
 
         void paint (juce::Graphics& g) override
@@ -136,9 +136,8 @@ namespace sl::ui
             // .sls-kval:hover: the hover colour behind the value of a knob that takes typing
             if (isEditableOnSingleClick() && isMouseOver (true) && ! isBeingEdited())
             {
-                const auto& theme = owner.theme;
                 const float w = juce::jmin ((float) getWidth(), Theme::textWidth (valueFont(), getText()) + 8.0f);
-                g.setColour (theme (Tok::hover));
+                g.setColour (owner.theme (Tok::hover));
                 g.fillRoundedRectangle (getLocalBounds().toFloat().withSizeKeepingCentre (w, (float) getHeight()), 4.0f);
             }
             juce::Label::paint (g);
