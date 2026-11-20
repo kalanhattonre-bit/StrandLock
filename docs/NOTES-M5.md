@@ -396,8 +396,10 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   Fixed in the test. JUCE assertions in the Debug pictures 0, pluginval SUCCESS. Its 88 pictures compared with S2's
   and looked at (below).
 - Done: the Cubase checklist's M5 section.
-- In progress: CI on the second push (the decision 6 test made font-independent, the box picture in Tone).
-- Next: the notes' figures, the M5 summary, then the merge to main.
+- Done: run 44695294607 on ba326b7 (the decision 6 test made font-independent, the box picture in Tone): Linux's tests
+  green.
+- In progress: CI on the third push (these notes, the first run's figures, S1's Chop picture scrolled to its notes).
+- Next: the final run's figures and the M5 summary, then the merge to main.
 
 ### Files
 
@@ -472,8 +474,9 @@ Branch `m5-select`, from S2's a84a8b4 (main).
   whole row fits, the tabs show folded (`isAutoFolded`): the person's fold in UIST is unchanged, the tab opens again by
   itself when the window is taller, and a click on a tab or Show says "This window is too short to show the tab. Make
   the window taller and the tab opens by itself." The prototype instead cuts the row (its pane's least share is 60 px,
-  fresh1100tab.png cuts the knob row). At 900 x 560 the Sample and Macros tabs fold; Slides, Copy / Paste and Sound
-  show (with notes selected Sound folds too).
+  fresh1100tab.png cuts the knob row). Which tab folds where depends on the fonts: on Windows the Sample tab folds at
+  900 x 560 (a whole knob row would leave the roll under 110 px); Linux's wider fonts wrap its first line, so two whole
+  rows show there. Of 180 cases (5 tabs, 900 and 1100 wide, 560 to 900 high) 4 fold on Windows and 2 on Linux.
 - **Decision 6, the 75 px roll at 900 x 560 with a drawer open** (S1's and S2's note): with the tabs folded and a drawer
   open, a window too short for the roll's floor gives the inspector's line to the roll (`isInspectorFolded`): at 900 x
   560 the roll has 137 px (a 107 px canvas) instead of 105 (75). The inspector comes back when the drawer closes or the
@@ -505,3 +508,59 @@ Branch `m5-select`, from S2's a84a8b4 (main).
 - **The zoom buttons in the tab row.** The prototype has them in its top bar, which has no room at 900 px (M4 R2).
 - **The clipboards live with the window:** closing the StrandLock window forgets what was copied. Keeping them in the
   processor (or sharing them between StrandLock instances) is a small change if Kalan wants it.
+
+### CI results
+
+- Run 44692540376 on 9d6360a (the first push): both platforms built it the first time. Red: 1 of 1797 checks on Windows
+  and 3 of 1789 on Linux, all in `decisionSixLayout`, all the test's own assumptions about layouts that depend on the
+  fonts: the Tools drawer without a tool panel is only 40 px, so at 900 x 560 the roll keeps 129 px and nothing needs
+  to fold (the test now opens Walk's panel, as S1's small-window test does, so the drawer takes its 62 px); and Linux's
+  wider fonts wrap the Sample tab's first line, so two whole rows fit at 900 x 560 and it does not fold there (the test
+  now works out from each panel's own rows whether each fold was needed, and finds a folded tab to click). Every other
+  step green: the fixture check, the Debug-CRT allocation run 38 checks in 7 tests, the Debug pictures with 0 JUCE
+  assertions, the sanitizers' groups 808 in 139 and 142 in 20, pluginval strictness 10 SUCCESS. The `ui` group: 92
+  tests, 457 checks (S2: 84 and 408).
+- Copy / paste (run 44692540376, the same on both platforms): Paste lanes from the 1-beat source onto notes of 4, 0.5
+  and 2 beats: 30 of 30 lanes the source's, the node times bit for bit, so its bend node (t 0.3) lands at beats 3.20,
+  7.15 and 12.60 of notes 2-6, 7-7.5 and 12-14; one step "Paste lanes", the bytes of `model::pasteLanes`; Undo puts the
+  targets' own lanes back. With only Pitch and Tone chosen ("holding: Pitch, Tone") 2 lanes change and 8 keep the
+  note's own. Duplicate of A -> B, C -> D (D not selected) and E: the copy of A slides into the copy of B, the copy of C
+  into none, the originals keep theirs, the copies start at beat 3 where the group ends; the bytes of
+  `model::duplicateNotes`. Paste notes after E: the copies start at beat 2, links as Duplicate, "Pasted 3 notes"; at
+  beat 30.5 of 32: 2 of 3 copies, the second cut to 0.5 beat, "Pasted 2 of 3 notes: the rest would start after the
+  clip's end"; past the end nothing and "No room there: add bars first". The right-click menu has no Paste notes here
+  until notes are copied; then its copies start on the grid line at the click (beat 20.5 for a click at 20.6).
+- Caps: Duplicate of 97 notes on a 4000-note clip refused, "That would make 4097 notes; the limit is 4096.", the bytes,
+  the clip version and the selection unchanged, 0 undo steps; 96 done (exactly 4096 notes, one step). Paste notes the
+  same (97 refused, 96 done). In the editor the tab's Duplicate and Paste notes past the cap show the toast in the
+  window and hand nothing to the SnapshotPublisher.
+- The Copy / Paste tab in the editor: 10 chips lit; Pitch off writes UIST copyMask 0x3fe and a new window shows it off;
+  Copy then reads "holding: 9 lanes" and Paste onto 2 notes is the bytes of the direct call without Pitch; Copy notes
+  ("holding: 2 notes"), Paste notes after the selected notes (t1 ends at beat 7.5) and Duplicate, one step each.
+- The Slides tab: AUTO SLIDE offers Off, Legato (touching notes), Always (next note); SLIDE TIME 1/32 .. 1/2 shows 1/8;
+  Always picked is one host gesture and one undo step "Auto slide", Undo gives Legato back; Slide time 1/4 one gesture,
+  one step "Slide time"; Cubase's Off and 0.7 beats wait for the 30 Hz timer, then both move ("Off", "0.700 beats").
+  SELECTED NOTES: greyed and "—" with nothing selected (a press changes nothing); "auto" at 0.5 for a note that
+  follows Slide time; 3 moves are 3 of 3 the bytes of `model::updateNotes` on the clip the drag started from, 3 clips
+  handed to the SnapshotPublisher and no undo step; the release one step "Slide time (notes)" ("0.75 beats"); Jump, no
+  slide ("jump") and Auto ("auto") one step each; Undo walks back to the clip before the drag.
+- Decision 6: a new instance folded (UIST 1, the roll 352 px at 1100 x 680); the Sample tab opened gives the pane 148
+  px and the roll 204; a project saved with Macros open opens with it open. 180 tab and window cases (5 tabs, 900 and
+  1100 wide, 560 to 900 high): on Windows 176 show whole rows and 4 fold, on Linux 178 and 2; 0 cut a row, 0 leave the
+  roll under 110 px. At 900 x 560 with the banner the tabs show folded and UIST keeps the Sample tab open; at 900 x 640
+  the pane scrolls whole rows with its thumb (116 px of 282 on Windows, 70 of 392 on Linux). The zoom buttons: 4 of 4
+  in the tab row, 0 over the ruler, the ruler reaching the canvas's right edge (876 >= 866 at 900 x 560), H+ 1.3
+  times. With Walk's panel open at 900 x 560 the roll's canvas has 107 px on both platforms (S1 and S2: 75).
+- The pictures (run 44692540376's artifact, 88), compared pixel for pixel with S2's (run 44681435341): 10 new, 76
+  changed, 2 the same (the Diagnostics pages: the tab hides the zoom buttons). The changes are the ones meant: the zoom
+  buttons in the tab row (every picture with the roll; at 900 x 560 bar 4's number now shows), the first view centred
+  in the folded roll (a new instance is folded, so the roll pictures that fold the tabs start where the first view now
+  puts them), the default pictures (strandlock_*, strip_*) with the tabs folded and a big roll, and at 900 x 560 with
+  a drawer open no inspector line. Looked at: the 10 new ones whole, the changed ones in 2 x 2 sheets and the 200 %
+  tab row in a crop. The Copy / Paste tab: LANES TO COPY, the ten chips in their colours (Vibrato and Hollow off:
+  dark with their coloured edge), Copy, Paste, HOLDING: 8 LANES; NOTES, Copy notes, Paste notes, Duplicate, HOLDING: 1
+  NOTE (shell.html's copy pane). The Slides tab: AUTO SLIDE (Legato (touching notes)), SLIDE TIME (1/8), a line,
+  SELECTED NOTES with the slider at 0.75 beats, Auto, Jump, no slide (shell.html's glide pane); at 150 % greyed with
+  "—". The Shapes drawer on Volume, the hover ghost of Ramp up with its sentence in the hint bar (ghost.png), the box.
+  Nothing cut, overlapping or off-palette. One picture improved for the next run: S1's Chop refused picture lost its
+  notes from view (its clip sits lower than the first view now centres), so it scrolls to them.

@@ -702,11 +702,12 @@ SL_TEST ("ui", slidesTabAutoSlideAndTime)
     {
         ParamWatch w (modeParam);
         mode.setSelectedItemIndex (2, juce::sendNotificationSync);
-        const bool picked = juce::exactlyEqual (plainOf (e.proc, params::P::glideMode), 2.0f) && w.begins == 1 && w.ends == 1
+        const int begins = w.begins, ends = w.ends;   // the pick alone (Undo writes the parameter in a gesture too)
+        const bool picked = juce::exactlyEqual (plainOf (e.proc, params::P::glideMode), 2.0f) && begins == 1 && ends == 1
                          && e.proc.undoLabel().value_or ("") == "Auto slide";
         e.view().getRoll().undo();
         check (picked && juce::exactlyEqual (plainOf (e.proc, params::P::glideMode), 1.0f),
-               fmt ("Always picked: one gesture (%d / %d), the parameter 2, one undo step; Undo: Legato again (%g)", w.begins, w.ends,
+               fmt ("Always picked: one gesture (%d / %d), the parameter 2, one undo step; Undo: Legato again (%g)", begins, ends,
                     (double) plainOf (e.proc, params::P::glideMode)));
     }
     {

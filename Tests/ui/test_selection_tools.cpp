@@ -1741,6 +1741,8 @@ namespace
                                                                                                "ch-" + std::to_string (i))));
                 proc.editClip ("Start", clip);
                 roll.getTools().settings().chop.rate = core::RateId::r1_32;
+                // the first view centred on the demo clip; these notes are lower (M5 S3: the roll is taller now)
+                roll.setScroll (0.0, roll.getGeometry().cy (62.0) - roll.getGeometry().viewHeight() / 2.0);
             }
             if (what == BarShot::shapesTravel || what == BarShot::pattern || what == BarShot::random)
             {
