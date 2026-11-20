@@ -1629,6 +1629,41 @@ NOTES-M5. The engine and the state format are not M5's.
    The rest of M4's architect list (computeGlides cost near 4096 notes, tempo-ramp redraws, the inspector's Windows
    focus with Keys off, a "view saved" flag in UIST) waits for Kalan's checklist answers or M8's performance pass.
 
+
+### 7.8 M6: who builds what, and the architect's decisions (2026-11-19)
+
+**Order.** M6 finishes the Sample side of the UI in files that share the Sample tab, the roll and the strip, so it
+runs as one chain on branch `m6-sample`, each part fast-forwarding main when CI is green: T1 (the Sample tab's rules
+and readouts, the full Sample tab, the Macros tab with the 5 offsets) -> T2 (mode 8 in the roll: the Travel / Heads /
+Grain / Refresh chips, chevrons and per-note thumbnails, the Sample editor strip with the live heads overlay, the Note
+settings panel, the "Try this" hint line) -> T3 (Recipes 1-8 and Dice with pins, Preview while Cubase is stopped, the
+M6 snapshots, and an M6 section in `docs/CUBASE-CHECKLIST.md`). Then review and a fix pass. Each part writes its
+section in `docs/NOTES-M6.md` (T1, T2, T3, Fix) with a Progress list.
+
+**Ownership.** All three parts own `ui/tabs/SampleTab`, `MacrosTab`, `NoteSettingsTab`, `ui/SampleTabRules`,
+`ui/strip/HeadsOverlay`, the roll's Sample-mode drawing, `host/HostSync`'s Preview clock, `Tests/ui/test_sample_rules`,
+`test_readouts`, `test_heads_overlay`, `test_note_settings`, `Tests/engine/test_preview`, and the fixtures
+`ui/sample-rules.json` and `ui/readouts.json` (append-only). M4's and M5's UI files (`ui/roll/**`, `MainView`,
+`KeyRouter`, `HintBar`) where a part needs them. The model (M1) and the engine (M2, M3) are not M6's: a need there
+goes in NOTES-M6.
+
+**Decisions.**
+1. **A Sample-tab change is one undo step** per finished gesture (a knob drag is one step on release, a click or a
+   typed value one step), recorded as a parameter diff in the document's history (plan 1.2's VersionHistory), and each
+   control changes exactly its own parameter.
+2. **Typed values are kept as typed; drags snap.** A drag snaps as the prototype's `q` functions (`KNOB_MATH`) do; a
+   typed value is stored as typed (Lock Grain 4.3 stays 4.3 and plays 4 taps).
+3. **Preview is built now.** The M0 checklist answer is not in yet, so Preview is built either way: with Cubase
+   stopped and Preview on, HostSync runs its own clock at the host tempo (1.10). If no block arrives for 250 ms while
+   Preview is on, the Sample tab says that Cubase has paused StrandLock while stopped, and names the Cubase option
+   that does it (Studio > Studio Setup > VST Plug-ins > "Suspend VST 3 plug-in processing when no audio signals are
+   received"). Preview never runs while the host plays.
+4. **Dice pins are per user** (UserSettings), so they survive closing and reopening and carry across projects.
+5. **The roll's chevrons (H4) and per-note thumbnails (U7)** follow the prototype in every mode where it draws them,
+   with its alphas (M4's fix hand-off).
+6. **"Try this" (U3)** shows one suggestion at a time from the prototype's list, never covers the hint bar's mode
+   text, and is plain English.
+
 ---
 
 ## 8. Deviations
