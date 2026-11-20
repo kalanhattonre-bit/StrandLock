@@ -269,6 +269,7 @@ namespace sl::ui::roll
         FlatButton& getRemove() noexcept { return *removeButton; }
         FlatButton& getBake() noexcept { return *bakeButton; }
         const NoteText& getNote() const noexcept { return note; }
+        const Caption& getCaption() const noexcept { return caption; }
 
     private:
         std::vector<FlowItem> items (int width);

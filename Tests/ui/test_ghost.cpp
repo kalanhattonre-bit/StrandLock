@@ -58,62 +58,16 @@ namespace
     using ui::roll::ToolSettings;
     using Make = GhostPreview::Make;
 
-    /** sl-ui-panels.js putGen, computed another way: setGen puts a copy of the generator on every note, then the notes
-        that had a generator on the lane get their own seed and key back (and their invert when it was the same kind). */
-    model::Clip expectedPutGen (const model::Clip& c, const std::vector<std::string>& ids, core::LaneId lane, const model::Gen& g)
+    /** c and its parents up to root are visible (a test editor has no window, so isShowing () is false). */
+    bool shownIn (const juce::Component& c, const juce::Component& root)
     {
-        model::Clip out = model::setGen (c, ids, lane, g);
-        const std::unordered_set<std::string> sel (ids.begin(), ids.end());
-        std::map<std::string, model::Gen> old;
-        for (const auto& n : c.notes)
-            if (sel.count (n->id) != 0 && n->genOf (lane))
-                old[n->id] = *n->genOf (lane);
-        if (old.empty())
-            return out;
-        std::vector<std::string> had;
-        for (const auto& [id, gen] : old)
-            had.push_back (id);
-        return model::editNotes (out, had, [&old, lane, &g] (model::Note& n, const model::Note&)
+        for (auto* p = &c; p != nullptr; p = p->getParentComponent())
         {
-            const auto& o = old.at (n.id);
-            auto& now = *n.genOf (lane);
-            now.seed = o.seed;
-            now.key = o.key;
-            now.invert = o.kind == g.kind ? o.invert : false;
-        });
-    }
-
-    /** The drawers' generators as they start (sl-ui-panels.js S.pat and S.rnd), through makeGen. */
-    model::Gen startPattern (model::GenShape shape)
-    {
-        model::GenPatch p;
-        p.shape = shape;
-        p.rate = core::RateId::r1_16T;
-        p.d0 = 0.3;
-        p.d1 = 0.3;
-        p.warp = 0.0;
-        p.lockToBeat = true;
-        p.perNote = model::PerNote::same;
-        return model::makeGen (model::GenKind::pattern, p);
-    }
-
-    model::Gen startRandom()
-    {
-        model::GenPatch p;
-        p.rate = core::RateId::r1_16T;
-        p.amount = 0.5;
-        p.smooth = 0.0;
-        p.perNote = model::PerNote::same;
-        p.lockToBeat = true;
-        return model::makeGen (model::GenKind::random, p);
-    }
-
-    bool hasGen (const model::Clip& c, const std::vector<std::string>& ids, core::LaneId lane)
-    {
-        const std::unordered_set<std::string> sel (ids.begin(), ids.end());
-        for (const auto& n : c.notes)
-            if (sel.count (n->id) != 0 && n->genOf (lane))
+            if (! p->isVisible())
+                return false;
+            if (p == &root)
                 return true;
+        }
         return false;
     }
 
@@ -162,6 +116,10 @@ SL_TEST ("ui", ghostsChangeNothing)
                 ToolRig t (clip);
                 t.select (sel);
                 t.lane (L);
+                // the drawers at their first settings (sync reads the primary note's generator into them, as the
+                // prototype's loadGenValues does)
+                t.settings().pat = ToolSettings::Pattern();
+                t.settings().rnd = ToolSettings::Random();
                 auto& tools = *t.tools;
                 const auto ids = tools.ids();
                 const auto start = t.rig.doc.current();
@@ -266,7 +224,13 @@ SL_TEST ("ui", ghostsChangeNothing)
                         direct = [&clip, ids, L] { return std::optional<model::Clip> (model::bakeGen (clip, ids, L)); };
                     else
                         direct = [] { return std::optional<model::Clip>(); };
-                    list.push_back ({ "lane menu " + item.label, ghost, direct });
+                    // the menu reads the scope as the mouse reaches an item: Each note, as it opened (the shapes above
+                    // left it on Across)
+                    list.push_back ({ "lane menu " + item.label, [&tools, ghost]
+                    {
+                        tools.setScope (model::ShapeScope::each);
+                        return ghost();
+                    }, direct });
                 }
 
                 // hover each one as the mouse does (the owner is the control), then leave it
@@ -457,7 +421,7 @@ SL_TEST ("ui", ghostsInTheEditor)
     {
         for (auto* c : hooks.controls())
         {
-            if (! c->isShowing())
+            if (! shownIn (*c, *r.editor))
                 continue;
             hooks.enter (*c);
             ++hovered;
