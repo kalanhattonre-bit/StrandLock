@@ -169,8 +169,206 @@ Note settings panel (S7) and the "Try this" line (U3) (plan 7.8 T2, decisions 5 
 - Done: `ui/roll/NoteDecor` (sl-ui-panels.js tabAt, simulate, peakBins and thumbAmps, ported line by line) and its
   fixture test `noteDecorHelpersMatchFixture`: run 44767434482 on af7ca15 green on every job and step, the 30 cases
   of `ui/inspector.json` that M4 left for M6 30 of 30 bit for bit on both platforms.
-- In progress (second push): the decorations drawn through RollPainter and the NoteLayerCache (chevrons, thumbnails,
-  the own-settings dot, the slide warning), `ui/strip/HeadsOverlay` and the strip click that sets Start,
-  `ui/tabs/NoteSettingsTab`, Try this in the hint bar, the Sample chips' tooltips, and the tests
-  `test_heads_overlay`, `test_note_settings`, `test_note_decor`, `test_try_this` with their pictures.
-- Next: CI on that push, every new picture looked at, these notes, then the fast-forward of main.
+- Done: the decorations drawn through RollPainter and the NoteLayerCache (the chevrons, the thumbnails, the
+  own-settings dot, the slide warning), `ui/strip/HeadsOverlay` and the strip click that sets Start,
+  `ui/tabs/NoteSettingsTab`, Try this in the hint bar, the Sample chips' tooltips, and the tests `test_heads_overlay`,
+  `test_note_settings`, `test_note_decor` and `test_try_this` with their pictures (b9e5dc2, then two compile fixes,
+  8ca4fa9 and 3f359da). Run 44778014019 on 3f359da: every M6 row green on both platforms; one check of M0's
+  `alloc/hostChangesWithEditorOpen` red in the Debug-CRT run (below).
+- Done: the fix (bcdddf5): the Note settings tab measures a group only when its text changed, and does nothing while
+  it sleeps; a new test counts it. Run 44784505324 on bcdddf5 is green on every job and step.
+- Done: the pictures of run 44778014019 looked at beside the prototype's (Build, Sample mode, Note settings, the strip
+  while playing): the 9 `m6_*` pictures T2 adds, and M0-M5's roll and window pictures, which now show the decorations.
+  Nothing clipped or overlapping; the chevrons, thumbnails and heads as the prototype draws them; Try this beside the
+  mode's line at 75, 100 and 200 % and in the 900 px window.
+- Next: these notes on the branch, a green run on that head, then the fast-forward of main (main is still 10dc52a).
+
+### Files
+
+- `Source/ui/roll/NoteDecor`: sl-ui-panels.js tabAt, simulate, peakBins and thumbAmps, ported line by line (JavaScript's
+  Math.max, Math.min and `!==` where NaN matters); simPoints, thumbAlpha, chevronStrength, hasOwnSettings and
+  slideWarns (decorate's small rules); and `NoteDecor`, the cache the drawing reads: the sound's peak bins (made when a
+  sound arrives) and each note's simulation and thumbnail heights (made again only when the note's version, the
+  instrument fields simulate reads, the tempo, the zoom or the sound changed), with `key ()`, a hash of everything every
+  note's decorations read.
+- `Source/ui/roll/RollPainter`: `decorations (note, selected)` (sl-ui-panels.js decorate as data: the thumbnail's
+  columns, the chevrons, the Mirror chevrons, the still bars and the silent square, Scatter's jumps, the own-settings
+  dot, the slide warning) and `paintDecorations`, called at the end of `paintNote` (sl-ui.js runNoteDecorators: right
+  after each note). `PaintState::decor` and `decorKey`. The note bounds reach `decorPad` (18 px) under the line.
+- `Source/ui/roll/NoteLayerCache`: the Key holds `decor` (NoteDecor::key); a note's shown state holds where the note it
+  slides into starts (its warning mark moves with that note).
+- `Source/ui/roll/RollView`: owns the NoteDecor; `refresh` hands it the sound and the clip; the ViewKey holds `decor`,
+  so a change repaints the roll. `getDecor ()` for the tests.
+- `Source/ui/strip/HeadsOverlay`: the live heads and grains of the newest display frame (sl-ui.js drawStrip), and the
+  selected notes' Start markers; `heads ()` and `grains ()` say where each goes.
+- `Source/ui/strip/WaveStrip`: draws through the overlay (its own head drawing moved there); `updateStarts` (the
+  markers, on every refresh); a short click with notes selected sets their Start (`setStartAt`: model::setNoteSample
+  through `editClip`, one undo step "Set start", the prototype's toasts); the click's time is the mouse events' own;
+  `onEdit`.
+- `Source/ui/tabs/NoteSettingsTab`: the Note settings panel (S7), below.
+- `Source/ui/tabs/TabPanel`: `resizeItem` and `layoutChanged` (several widths change, one layout).
+- `Source/ui/roll/SelectionBar`: `SelectionTools::liveSession`, the bar's slider session (liveRun) for the Note settings
+  tab's sliders, as the prototype's panels share one.
+- `Source/ui/HintBar`: `sampleLaneHint` (SUB_HINT), `tryThis` (updateTry), and the hover for a suggestion cut short.
+- `Source/ui/MainView`: the Note settings tab in place of M0's "arrive in M6" line, synced with the other tabs; Try this
+  on every sync; the Sample chips' tooltips; the strip's onEdit.
+- Tests: `test_inspector.cpp` (`noteDecorHelpersMatchFixture`), `test_heads_overlay.cpp`, `test_note_settings.cpp`,
+  `test_note_decor.cpp`, `test_try_this.cpp`; `test_roll_perf.cpp` and `test_roll_view.cpp` start from a loaded sound.
+
+### Decisions and deviations
+
+- **Decision 5: the decorations are drawn in every mode with the prototype's alphas** (thumbnails 0.42 / 0.24 selected
+  or not in Sample mode and Build, 0.22 / 0.11 elsewhere; chevrons 1 / 0.8 in Sample mode, 0.8 / 0.5 elsewhere), into
+  the note layer, note by note after each strand, as sl-ui.js runNoteDecorators does. Each note's chevrons are one path
+  (and its Mirror chevrons another), its thumbnail columns, still bars and jumps one rectangle list each: the prototype
+  strokes each chevron alone, so where a note's two chevrons overlap (from 2.5x up, 3.6 px apart) it is a little
+  darker there than here. Every outline is a path and every fill a rectangle or path, so a partial update of the layer
+  gives a full one's picture with Direct2D too (M4's rule; `rollMoveRepaintsThreeNotes` checks it with the
+  decorations drawn).
+- **The plan's M6 text names the chevrons and thumbnails with mode 8; the prototype draws them in every mode** (M4's
+  hand-off UI4-9), and so does StrandLock. Mode 8's chips and lanes were M0's and M4's; T2 gives the chips the
+  prototype's sentences as tooltips (sl-ui.js SUB_HINT).
+- **What the decorations read redraws every note.** The instrument fields simulate reads (the Region, At the end,
+  Speed, the Speed macro, Motion, Engine, Jump every, the seed, the root, Pitch), the Heads and Heads macro (the Mirror
+  chevrons) and the sound are hashed into one key; when it changes the note layer draws every note again, as the
+  prototype redraws every frame. Cubase automating one of these redraws the roll at the editor's refresh rate.
+- **The thumbnails' peak bins are made when a sound arrives**, on the message thread (one pass over the sound, as M2's
+  WavePeaks); the prototype makes them 80 ms later on a timer.
+- **A slide's warning mark moves with the note it slides into**: the note layer's shown state holds that note's start,
+  so moving it redraws the warning (a note's own version does not change when another note moves).
+- **HeadsOverlay is a painter the strip owns, not a component.** A transparent component over the wave would repaint
+  the wave under it anyway; the strip repaints only its wave area for each new frame, as before.
+- **Plan 1.5's mapping of noteIdHash to the clip's notes is not used**: the prototype's strip draws every voice's heads
+  alike, and the overlay does too.
+- **The strip click (sl-ui.js stripUp)**: a press of at most 300 ms with notes selected sets their Start
+  (model::setNoteSample with start mode "region" and the spot in the Region), one undo step "Set start", and toasts
+  "Start set for 3 notes at 40% of the Region"; outside the Region with notes selected it toasts the prototype's
+  sentence and changes nothing. A longer press only listens. The time is the mouse events' own (as the roll's
+  double-click rule), so the tests are exact.
+- **Outside the Region the prototype plays the file itself while the mouse is held** (rawAuditionStart). Not built: it
+  needs a player of its own on the audio thread and a command the CommandQueue does not have (M2 left it for M6's
+  Preview; T3 owns Preview). The readout still says "outside the Region".
+- **The Note settings tab keeps every control in its place.** The prototype hides the groups while nothing is selected
+  and the Range and Re-roll while the Start is not Random. Here the groups stay, faded (0.45) and taking no clicks while
+  nothing is selected (the selection bar's idle drawer), the Spot faded for Carry on and With the song, the Range and
+  Re-roll faded or greyed unless the Start is Random: the pane keeps its rows, so a click that selects a note never
+  moves the roll under the mouse (decision 6 of M5 shares the window by whole rows).
+- **Every Note settings change is one model call and one undo step** with the prototype's label (setNS, setMotion,
+  setTravelKind, Re-roll, the sliders' liveRun), "Jump every : follow" included. Mirror on notes whose Heads never reach
+  1.5 sets their Heads lane to 2 heads in the same step and toasts it; Path or Speed on a flat Travel line resets it to
+  Fit or 1x in the same step, with the prototype's toast. The sliders run through the selection bar's live session.
+- **A faded group says why** in its tooltip, and its buttons with no text of their own show the same reason (an HTML
+  title on the group does that for its children).
+- **Try this (decision 6)** is sl-ui-panels.js updateTry: a tip for each lane mode, in Sample mode one per Sample lane,
+  on Travel one per Motion (the primary note's own, else the Sample tab's) with its next step once done, and the
+  engine's own tip where the general one does nothing (Freeze or Grain on Tape). It keeps M4's layout: at most half the
+  bar, the mode's line keeps the rest. A suggestion cut short shows whole while the mouse is on it, over the right half
+  only, growing upwards: it never covers the mode's line. The texts point at controls StrandLock has (Tools, Strum,
+  Shapes, Pattern, Random, Across, the Sample tab's Refresh, Jump every, Head tune, Re-roll, the waveform).
+- **Three M4 tests now start from a loaded sound** (`rollFullRepaintCost` and `rollMoveRepaintsThreeNotes` through
+  their rig, and `rollViewRepaintsWhatChanged`): the starter sound arrives from the worker some tens of milliseconds
+  after a processor is made, and since the thumbnails read it, its arrival redraws every note.
+- **The Note settings tab measures a group only when its text changed.** The editor syncs the tabs on every tick, and
+  the host's automation changes the instrument on most ticks. Measuring a text shapes it, which is slow in a Debug
+  build: measuring all ten groups again on each tick let the editor tick only 60 times in the Debug-CRT run of
+  `alloc/hostChangesWithEditorOpen` (it needs 240 to close the editor and open it again). Each group now keeps what it
+  was measured with (its caption, its buttons' texts, its "mixed" tag) and is measured again only when one of them
+  changed; the first line keeps its width while its text stays; and while nothing is selected a sync does nothing (the
+  sleeping tab shows nothing of the instrument). `noteSettingsMeasuresOnlyWhatChanged` counts both.
+
+### For the architect
+
+- **The raw-file audition outside the Region is not built** (sl-ui.js rawAuditionStart: holding the mouse on the strip
+  outside the Region plays the file itself). It needs a player of its own on the audio thread and a command the
+  CommandQueue does not have; M2 left it for M6's Preview, which is T3's.
+- **The decorations made M4's full repaint of 512 notes slower.** Linux: 10.6 ms before T2 (run 44767434482), 23.5
+  and 26.4 ms with them (runs 44778014019 and 44784505324). Windows varies more from runner to runner: the software
+  renderer 34.9 ms before, 43.1 and 23.2 ms with them; Direct2D 26.8 ms before, 67.9 and 29.8 ms with them. The target
+  is 50 ms (printed) and the gate 250 ms, so Direct2D was over the target once. The runner has no GPU, so Direct2D
+  draws in software there. Each note's chevrons are a stroked path, which Direct2D probably turns into a new geometry
+  on every paint; if a real machine is slow here, the chevrons could be kept per note as filled outlines.
+- **Automating a setting the decorations read redraws the whole roll** on each editor refresh while it moves. The
+  prototype redraws every frame anyway. A cheaper key would hash, per note, only the fields its own simulation reads.
+- **Plan 1.5's noteIdHash is not used by the strip**: the prototype draws every voice's heads alike. It stays in the
+  frame for a later per-note view.
+- **The Note settings tab keeps its controls while nothing is selected** (faded, as the selection bar's idle drawer);
+  the prototype hides them. The plan does not say; the reason is under the decisions above.
+
+### Hand-off for T3
+
+- **Pictures:** T2's `m6_mode8_*`, `m6_build_decor_dark`, `m6_heads_overlay_*` and `m6_note_settings_*`
+  (test_note_decor.cpp, test_heads_overlay.cpp, test_note_settings.cpp) are review shots, like T1's. T3 names the M6
+  table's own snapshots.
+- **Note settings:** `NoteSettingsTab::sync ()` runs on every MainView sync and returns at once when the selection, the
+  clip and the instrument fields it shows are unchanged (`sync (true)` after its own edits). Its controls act through
+  `SelectionTools::act` (one undo step) and `liveSession` (the sliders), so a recipe or Dice that changes the notes'
+  settings shows there on the next tick with no extra wiring.
+- **Work on the editor's tick must stay cheap.** `alloc/hostChangesWithEditorOpen` needs at least 240 ticks in the
+  Debug-CRT run's minute of host automation, and shaping text (`Theme::textWidth`, a GlyphArrangement) on every tick
+  starved it (60 ticks). Measure a text when it changes, not on every sync.
+- **Decorations:** `NoteDecor::key (inst)` hashes everything the decorations read, so a recipe that changes the Region,
+  At the end, Speed, Motion, Engine, Jump every, the seed, Heads or the sound redraws every note by itself.
+  `RollView::getDecor ().simulationsMade ()` counts the work for tests.
+- **Preview:** the strip's press already plays the spot through the CommandQueue while it is held (M2's audition), and
+  a short click sets Start (`WaveStrip::setStartAt`). The raw-file audition (above) would start in the outside branch
+  of `WaveStrip::mouseDown`.
+- **Try this:** `ui::tryThis (mode, subLane, primary, inst)` is pure, and MainView sets it on every sync.
+- **A test that counts the roll's drawing starts from a loaded sound** (`proc.waitForSounds ()`): the starter sound
+  arrives from the worker after the processor is made, and since the thumbnails read it, its arrival redraws every
+  note.
+- **Fixtures:** T2 added none (`ui/inspector.json` has held the 30 M6 cases since M4; test_try_this.cpp holds its 75
+  cases inline, made by running sl-ui-panels.js's own updateTry in node). The budget still has 41.5 KB left.
+
+### CI results
+
+- Run 44767434482 on af7ca15 (NoteDecor and its fixture test), green on every job and step: Windows Release 1854
+  checks in 320 tests, Linux Release 1846 in 320 (T1's head had 1849 and 1841 in 319), the sanitizers' groups 808 in
+  139 and 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug pictures 0 JUCE assertions,
+  pluginval strictness 10 SUCCESS. `ui/inspector.json`'s M6 cases: 30 of 30 bit for bit (simulate 19, peakBins 2,
+  thumbAmps 4, tabAt 5; 71 silent points, 12 Scatter jumps, 78 still points and 191 backward points among them).
+- Run 44773412451 on b9e5dc2 (the rest of T2): red at the build. `SelectionTools::live`, the new name for the slider
+  session, clashed with the member `live` (GCC and MSVC both stopped there); renamed `liveSession` in 8ca4fa9.
+- Run 44775417577 on 8ca4fa9: red at the build. The Note settings tab called a one-argument lambda with two; fixed in
+  3f359da, with two warnings (an unused function in WaveStrip.cpp, a shadowed name in MainView.cpp).
+- Run 44778014019 on 3f359da: Windows Release 1915 checks in 333 tests and Linux Release 1907 in 333, all passed; the
+  sanitizers' groups 808 in 139 and 142 in 20; the Debug pictures 0 JUCE assertions; pluginval strictness 10 SUCCESS;
+  the fixture check passed (26 files, 4,958,478 bytes, as T1 left them). Red: 1 of 38 checks of the Debug-CRT
+  allocation run (0 JUCE assertions, 0 allocations on the audio thread): `hostChangesWithEditorOpen` saw the editor
+  tick 60 times and never close (1175 in run 44767434482). The editor's tick also took longer in Release (767 ticks on
+  Windows, 1637 before; 1169 on Linux, 1729 before). The fix is bcdddf5 (decisions above).
+- The M6 rows in run 44778014019 (Linux; Windows the same unless given):
+  - Display slot: 10,000 blocks of 1600 samples (333 s of audio) written while the UI thread was paused, in 1160 ms on
+    Linux and 1410 ms on Windows; the longest block 0.17 ms (Windows 0.30 ms) against its 33.3 ms of real time; 10,000
+    frames written, 0 allocations and 0 frees; the frame the paused UI held never written into; its next take the last
+    frame written (sample 16001600, the engine's), whole (1 voice, 1 head); a second take finds nothing newer.
+  - Heads overlay: 5 of 5 heads of a fed frame at the strip's x for their place, with their number, way and strength;
+    each solid head's line down the wave (3 of 3); 0 head-coloured pixels half way between two heads; the 5 grains;
+    zoomed to 30 .. 70 %, the 2 heads in view and no others; no frame, nothing drawn.
+  - Strip click: the Start of exactly the 3 selected notes set at 0.4000 of the Region (the bytes of
+    model::setNoteSample), the other 23 notes as they were; one undo step "Set start", the toast "Start set for 3
+    notes at 40% of the Region", 3 markers; the press played the spot through the command queue (2 commands); a press
+    held 400 ms only listens; outside the Region no change and the prototype's sentence.
+  - Note settings: 240 of 240 seeded selections show "mixed" exactly where model::getMixed says the notes differ (every
+    group seen both mixed and shared); 28 of 28 clicks give the bytes of the direct model call with one undo step and
+    the prototype's label; Velocity 3 of 3 live moves with no step, then one step on release; Mirror, Path and the
+    faded groups as the prototype's.
+  - Decorations: 16 of 16 mode and selection cases with the prototype's alphas (under the line 66.6 against 41.9:
+    1.591 times, 0.8 / 0.5 = 1.6); the chevrons of Forward, Backward, Freeze, Mirror, Scatter, 3x and Stop; a 43-column
+    thumbnail; the own-settings dot on 4 of 4 notes; the slide warning; 9 simulations made, then none on a refresh
+    with nothing changed.
+  - Try this: 75 of 75 cases the prototype's text (24 different suggestions); 1200 of 1200 layouts keep the mode's
+    line and the suggestion apart; 151 cut suggestions show whole over the right half only.
+  - M4's rows with the decorations: moving one note marks 3 notes' bounds, 107 note drawings in 3 rectangles, 2.8 % of
+    the roll, 0 pixels different from a full repaint with both renderers; selecting a note repaints 3.0 %.
+- Run 44784505324 on bcdddf5 (the fix), green on every job and step: Windows Release 1918 checks in 334 tests and
+  Linux Release 1910 in 334 (T1's head had 1849 and 1841 in 319; the ui group is now 578 checks in 123 tests), the
+  sanitizers' groups 808 in 139 and 142 in 20, the Debug-CRT allocation run 38 in 7 (0 JUCE assertions), the Debug
+  pictures 0 JUCE assertions, pluginval strictness 10 SUCCESS, the fixture check passed (26 files, 4,958,478 bytes).
+  `hostChangesWithEditorOpen`: the editor ticked 1027 times in the Debug-CRT run (60 before the fix), 1613 times in
+  Windows Release (767) and 1709 times on Linux (1169). `noteSettingsMeasuresOnlyWhatChanged`: nothing selected, 40
+  instrument changes, 0 syncs did work and 0 groups were measured; 3 notes selected and the Region moved 40 times, 40
+  syncs did work and 0 groups were measured (the Spot read "50% (0:03.00)", then "50% (0:03.60)"); Engine Cloud, 1
+  group measured, then none. M4's full repaint of 512 notes: Windows software renderer 23.2 ms, Direct2D 29.8 ms,
+  Linux 26.4 ms (target 50, gate 250). The display slot: 10,000 blocks in 806 ms on Windows and 1245 ms on Linux, the
+  longest block 0.14 ms and 0.23 ms. 106 of the 107 pictures are byte for byte the ones looked at; in
+  `m6_mode8_light_200` 2 pixels of the hint line's text differ by at most 8 levels.
