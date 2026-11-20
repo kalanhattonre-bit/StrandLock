@@ -287,14 +287,17 @@ namespace sl::ui::roll
         const auto st = host.doc.rollState();
         const auto L = st.activeLane();
         const int laneCode = L ? core::laneIndex (*L) : -1;
+        bool modeChanged = false;
         if (st.mode != lastMode || laneCode != lastLane)
         {
-            // sl-ui-panels.js A.on ('mode'): the lane mode's lane becomes the Lane, and a live session ends
+            // sl-ui-panels.js A.on ('mode'): the lane mode's lane becomes the Lane, a live session ends, and the drawers
+            // read the primary note's generator again (below), also when the lane stays (Build and the lane's own mode)
             lastMode = st.mode;
             lastLane = laneCode;
             if (L)
                 set.lane = *L;
             endLive();
+            modeChanged = true;
         }
         if (live)
         {
@@ -304,11 +307,12 @@ namespace sl::ui::roll
                 live.reset();                       // A.on ('clip'): Undo, a drag on the roll: the session is gone
         }
 
-        // another clip, selection, primary note or lane: the drawers' settings read the primary note's generator
-        // again (sl-ui-panels.js loadGenValues on 'selection', 'clip' and 'mode')
+        // another clip, selection, primary note, mode or lane: the drawers' settings read the primary note's generator
+        // again (sl-ui-panels.js loadGenValues on 'selection', 'clip' and 'mode'). A clip the bar made itself was marked
+        // seen when it made it (markSeen: the prototype's busy rule), so after More or Less the drawers keep their values.
         const auto cur = host.doc.current();
         const int ln = core::laneIndex (lane());
-        if (cur != seenClip || st.selected != seenSelection || st.primary != seenPrimary || ln != seenLane)
+        if (modeChanged || cur != seenClip || st.selected != seenSelection || st.primary != seenPrimary || ln != seenLane)
         {
             seenClip = cur;
             seenSelection = st.selected;
@@ -334,6 +338,7 @@ namespace sl::ui::roll
         endLive();
         if (ghosts != nullptr)
             ghosts->clear();
+        const bool wasSeen = host.doc.current() == seenClip;
         const auto out = host.doc.apply (std::move (result));
         gestures.sync();
         if (out.refused)
@@ -341,9 +346,19 @@ namespace sl::ui::roll
             toast (out.message, 4000);
             return false;
         }
+        markSeen (wasSeen);
         if (host.commit)
             host.commit (label);
         return true;
+    }
+
+    void SelectionTools::markSeen (bool wasSeen)
+    {
+        // sl-ui-panels.js act and liveRun set the clip while busy, and its 'clip' listener then skips loadGenValues: the
+        // drawers keep their own values after the bar's own edits (More and Less scale the notes' pattern, not the
+        // drawer's). Only when sync had seen the clip before the edit: a change it has not seen yet still reads.
+        if (wasSeen)
+            seenClip = host.doc.current();
     }
 
     void SelectionTools::endLive()
@@ -392,6 +407,7 @@ namespace sl::ui::roll
         live->label = label;
         if (ghosts != nullptr)
             ghosts->clear();
+        const bool wasSeen = host.doc.current() == seenClip;
         const auto out = host.doc.apply (std::move (next));
         gestures.sync();
         if (out.refused)
@@ -399,6 +415,7 @@ namespace sl::ui::roll
             toast (out.message, 4000);
             return;
         }
+        markSeen (wasSeen);
         live->last = host.doc.current();
         if (final)
         {
@@ -651,6 +668,10 @@ namespace sl::ui::roll
             patch.glide = std::optional<double> (beats);
             return model::updateNotes (base, sel, patch);
         }, final);
+        // these are sl-ui.js's own edits, not the panels' (they are not busy): the release's clip reads the primary
+        // note's generator again at the next sync, as the prototype's 'clip' listener does (its moves are live: no read)
+        if (final)
+            seenClip = nullptr;
     }
 
     void SelectionTools::slideAuto()
@@ -666,6 +687,7 @@ namespace sl::ui::roll
         patch.glide.emplace();   // an empty inner value: null
         patch.gc = 0.0;
         act (model::updateNotes (*host.doc.current(), sel, patch), "Slide: auto");
+        seenClip = nullptr;   // sl-ui.js's own edit (not busy): the next sync reads the primary note's generator
     }
 
     void SelectionTools::slideJump()
@@ -680,6 +702,7 @@ namespace sl::ui::roll
         model::NotePatch patch;
         patch.glide = std::optional<double> (0.0);
         act (model::updateNotes (*host.doc.current(), sel, patch), "Slide: jump");
+        seenClip = nullptr;   // sl-ui.js's own edit (not busy): the next sync reads the primary note's generator
     }
 
     //==============================================================================================
@@ -1275,8 +1298,9 @@ namespace sl::ui::roll
 
     bool SelectionBar::Seen::operator== (const Seen& o) const noexcept
     {
-        return clip == o.clip && ids == o.ids && lane == o.lane && juce::exactlyEqual (bpm, o.bpm) && juce::exactlyEqual (seconds, o.seconds)
-            && juce::exactlyEqual (regionStart, o.regionStart) && juce::exactlyEqual (regionEnd, o.regionEnd) && scope == o.scope;
+        return clip == o.clip && ids == o.ids && primary == o.primary && mode == o.mode && lane == o.lane && juce::exactlyEqual (bpm, o.bpm)
+            && juce::exactlyEqual (seconds, o.seconds) && juce::exactlyEqual (regionStart, o.regionStart) && juce::exactlyEqual (regionEnd, o.regionEnd)
+            && scope == o.scope;
     }
 
     void SelectionBar::sync()
@@ -1319,11 +1343,14 @@ namespace sl::ui::roll
         }
         if (drawer != nullptr)
         {
-            // the drawer follows the clip, the selection, the lane, the tempo and the sound; the editor's timer calls
-            // this too, so it is synced again only when one of them changed
+            // the drawer follows the clip, the selection, the primary note, the mode, the lane, the tempo and the sound
+            // (sl-ui-panels.js draws it again on every 'selection', 'clip' and 'mode'); the editor's timer calls this too,
+            // so it is synced again only when one of them changed. tools.sync () above has read the primary note's
+            // generator into the drawers' settings, so a click on a selected note shows that note's (review P1).
             const auto& rs = tools.rollSettings();
-            Seen now { tools.clip(), ids, core::laneIndex (tools.lane()), rs.bpm, rs.sampleSeconds, rs.inst.region.start, rs.inst.region.end,
-                       static_cast<int> (rs.scope) };
+            const auto shownState = tools.rollState();
+            Seen now { tools.clip(), ids, shownState.primary, shownState.mode, core::laneIndex (tools.lane()), rs.bpm, rs.sampleSeconds,
+                       rs.inst.region.start, rs.inst.region.end, static_cast<int> (rs.scope) };
             if (rebuilt || ! (now == seen))
             {
                 seen = std::move (now);

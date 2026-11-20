@@ -295,8 +295,13 @@ namespace sl::ui::roll
 
     void ToolSlider::dragTo (float x)
     {
+        // an HTML range input fires 'input' only when its value changes: a move within the same step calls nothing, where
+        // each call rebuilt the result and handed the document a clip (review R5T-3)
         dragging = true;
-        setValue (valueAt (x));
+        const double v = valueAt (x);
+        if (juce::exactlyEqual (v, value))
+            return;
+        setValue (v);
         if (onInput)
             onInput (value);
     }

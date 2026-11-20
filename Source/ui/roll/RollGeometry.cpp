@@ -366,9 +366,14 @@ namespace sl::ui::roll
     //==============================================================================================
     std::vector<model::NotePtr> RollGeometry::selectedNotes (const model::Clip& c, const doc::RollState& state)
     {
+        // the selection as a set first: RollState::isSelected searches the list, and the selection bar asks this on
+        // every editor tick, which with 4096 notes selected was 8 million string compares a call (review R5T-3)
         std::vector<model::NotePtr> out;
+        if (state.selected.empty())
+            return out;
+        const std::unordered_set<std::string> sel (state.selected.begin(), state.selected.end());
         for (const auto& n : c.notes)
-            if (state.isSelected (n->id))
+            if (sel.count (n->id) != 0)
                 out.push_back (n);
         return model::timeOrder (std::move (out));
     }
@@ -386,10 +391,12 @@ namespace sl::ui::roll
 
     model::NotePtr RollGeometry::hitNote (const model::Clip& c, const doc::RollState& state, double x, double y) const
     {
-        // the later notes first, then (a stable sort) the selected ones before the others
+        // the later notes first, then (a stable sort) the selected ones before the others (the selection as a set, as in
+        // selectedNotes)
+        const std::unordered_set<std::string> sel (state.selected.begin(), state.selected.end());
         std::vector<model::NotePtr> list (c.notes.rbegin(), c.notes.rend());
-        std::stable_sort (list.begin(), list.end(), [&state] (const model::NotePtr& a, const model::NotePtr& b)
-                          { return state.isSelected (a->id) && ! state.isSelected (b->id); });
+        std::stable_sort (list.begin(), list.end(), [&sel] (const model::NotePtr& a, const model::NotePtr& b)
+                          { return sel.count (a->id) != 0 && sel.count (b->id) == 0; });
         const double lh = laneHeight();
         for (const auto& n : list)
         {

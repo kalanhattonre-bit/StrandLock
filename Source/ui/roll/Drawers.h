@@ -104,7 +104,8 @@ namespace sl::ui::roll
     };
 
     /** A range slider with its caption and its value (sl-ui-panels.js slider): onInput while it is dragged (and on the
-        press), onChange once on the release, as an HTML range input's input and change events. */
+        press) each time its value changes, onChange once on the release, as an HTML range input's input and change
+        events. */
     class ToolSlider final : public juce::Component
     {
     public:
@@ -124,8 +125,9 @@ namespace sl::ui::roll
         /** The value the track gives at x (this component's pixels), on the slider's steps. */
         double valueAt (float x) const;
 
-        /** As the mouse does: a press at x (onInput), then the release (onChange). The mouse does nothing while it is
-            disabled (an HTML range input that is disabled). */
+        /** As the mouse does: a press or a move at x (onInput, only when the value changes: an HTML range input's input
+            event), then the release (onChange). The mouse does nothing while it is disabled (an HTML range input that is
+            disabled). */
         void dragTo (float x);
         void release();
 

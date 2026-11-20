@@ -49,6 +49,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -726,11 +727,13 @@ SL_TEST ("ui", selectionBarInTheEditor)
             tools->getButton ("Walk" + juce::String::charToString ((juce::juce_wchar) 0x2026)).onClick();
             auto* panel = tools->getPanel();
             auto* go = panel != nullptr ? panel->findButton ("Walk") : nullptr;
+            const auto beforeWalk = proc.getDocument().current();
             if (go != nullptr)
             {
                 go->onClick();
                 walked = proc.undoLabel().value_or ("") == "Walk Start";
             }
+            const auto afterWalk = proc.getDocument().current();
             auto* lastNote = panel != nullptr ? panel->findSlider ("Last note") : nullptr;
             if (lastNote != nullptr)
             {
@@ -738,7 +741,19 @@ SL_TEST ("ui", selectionBarInTheEditor)
                 lastNote->dragTo (10.0f + (float) lastNote->getWidth() * 0.5f);
                 const bool live = proc.getDocument().current() != before && proc.undoLabel().value_or ("") == "Walk Start" && ! proc.canRedo();
                 lastNote->release();
-                slid = live && proc.canUndo();
+                // the release is exactly one undo step (review R5T-2: the Walk click had already made canUndo () true, and
+                // the release's label is "Walk Start" too): one Undo gives the clip right after the click, a second the
+                // clip before it; two Redos give the release's clip back
+                const auto released = proc.getDocument().current();
+                const auto bytesOf = [] (const model::ClipPtr& c) { return model::encodeClip (*c); };
+                proc.undo();
+                const bool oneBack = bytesOf (proc.getDocument().current()) == bytesOf (afterWalk);
+                proc.undo();
+                const bool twoBack = bytesOf (proc.getDocument().current()) == bytesOf (beforeWalk);
+                proc.redo();
+                proc.redo();
+                const bool again = bytesOf (proc.getDocument().current()) == bytesOf (released);
+                slid = live && oneBack && twoBack && again && bytesOf (released) != bytesOf (afterWalk) && bytesOf (afterWalk) != bytesOf (beforeWalk);
             }
             tools->getButton ("Chop" + juce::String::charToString ((juce::juce_wchar) 0x2026)).onClick();
             auto* chopPanel = tools->getPanel();
@@ -748,20 +763,34 @@ SL_TEST ("ui", selectionBarInTheEditor)
                 chopButton->onClick();
                 chopped = proc.undoLabel().value_or ("") == "Chop 1/16";
             }
+            // Select similar on every third note (review P6: with every note selected, as Chop leaves it, any flip passed):
+            // Flip the selection selects exactly the others
+            const auto chopped0 = proc.getDocument().current();
+            std::vector<std::string> part;
+            std::set<std::string> rest;
+            for (std::size_t i = 0; i < chopped0->notes.size(); ++i)
+            {
+                if (i % 3 == 0)
+                    part.push_back (chopped0->notes[i]->id);
+                else
+                    rest.insert (chopped0->notes[i]->id);
+            }
+            proc.getDocument().setSelection (part, part.front());
+            roll.edited();
             tools->getButton ("Select similar").onClick();
             const auto& items = roll.getMenu();
-            menu = items.size() == 6 && items[0].kind == ui::roll::MenuItem::Kind::header && items[5].label == "Flip the selection";
+            menu = items.size() == 6 && items[0].kind == ui::roll::MenuItem::Kind::header && items[5].label == "Flip the selection" && ! rest.empty();
             if (menu)
             {
-                const auto selectedBefore = proc.getDocument().rollState().selected.size();
                 roll.chooseMenuItem (items[5]);
-                menu = proc.getDocument().rollState().selected.size() != selectedBefore || selectedBefore == proc.getDocument().current()->notes.size();
+                const auto flipped = proc.getDocument().rollState().selected;
+                menu = flipped.size() == rest.size() && std::set<std::string> (flipped.begin(), flipped.end()) == rest;
             }
         }
         check (tools != nullptr && walked && slid && chopped && menu,
-               fmt ("Tools: Walk... opens Walk's panel, its Walk button is one step (%d); a drag of Last note is live and its release one step (%d); "
-                    "Chop... and Chop make \"Chop 1/16\" (%d); Select similar opens its menu and Flip the selection runs (%d)", (int) walked,
-                    (int) slid, (int) chopped, (int) menu));
+               fmt ("Tools: Walk... opens Walk's panel, its Walk button is one step (%d); a drag of Last note is live and its release exactly one "
+                    "step (%d); Chop... and Chop make \"Chop 1/16\" (%d); Select similar opens its menu and Flip the selection selects exactly the "
+                    "notes that were not selected (%d)", (int) walked, (int) slid, (int) chopped, (int) menu));
 
         // M0's rule holds for what the bar makes later: no control in an open drawer or tool panel wants the keyboard
         std::function<int (const juce::Component&)> wanting = [&wanting] (const juce::Component& c)
@@ -1704,6 +1733,328 @@ SL_TEST ("ui", selectionBarDrawersInTheEditor)
         check (menus == 7 && told, fmt ("%d of 7 lane arrows open their lane's menu (\"Volume on %d notes\" ...) and show the lane; with nothing "
                                         "selected the arrow says \"%s\"", menus, (int) ids.size(), view.getToastText().toRawUTF8()));
     }
+}
+
+//==================================================================================================
+// The M5 fix pass: the drawers and the primary note (P1), the drawers after the bar's own edits (P4), the bar's cost (R5T-3).
+
+namespace
+{
+    /** A pattern on a lane, as the Pattern drawer makes it. */
+    model::Gen patternOf (model::GenShape shape, core::RateId rate, double depth, bool locked)
+    {
+        model::GenPatch p;
+        p.shape = shape;
+        p.rate = rate;
+        p.d0 = depth;
+        p.d1 = depth;
+        p.lockToBeat = locked;
+        return model::makeGen (model::GenKind::pattern, p);
+    }
+
+    /** The index of the first item whose label starts with prefix, or -1. */
+    int itemStarting (const std::vector<ui::roll::MenuItem>& items, const std::string& prefix)
+    {
+        for (std::size_t i = 0; i < items.size(); ++i)
+            if (items[i].kind == ui::roll::MenuItem::Kind::item && items[i].label.rfind (prefix, 0) == 0)
+                return (int) i;
+        return -1;
+    }
+
+    /** Runs the lane menu's item that starts with prefix (headless); false when there is none. */
+    bool runMenuItemStarting (ToolRig& t, core::LaneId lane, const std::string& prefix)
+    {
+        auto m = menuOf (t, lane);
+        const int i = itemStarting (m.items, prefix);
+        if (i < 0)
+            return false;
+        const int a = m.items[(std::size_t) i].action;
+        if (a < 0 || a >= (int) m.actions.size())
+            return false;
+        m.actions[(std::size_t) a]();
+        return true;
+    }
+
+    /** The first note's generator on a lane: its depth at start (pattern) or amount (random), or -1 with none. */
+    double firstDepth (const model::Clip& c, core::LaneId lane, bool amount)
+    {
+        if (c.notes.empty() || ! c.notes.front()->genOf (lane))
+            return -1.0;
+        const auto& g = *c.notes.front()->genOf (lane);
+        return amount ? g.amount : g.d0;
+    }
+
+    const model::Note* findNote (const model::Clip& c, const std::string& id)
+    {
+        for (const auto& n : c.notes)
+            if (n->id == id)
+                return n.get();
+        return nullptr;
+    }
+}
+
+SL_TEST ("ui", selectionBarPrimaryChange)
+{
+    section ("The open Pattern drawer follows the primary note (review P1): a click on a note already selected makes it the primary, and the "
+             "drawer shows that note's pattern at once (shape, rate, depth, Lock to the beat, Apply and its note), as the prototype draws it "
+             "again on 'selection'; the next click acts on what it shows");
+
+    // A: Square 1/8 at 80 %, locked to the beat; B: Triangle 1/4 at 20 %, unlocked; C: nothing on Tone
+    const auto tone = core::LaneId::tone;
+    model::Clip clip = model::newClip (4.0);
+    {
+        auto a = model::mkNote (60.0, 0.0, 2.0, "A");
+        a.genOf (tone) = patternOf (model::GenShape::square, core::RateId::r1_8, 0.8, true);
+        auto b = model::mkNote (64.0, 2.0, 2.0, "B");
+        b.genOf (tone) = patternOf (model::GenShape::triangle, core::RateId::r1_4, 0.2, false);
+        clip.notes.push_back (std::make_shared<const model::Note> (std::move (a)));
+        clip.notes.push_back (std::make_shared<const model::Note> (std::move (b)));
+        clip.notes.push_back (std::make_shared<const model::Note> (model::mkNote (67.0, 0.0, 2.0, "C")));
+    }
+
+    StrandLockProcessor proc;
+    proc.waitForSounds();
+    {
+        auto& s = proc.getUserSettings();
+        s.setTheme (state::Theme::dark);
+        s.setUiScalePercent (100);
+        s.setKeysDefault (false);
+    }
+    {
+        StrandLockEditor editor (proc);
+        auto& view = editor.getView();
+        auto& roll = view.getRoll();
+        auto& bar = view.getSelectionBar();
+        roll.setMenusShown (false);
+        view.setFolded (true);
+        proc.editClip ("Start", clip);
+        auto select = [&proc, &roll] (const std::vector<std::string>& ids, const std::string& primary)
+        {
+            proc.getDocument().setSelection (ids, primary);
+            roll.edited();
+        };
+        auto makePrimary = [&proc, &roll] (const std::string& id)
+        {
+            // what a plain click on a note already selected does (RollGestures::pickNote: ClipDocument::setPrimary)
+            proc.getDocument().setPrimary (id);
+            roll.edited();
+        };
+        select ({ "A", "B" }, "A");
+        editor.refreshNow();
+        bar.getDrawerButton (ToolSettings::Drawer::pattern).onClick();
+        editor.refreshNow();
+        auto* gen = dynamic_cast<ui::roll::GenDrawer*> (bar.getOpenDrawer());
+        if (gen == nullptr || gen->getShapes() == nullptr || gen->findSlider ("Depth at start") == nullptr)
+        {
+            check (false, "the Pattern drawer opens with its shape chips and Depth at start");
+            return;
+        }
+        auto shows = [gen] (model::GenShape shape, core::RateId rate, double depth, bool locked)
+        {
+            return gen->getShapes()->getSelected() == static_cast<int> (shape) && gen->getRate().getRate() == rate
+                   && juce::exactlyEqual (gen->findSlider ("Depth at start")->getValue(), depth) && gen->getLock().getToggleState() == locked;
+        };
+        const bool showsA = shows (model::GenShape::square, core::RateId::r1_8, 0.8, true) && ! gen->getApply().getToggleState();
+
+        makePrimary ("B");
+        const bool same = bar.getOpenDrawer() == gen;   // drawn again in place
+        const bool showsB = shows (model::GenShape::triangle, core::RateId::r1_4, 0.2, false) && ! gen->getApply().getToggleState();
+        check (showsA && same && showsB,
+               fmt ("A primary: the drawer shows Square, 1/8, 80 %%, locked (%d); a click on B, already selected, makes it the primary and the "
+                    "same drawer (%d) shows Triangle, 1/4, 20 %%, unlocked, at once (%d)", (int) showsA, (int) same, (int) showsB));
+
+        // Lock to the beat now locks the pattern the drawer shows (B's); every selected note takes it, as putGen does
+        gen->getLock().onClick();
+        const auto* nb = findNote (*proc.getDocument().current(), "B");
+        const bool locked = nb != nullptr && nb->genOf (tone) && nb->genOf (tone)->lockToBeat && nb->genOf (tone)->shape == model::GenShape::triangle
+                            && gen->getLock().getToggleState() && proc.undoLabel().value_or ("") == "Pattern locked to the beat (Tone)";
+
+        // with A and C selected, C (nothing on Tone) as the primary: Apply lights up and the note says how to use it
+        select ({ "A", "C" }, "A");
+        const bool editingA = ! gen->getApply().getToggleState() && gen->getNote().getText().startsWith ("Moving these changes the pattern");
+        makePrimary ("C");
+        const bool applyC = bar.getOpenDrawer() == gen && gen->getApply().getToggleState() && gen->getNote().getText().startsWith ("Choose the settings");
+        check (locked && editingA && applyC,
+               fmt ("Lock to the beat locks B's Triangle (%d, \"%s\"); with A primary the drawer edits A's pattern (%d); C as the primary lights "
+                    "Apply and says \"%s\" (%d)", (int) locked, proc.undoLabel().value_or ("").c_str(), (int) editingA,
+                    gen->getNote().getText().toRawUTF8(), (int) applyC));
+    }
+}
+
+SL_TEST ("ui", selectionToolsOwnEditsKeepTheDrawers)
+{
+    section ("The drawers keep their own values after the bar's own edits (review P4, sl-ui-panels.js busy): More and Less scale the notes' "
+             "pattern and random while the drawers' settings stay, so the lane menu's Pattern and Random items put the drawers' values back; "
+             "another clip (Undo), selection or mode reads the primary note's generator again");
+
+    const auto tone = core::LaneId::tone;
+    model::Clip clip = model::newClip (4.0);
+    for (int i = 0; i < 3; ++i)
+        clip.notes.push_back (std::make_shared<const model::Note> (model::mkNote (60.0 + 4.0 * (double) i, (double) i, 1.0, "own-" + std::to_string (i))));
+    const auto all = allIdsOf (clip);
+
+    // Pattern: Apply (30 %), More (the notes' pattern swings twice as far), then the lane menu's "Pattern: squiggle 1/16 triplet"
+    ToolRig t (clip);
+    t.select (all, "own-0");
+    t.lane (tone, true);
+    const auto ids = t.tools->ids();
+    t.tools->applyGen (model::GenKind::pattern);
+    const auto applied = t.rig.doc.current();
+    t.tools->more();
+    t.tools->sync();
+    const auto afterMore = t.rig.doc.current();
+    const double moreDepth = firstDepth (*afterMore, tone, false);
+    const bool more = t.lastLabel() == "More (Tone)" && t.bytes() == model::encodeClip (model::scaleLane (*applied, ids, tone, 2.0))
+                      && moreDepth > 0.31;
+    const bool kept = juce::exactlyEqual (t.settings().pat.d0, 0.3) && juce::exactlyEqual (t.settings().pat.d1, 0.3);
+    const bool ran = runMenuItemStarting (t, tone, "Pattern: ");
+    const bool put = ran && t.lastLabel() == "Pattern (Tone)" && t.bytes() == model::encodeClip (expectedPutGen (*afterMore, ids, tone, startPattern()));
+    check (more && kept && put,
+           fmt ("Pattern at 30 %%, then More: the notes swing %.2f, the bytes of model::scaleLane (%d); the drawer keeps 30 %% (%.2f); the lane menu's "
+                "Pattern item puts 30 %% back, the bytes of the drawer's pattern (%d)", moreDepth, (int) more, t.settings().pat.d0, (int) put));
+
+    // another clip: Undo of the menu item gives More's clip back, and the drawer reads its pattern
+    t.rig.undo();
+    t.tools->sync();
+    const bool undoReads = t.rig.doc.current() == afterMore && juce::exactlyEqual (t.settings().pat.d0, moreDepth);
+    // a mode change reads it again, though the lane stays Tone (Build and Tone mode), as the prototype's 'mode' listener does
+    t.settings().pat.d0 = 0.45;
+    t.rig.gestures().setMode (1);
+    t.tools->sync();
+    const bool modeReads = t.tools->lane() == tone && juce::exactlyEqual (t.settings().pat.d0, moreDepth);
+    // and another selection
+    t.settings().pat.d0 = 0.45;
+    t.select ({ "own-1" }, "own-1");
+    const bool selectionReads = juce::exactlyEqual (t.settings().pat.d0, moreDepth);
+    check (undoReads && modeReads && selectionReads,
+           fmt ("the drawer reads the primary note's pattern after Undo (%d), a mode change on the same lane (%d) and another selection (%d)",
+                (int) undoReads, (int) modeReads, (int) selectionReads));
+
+    // Random: Apply (50 %), Less, then the lane menu's "Random 1/16 triplet"
+    ToolRig r (clip);
+    r.select (all, "own-0");
+    r.lane (tone, true);
+    r.tools->applyGen (model::GenKind::random);
+    const auto rApplied = r.rig.doc.current();
+    r.tools->less();
+    r.tools->sync();
+    const auto afterLess = r.rig.doc.current();
+    const double lessAmount = firstDepth (*afterLess, tone, true);
+    const bool less = r.lastLabel() == "Less (Tone)" && r.bytes() == model::encodeClip (model::scaleLane (*rApplied, ids, tone, 0.5)) && lessAmount < 0.49
+                      && lessAmount > 0.0;
+    const bool keptAmount = juce::exactlyEqual (r.settings().rnd.amount, 0.5);
+    const bool rRan = runMenuItemStarting (r, tone, "Random 1");
+    const bool rPut = rRan && r.lastLabel() == "Random (Tone)" && r.bytes() == model::encodeClip (expectedPutGen (*afterLess, ids, tone, startRandom()));
+    check (less && keptAmount && rPut,
+           fmt ("Random at 50 %%, then Less: the notes move %.2f (%d); the drawer keeps 50 %% (%.2f); the lane menu's Random item puts 50 %% back "
+                "(%d)", lessAmount, (int) less, r.settings().rnd.amount, (int) rPut));
+
+    // the same through the editor: Pattern's Apply, Tools' More, then the Tone lane arrow's "Pattern: ..." item
+    StrandLockProcessor proc;
+    proc.waitForSounds();
+    {
+        auto& s = proc.getUserSettings();
+        s.setTheme (state::Theme::dark);
+        s.setUiScalePercent (100);
+        s.setKeysDefault (false);
+    }
+    {
+        StrandLockEditor editor (proc);
+        auto& view = editor.getView();
+        auto& roll = view.getRoll();
+        auto& bar = view.getSelectionBar();
+        roll.setMenusShown (false);
+        view.setFolded (true);
+        proc.editClip ("Start", clip);
+        proc.getDocument().setSelection (all, std::string ("own-0"));
+        roll.edited();
+        editor.refreshNow();
+        bar.getDrawerButton (ToolSettings::Drawer::pattern).onClick();
+        if (auto* gen = dynamic_cast<ui::roll::GenDrawer*> (bar.getOpenDrawer()))
+            gen->getApply().onClick();
+        editor.refreshNow();
+        const auto eApplied = proc.getDocument().current();
+        bar.getDrawerButton (ToolSettings::Drawer::tools).onClick();
+        if (auto* tools = dynamic_cast<ui::roll::ToolsDrawer*> (bar.getOpenDrawer()))
+            tools->getButton ("More").onClick();
+        editor.refreshNow();
+        const auto eMore = proc.getDocument().current();
+        view.getLaneArrow (5).onClick();
+        const auto& items = roll.getMenu();
+        const int i = itemStarting (items, "Pattern: ");
+        if (i >= 0)
+            roll.chooseMenuItem (items[(std::size_t) i]);
+        editor.refreshNow();
+        const auto eIds = roll.getTools().ids();
+        const bool eMoreOk = proc.getDocument().current() != eMore
+                             && model::encodeClip (*eMore) == model::encodeClip (model::scaleLane (*eApplied, eIds, tone, 2.0));
+        const bool ePut = i >= 0 && proc.undoLabel().value_or ("") == "Pattern (Tone)"
+                          && model::encodeClip (*proc.getDocument().current()) == model::encodeClip (expectedPutGen (*eMore, eIds, tone, startPattern()));
+        check (eMoreOk && ePut, fmt ("in the editor: Apply, More (%d), then the Tone arrow's \"Pattern: ...\" puts the drawer's 30 %% back, one step "
+                                     "\"%s\" (%d)", (int) eMoreOk, proc.undoLabel().value_or ("").c_str(), (int) ePut));
+    }
+}
+
+SL_TEST ("ui", selectionScanCost)
+{
+    section ("The selection bar's cost on the message thread (review R5T-3): with 4096 notes all selected, the selected notes in time order "
+             "and the bar's own sync, as the editor asks on every tick (timed: fails only above 5 times its target); a slider move that "
+             "stays on its step calls nothing");
+
+    model::Clip c = model::newClip (64.0);
+    std::vector<std::string> ids;
+    for (int i = 0; i < model::kMaxClipNotes; ++i)
+    {
+        const std::string id = "q" + std::to_string (i);
+        c.notes.push_back (std::make_shared<const model::Note> (model::mkNote (36.0 + (double) (i % 48), (double) (i % 250), 0.5, id)));
+        ids.push_back (id);
+    }
+    ToolRig t (c);
+    t.select (ids, ids.front());
+    auto& g = t.rig.gestures();
+    std::size_t found = 0;
+    const int calls = 20;
+    const double t0 = juce::Time::getMillisecondCounterHiRes();
+    for (int k = 0; k < calls; ++k)
+        found += g.selectionInTimeOrder().size();
+    const double ms = (juce::Time::getMillisecondCounterHiRes() - t0) / (double) calls;
+    const double t1 = juce::Time::getMillisecondCounterHiRes();
+    for (int k = 0; k < calls; ++k)
+    {
+        t.tools->sync();
+        found += t.tools->ids().size();
+        found += t.tools->anyGen (core::LaneId::tone) ? 1u : 0u;
+    }
+    const double msBar = (juce::Time::getMillisecondCounterHiRes() - t1) / (double) calls;
+    note (fmt ("4096 notes selected: the selection in time order %.2f ms a call (target 2 ms); the bar's sync, ids and anyGen %.2f ms (target "
+               "6 ms)", ms, msBar));
+    check (found == (std::size_t) (2 * calls * model::kMaxClipNotes) && ms < 10.0 && msBar < 30.0,
+           fmt ("%.2f ms and %.2f ms a call (gates 10 and 30 ms: 5 times the targets; a search of the list for each note took tens of ms)", ms, msBar));
+
+    // a slider: a move that stays on its step calls nothing (an HTML range input's input event)
+    ui::Theme theme (ThemeId::dark);
+    ui::roll::ToolSlider slider (theme, "Depth", 0.0, 1.0, 0.01, 0.3, {});
+    slider.setSize (slider.preferredWidth(), 24);
+    int inputs = 0, changes = 0;
+    slider.onInput = [&inputs] (double) { ++inputs; };
+    slider.onChange = [&changes] (double) { ++changes; };
+    auto xFor = [&slider] (double v)
+    {
+        for (float x = 0.0f; x < (float) slider.getWidth(); x += 0.25f)
+            if (std::abs (slider.valueAt (x) - v) < 1e-9)
+                return x;
+        return -1.0f;
+    };
+    const float x5 = xFor (0.5), x7 = xFor (0.7);
+    slider.dragTo (x5);
+    slider.dragTo (x5);
+    slider.dragTo (x5 + 0.25f);
+    const int sameStep = inputs;
+    slider.dragTo (x7);
+    slider.release();
+    check (x5 >= 0.0f && x7 >= 0.0f && sameStep == 1 && inputs == 2 && changes == 1 && juce::exactlyEqual (slider.getValue(), 0.7),
+           fmt ("a press at 50 %% and two moves on the same step: %d input (1); a move to 70 %%: %d in all (2); the release: %d change (1)", sameStep,
+                inputs, changes));
 }
 
 //==================================================================================================

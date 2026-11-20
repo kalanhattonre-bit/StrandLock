@@ -174,6 +174,9 @@ namespace sl::ui::roll
         model::NotePtr primaryNote() const;
         const RollSettings& rollSettings() const noexcept { return gestures.settings(); }
 
+        /** The roll's state now (the selection, the primary note, the mode), for the bar. */
+        doc::RollState rollState() const { return host.doc.rollState(); }
+
         /** Picks the lane in the bar's Lane list: it becomes the Lane, and the roll shows its mode (showLane). */
         void pickLane (core::LaneId lane);
 
@@ -205,8 +208,9 @@ namespace sl::ui::roll
         bool act (model::Clip proposed, const std::string& label);
 
         /** What the document holds now, after the roll or Undo changed it: a live slider session the selection or the
-            clip left behind ends (sl-ui-panels.js wire), and a lane mode's lane becomes the Lane. Call it on every
-            refresh. */
+            clip left behind ends (sl-ui-panels.js wire), and a lane mode's lane becomes the Lane. Another clip, selection,
+            primary note, mode or lane reads the primary note's generator into the drawers' settings (loadGenValues); a
+            clip the bar's own act or live session made does not (sl-ui-panels.js busy). Call it on every refresh. */
         void sync();
 
         //==========================================================================================
@@ -397,6 +401,7 @@ namespace sl::ui::roll
 
         bool act (model::EditResult result, const std::string& label);
         void liveRun (const std::string& key, const std::string& label, const std::function<model::Clip (const model::Clip&)>& make, bool final);
+        void markSeen (bool wasSeen);
         void ghost (std::optional<model::Clip> clip) const;
         void doConnect (model::ConnectMode mode, const std::string& label);
         void humRun (bool final, bool click, const std::string& label);
@@ -411,7 +416,8 @@ namespace sl::ui::roll
         GhostPreview* ghosts = nullptr;
         int lastMode = 0, lastLane = -1;   // the mode and lane sync last saw (a change ends a live session)
 
-        // what sync last saw: another clip, selection, primary or lane reads the primary's generator again
+        // what sync last saw: another clip, selection, primary, mode or lane reads the primary's generator again; a clip
+        // the bar made itself is marked seen (markSeen), as the prototype skips loadGenValues while busy
         model::ClipPtr seenClip;
         std::vector<std::string> seenSelection;
         std::string seenPrimary;
@@ -514,6 +520,8 @@ namespace sl::ui::roll
         {
             model::ClipPtr clip;
             std::vector<std::string> ids;
+            std::string primary;   // a click on a note already selected changes only the primary: the drawers show its generator
+            int mode = 0;          // a mode change reads the primary note's generator again (SelectionTools::sync)
             int lane = -1;
             double bpm = 0.0, seconds = 0.0, regionStart = 0.0, regionEnd = 0.0;
             int scope = 0;   // Each note or Across (a menu can change it while the Shapes drawer is open)
