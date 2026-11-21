@@ -7,6 +7,7 @@
 
 #include "core/Lanes.h"
 #include "core/Seeds.h"
+#include "engine/OctaveLevels.h"
 #include "model/Normalize.h"
 #include "model/Presets.h"
 #include "model/Recipes.h"
@@ -283,6 +284,12 @@ namespace sl::test::render
 
     bool renderFixtureCase (const JsonValue& c, const std::map<std::string, model::Clip>& clips, Rendered& out, std::string& why)
     {
+        return renderFixtureCase (c, clips, out, why, FixtureOptions {});
+    }
+
+    bool renderFixtureCase (const JsonValue& c, const std::map<std::string, model::Clip>& clips, Rendered& out, std::string& why,
+                            const FixtureOptions& options)
+    {
         const double sr = c["sr"].asNumber (48000);
         const auto n = static_cast<std::int64_t> (c["n"].asNumber());
         const int res = c.contains ("res") ? static_cast<int> (c["res"].asNumber()) : 256;
@@ -292,6 +299,7 @@ namespace sl::test::render
         auto e = std::make_unique<engine::Engine>();
         e->prepare (sr);
         e->setRampMs (0);
+        e->setOctaveLevels (options.levelsOn);
         JsonValue instJson = c["inst"];
         core::Inst inst = enginefx::instFromEngineJson (instJson);
         e->setInst (inst);
@@ -301,6 +309,8 @@ namespace sl::test::render
             why = "the sound could not be made";
             return false;
         }
+        if (options.buildLevels)
+            engine::addOctaveLevels (*sample);   // M7 V4: as the SampleManager's worker does after a decode
         e->setSample (sample.get(), 1);
 
         std::uint64_t epoch = 0;

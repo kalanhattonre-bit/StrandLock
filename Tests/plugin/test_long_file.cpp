@@ -3,9 +3,10 @@
 //     seams, seamRho) and the whole engine (Tape, Voice, Cloud, Lock) give the same bits from 16-bit samples s as from
 //     floats holding s / 32768; one sample one step away gives other bits (the comparison can fail).
 //   - longFileLoadsAs16Bit (songs, Release and Linux): a 10-minute stereo 48 kHz WAV made at test time loads as 16-bit
-//     with at most its 16-bit bytes (115.2 MB) + 16 MB live on the worker (AllocCounter, counted on the worker through
-//     SampleManager::workerProbe), decoded on the worker (the message thread allocates almost nothing meanwhile), the
-//     samples as JUCE's reader gives them, and 0 allocations on the audio thread at and after the swap.
+//     with at most 2 x its 16-bit bytes (115.2 MB) + 16 MB live on the worker (M7 V4: its octave levels, 16-bit too, take
+//     at most its own bytes again; AllocCounter, counted on the worker through SampleManager::workerProbe), decoded on
+//     the worker (the message thread allocates almost nothing meanwhile), the samples as JUCE's reader gives them, and 0
+//     allocations on the audio thread at and after the swap.
 //   - sixteenBitSwapAllocatesNothing (alloc, so the Debug CRT counts every heap call too): a 200 s file (16-bit) swapped
 //     in while a note plays.
 //   - newerRequestsStopTheWorker (songs, decision 1): a newer Detect replaces one still waiting, a new sound drops a
@@ -220,8 +221,8 @@ SL_TEST ("engine", sixteenBitReadsLikeFloat)
 
 SL_TEST ("songs", longFileLoadsAs16Bit)
 {
-    section ("Long files (M7): a 10-minute stereo 48 kHz WAV loads as 16-bit, with at most 115.2 MB + 16 MB live on the worker, "
-             "and the audio thread allocates nothing when it swaps to it");
+    section ("Long files (M7): a 10-minute stereo 48 kHz WAV loads as 16-bit, with its octave levels, at most 2 x 115.2 MB + 16 MB live on "
+             "the worker (the fast-reads budget, M7 V4), and the audio thread allocates nothing when it swaps to it");
 
     const auto dir = songs::tempFolder ("long-file");
     const auto file = dir.getChildFile ("ten minutes.wav");
@@ -311,9 +312,10 @@ SL_TEST ("songs", longFileLoadsAs16Bit)
     const double mb = 1.0e6;
     check (probe.runs == 1 && probe.thread != std::this_thread::get_id() && probe.counts.peakLiveBytes >= bytes16,
            fmt ("decoded on the worker (another thread), which allocated the samples itself: peak live %.2f MB there", (double) probe.counts.peakLiveBytes / mb));
-    check (probe.counts.peakLiveBytes <= bytes16 + 16000000,
-           fmt ("at most the 16-bit bytes + 16 MB live on the worker: %.2f MB against %.2f MB (the largest block %.2f MB; %s)",
-                (double) probe.counts.peakLiveBytes / mb, (double) (bytes16 + 16000000) / mb, (double) probe.counts.largest / mb, alloc::coverage()));
+    check (probe.counts.peakLiveBytes <= 2 * bytes16 + 16000000,
+           fmt ("at most 2 x the 16-bit bytes + 16 MB live on the worker (the samples and their octave levels): %.2f MB against %.2f MB (the "
+                "largest block %.2f MB; %s)",
+                (double) probe.counts.peakLiveBytes / mb, (double) (2 * bytes16 + 16000000) / mb, (double) probe.counts.largest / mb, alloc::coverage()));
     check (messageThread.peakLiveBytes < 4000000,
            fmt ("the message thread meanwhile: %.3f MB live at most (it decodes nothing)", (double) messageThread.peakLiveBytes / mb));
     note (fmt ("the load took %.0f ms (hash, decode and analysis %.0f ms on the worker, the analysis %.0f ms)", loadMs, manager.lastFileMs(),
@@ -338,6 +340,13 @@ SL_TEST ("songs", longFileLoadsAs16Bit)
                && played->sampleBytes() == bytes16,
            fmt ("the audio thread plays it as 16-bit: %lld frames, stereo, %lld bytes", played != nullptr ? (long long) played->n : -1LL,
                 played != nullptr ? (long long) played->sampleBytes() : -1LL));
+    // M7 V4: its octave levels, built on the worker before the hand-over: 16-bit, 7/8 of its bytes (14.4 + 7.2 + 3.6 M frames)
+    const std::int64_t levelBytes = (frames / 2 + frames / 4 + frames / 8) * 2 * 2;   // 100,800,000
+    check (played != nullptr && played->numLevels == 3 && played->levels[0].L16 != nullptr && played->levels[0].L == nullptr
+               && played->levelBytes() == levelBytes && played->levelBytes() <= played->sampleBytes()
+               && probe.counts.peakLiveBytes >= bytes16 + levelBytes,
+           fmt ("with its 3 octave levels, 16-bit, %lld bytes (at most its own %lld), made on the worker (its peak %.2f MB holds both)",
+                played != nullptr ? (long long) played->levelBytes() : -1LL, (long long) bytes16, (double) probe.counts.peakLiveBytes / mb));
     check (audioCalls == 0 && peak > 1e-4,
            fmt ("0 allocations and frees on the audio thread in the 40 blocks of the swap and a note on it (%lld; the last block's peak %.4f; %s)",
                 audioCalls, peak, alloc::coverage()));

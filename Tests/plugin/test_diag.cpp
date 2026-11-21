@@ -6,12 +6,14 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_audio_processors/juce_audio_processors.h>
 
+#include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "core/Version.h"
 #include "params/ParameterLayout.h"
 #include "support/Check.h"
 #include "support/Harness.h"
 #include "support/TestRegistry.h"
+#include "ui/MainView.h"
 
 #include <array>
 #include <bit>
@@ -409,4 +411,67 @@ SL_TEST ("diag", messageThreadAndReport)
     check (info.name.isNotEmpty() && info.format.isNotEmpty(), fmt ("the host is named (%s)", info.summary().toRawUTF8()));
 
     wavFile.deleteFile();
+}
+
+//==================================================================================================
+// M7 V4 (plan 7.9 decision 7b): Preview's state, as one line on the Diagnostics page and in Copy report.
+
+SL_TEST ("diag", previewLineOnThePageAndInTheReport)
+{
+    section ("Preview on the Diagnostics page and in Copy report (M7 V4, plan 7.9 decision 7b): one line, the same in both: off; on, at its "
+             "clock's beat, while Cubase is stopped; off again once Cubase plays");
+
+    StrandLockProcessor p;
+    p.waitForSounds();
+    Host h (p);
+    p.waitForSnapshot();
+    h.looping = false;
+    StrandLockEditor editor (p);
+    auto& view = editor.getView();
+    view.openTab (ui::MainView::diagTab);
+    auto& page = view.getDiagnosticsPage();
+    const auto pageLine = [&editor, &page]
+    {
+        editor.refreshNow();
+        for (const auto& line : page.shownText())
+            if (line.startsWith ("Position and tempo (checklist 7): Preview: "))
+                return line.fromFirstOccurrenceOf ("Preview: ", false, false);
+        return juce::String ("(no Preview line)");
+    };
+    const auto reportLine = [&p]
+    {
+        juce::StringArray lines;
+        lines.addLines (p.getDiag().reportText());
+        for (const auto& line : lines)
+            if (line.startsWith ("Preview: "))
+                return line.fromFirstOccurrenceOf ("Preview: ", false, false);
+        return juce::String ("(no Preview line)");
+    };
+
+    h.stoppedBlock (512);
+    const auto s0 = p.getDiag().snapshot();
+    const auto page0 = pageLine(), report0 = reportLine();
+    check (! s0.previewOn && ! s0.previewPlaying && page0 == "off" && report0 == "off",
+           fmt ("before Preview: \"%s\" on the page and \"%s\" in the report", page0.toRawUTF8(), report0.toRawUTF8()));
+
+    // Preview on with Cubase stopped at ppq 2: its clock runs from beat 2 at 120 bpm.
+    p.setPreview (true);
+    h.ppq = 2.0;
+    for (int i = 0; i < 20; ++i)
+        h.stoppedBlock (512);
+    const auto s1 = p.getDiag().snapshot();
+    const double want = 2.0 + 20.0 * 512.0 * 120.0 / 60.0 / 48000.0;   // the next block's beat
+    const auto page1 = pageLine(), report1 = reportLine();
+    const juce::String text1 = "on, at beat " + juce::String (want, 3) + " (Cubase is stopped, so StrandLock plays the clip on its own clock)";
+    check (s1.previewOn && s1.previewPlaying && std::abs (s1.previewBeat - want) < 1e-9 && page1 == text1 && report1 == text1,
+           fmt ("Preview on, Cubase stopped at ppq 2 for 20 blocks of 512: beat %.6f (expected %.6f); \"%s\" on the page and in the report",
+                s1.previewBeat, want, page1.toRawUTF8()));
+
+    // Cubase plays: Preview goes off by itself, and both say so.
+    h.play (512);
+    const auto s2 = p.getDiag().snapshot();
+    const auto page2 = pageLine(), report2 = reportLine();
+    check (! s2.previewOn && ! s2.previewPlaying && page2 == "off" && report2 == "off" && ! p.isPreviewOn(),
+           fmt ("Cubase plays: \"%s\" on the page and \"%s\" in the report", page2.toRawUTF8(), report2.toRawUTF8()));
+    p.setPlayHead (nullptr);
 }

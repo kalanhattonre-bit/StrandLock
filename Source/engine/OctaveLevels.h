@@ -77,6 +77,20 @@ namespace sl::engine
     /** The decimation filter: 2 kLevelHalf + 1 floats. */
     inline const float* levelFilter() noexcept { return detail::kLevelTables.filter; }
 
+    /** The 8 taps h over the 8 frames p[0 .. 7], summed in pairs and then pairs of pairs: fewer dependent steps than one
+        running sum (a level read matches no older read, so the order is free; it is the same every time). */
+    template <class T>
+    inline double levelDot (const float* h, const T* p) noexcept
+    {
+        const double s01 = static_cast<double> (h[0]) * sampleValue (p[0]) + static_cast<double> (h[1]) * sampleValue (p[1]);
+        const double s23 = static_cast<double> (h[2]) * sampleValue (p[2]) + static_cast<double> (h[3]) * sampleValue (p[3]);
+        const double s45 = static_cast<double> (h[4]) * sampleValue (p[4]) + static_cast<double> (h[5]) * sampleValue (p[5]);
+        const double s67 = static_cast<double> (h[6]) * sampleValue (p[6]) + static_cast<double> (h[7]) * sampleValue (p[7]);
+        return (s01 + s23) + (s45 + s67);
+    }
+
+    static_assert (kLevelTaps == 8, "levelDot sums 8 taps");
+
     /** One level's read at its frame p (fractional, unbounded: beyond +-1e12 it reads frame 0), both channels at the same
         position, every index guarded (outside the level, its edge frame), as readAbsOf guards the sound's. */
     template <class T>
@@ -91,15 +105,9 @@ namespace sl::engine
         double a = 0, b = 0;
         if (i >= 3 && i + 4 < n)
         {
-            const T* pl = L + (i - 3);
-            for (int j = 0; j < kLevelTaps; ++j)
-                a += static_cast<double> (h[j]) * sampleValue (pl[j]);
+            a = levelDot (h, L + (i - 3));
             if (stereo)
-            {
-                const T* pr = R + (i - 3);
-                for (int j = 0; j < kLevelTaps; ++j)
-                    b += static_cast<double> (h[j]) * sampleValue (pr[j]);
-            }
+                b = levelDot (h, R + (i - 3));
         }
         else
         {

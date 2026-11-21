@@ -43,6 +43,14 @@ namespace sl::engine
         std::int64_t filterResets = 0;        // biquad NaN resets, counted by every voice (Stats::filterResets)
         bool levels = true;                   // M7 V4: reads faster than 1.25x read an octave level (the tests' switch)
         std::int64_t levelReads = 0;          // M7 V4: head runs (Tape, Lock) and grains that read a level (Stats::levelReads)
+        std::array<std::int64_t, kMaxOctaveLevels> levelUses {};   // the same, by level (1 .. 3)
+
+        /** M7 V4: count one read of octave level `level` (1 .. 3). */
+        void countLevel (int level) noexcept
+        {
+            ++levelReads;
+            ++levelUses[static_cast<std::size_t> (level - 1)];
+        }
     };
 
     /** The sample a voice plays, with the rate it plays it at, for the voice's whole life. */

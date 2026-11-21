@@ -8,8 +8,10 @@ steps below (The checklist) still apply. The M2 build plays the real sound engin
 are in **M4: the piano roll**. The M5 build adds the selection tools (selecting with a box, the tools for the
 selected notes, the Copy / Paste and Slides tabs): its steps are in **M5: selection tools**. The M6 build finishes
 the Sample side (Sample mode, the live playheads on the waveform, the whole Sample tab with its recipes, Dice and
-Preview, the Macros and Note settings tabs): its steps are in **M6: the Sample tab** at the end. Please go through
-them and send back your answers and the text from the **Copy report** button.
+Preview, the Macros and Note settings tabs): its steps are in **M6: the Sample tab**. The M7 build is about your own
+songs: it listens to them and suggests parts, roots and keys, handles songs longer than 10 minutes, keeps the sound
+with the project, and plays Tape far up without the harsh edge: its steps are in **M7: long songs** at the end.
+Please go through them and send back your answers and the text from the **Copy report** button.
 
 ## Getting the test build
 
@@ -617,3 +619,103 @@ What is new, and where it is:
     own settings and their Starts as you left them?
 
 14. **Copy report.** Open the **Diagnostics** tab and press **Copy report**. Paste the text into your reply.
+
+## M7: long songs
+
+This build is about your own songs. StrandLock now listens to a sound file when you load it: it suggests parts of a
+song, a root note and a key, it loads a part of a song longer than 10 minutes, it keeps the sound with the Cubase
+project (so the project still plays when the file moves), and Tape played two or three octaves up no longer has the
+harsh, gritty edge. The steps above still apply; this part is about the new things. Please go through it with one or
+two of your own songs and send back your answers and the text from **Copy report**. A screenshot helps whenever
+something looks wrong.
+
+What is new, and where it is:
+- **The waveform strip's file line** (the top line of the strip) now ends with what listening found: for example
+  "key A minor", or "no clear pitch" for noise and drums, or "listening..." for a moment after a load.
+- **Part chips.** For a song, a row of chips under the file line names the parts StrandLock suggests, each with
+  where it starts: **Steady note** (a held, steady stretch), **Big hit**, **Quiet texture** and **One-bar loop**
+  (with the tempo it found, for example "One-bar loop 120 bpm 0:29"). The chip of the part the Region is on now is
+  lit. **Use the whole file** sets the Region back to the whole file. A built-in sound has one **Parts** chip beside
+  the file line instead, with its parts in a menu.
+- **Suggestions**, on the same row: **Use A1 as the root** (with the note it heard), **Use key A major** (with the
+  key it heard), **Loop cleanly** (for a short file whose whole Region loops) and **Try Cloud** or
+  **Cloud suits this sound (on)** (an engine that suits the sound). Nothing changes until you click one.
+- **The Sound tab**: **Detect pitch & key**, **Key**, **Scale** and **Scale lock**; then
+  **Keep the sound in the project** (on unless you turn it off) and **Library** (off unless you turn it on), each
+  with a line saying what it keeps.
+- **A line under the top bar** when StrandLock has something to ask or tell about the sound: the 20 to 50 MB question
+  with **Yes**, **No** and **Just the Region**, or a missing file with **Locate sample...**.
+- **The part picker**, for a song longer than 10 minutes: it covers the waveform and says "Pick 10 minutes to
+  load", with **Load this part** and **Cancel**. **Load another part...** on the chip row opens it again.
+
+1. **Install the new build** the same way as before (Getting the test build, at the top). Add StrandLock to a new
+   Instrument track and click **Show** to open the tabs.
+
+2. **Load one of your songs, two ways.** Click **Browse...** on the waveform strip and pick a song (WAV, AIFF, FLAC,
+   MP3 or OGG). A message says it is a song and that the Region starts on a suggested part. Within a second or so
+   the part chips appear under the file line, and the file line says the key it heard. Then drag another song from
+   Windows Explorer onto the StrandLock window. Please also try these, because only Cubase can test them: a file
+   dragged from **MediaBay**, a clip dragged from the **Pool**, and an audio event dragged from the project window
+   (also one you have trimmed). Which ones load? For each, does the Region land on a part that makes sense? How long
+   do the chips take to show?
+
+3. **Click the part chips.** Click each chip in turn. The Region (the orange box on the waveform) jumps to that part,
+   and the lit chip follows. Hold the mouse over a chip first: a dashed box on the waveform shows the part, and the
+   hint bar says what kind of part it is. Play a note at C3 after each click: does each part sound like what its name
+   says? Click **Undo** once after a chip: the Region goes back (one step each). **Use the whole file** takes all of
+   it. For **One-bar loop**, a message says the tempo it found: is it your song's tempo?
+
+4. **Detect pitch & key, and the root.** Put the Region on a held note of the song (**Steady note** is a good start).
+   A chip such as **Use C2 as the root** (with whatever note it heard) may appear: hold the mouse over it to read why,
+   then click it. Play C3: does that part now play at its own pitch, in tune with the song? Now open the **Sound** tab
+   and click **Detect pitch & key**: it listens to the Region, sets the root (a message says which note and how many
+   cents), and sets **Key** and **Scale** to the key it heard. Is the key right? Click **Undo** once: only the key
+   goes back (the root belongs to the sound, so it is not an undo step). Try it on a drum part too: it should say
+   "no clear pitch" and change nothing.
+
+5. **A song longer than 10 minutes.** Load a file longer than 10 minutes (a long live recording, or two songs joined).
+   StrandLock loads its first 10 minutes at once, so something plays, and the part picker opens over the waveform.
+   Drag across the picture to choose where your 10 minutes start; the line at the top says which minutes. Click
+   **Load this part**: the file line then names the part (for example "6:00 to 12:00 of 12:00"). Later,
+   **Load another part...** on the chip row opens the picker again. Does the right part load and play?
+
+6. **The 20 to 50 MB question.** Load a file between 20 and 50 MB (a WAV of about 2 to 5 minutes). The line under the
+   top bar asks whether to keep the whole file in the project, with **Yes**, **No** and **Just the Region**. Click
+   **Yes**. Save the project, close it and open it again: the question must not come back for that file. (Files up to
+   20 MB are kept without asking; for files over 50 MB only the Region is kept.)
+
+7. **Save, close, move the file, reopen.** These check where StrandLock finds a sound when its file has moved.
+   - a. Load a small sound file (under 20 MB). Save the project and close it. In Windows Explorer move that file to
+     another folder (or rename it). Open the project again: does it play as before? A message says it plays the copy
+     kept in the project, and nothing asks you anything.
+   - b. On the **Sound** tab turn **Keep the sound in the project** off. Load a file, set a Region and turn a few
+     knobs. Save, close, move the file, reopen. Now the line under the top bar says StrandLock cannot find the file.
+     Click **Locate sample...** and pick the file where it is now. Does it play with the same Region, root and knobs
+     as before? Click **Undo** once: the line comes back. Turn **Keep the sound in the project** on again afterwards.
+   - c. On the **Sound** tab turn **Library** on. Load a file, save the project, close it, move the file, reopen. Does
+     it play from the library (a message says so)? The line next to **Library** says how much the library holds. You
+     can turn **Library** off again; the copies stay in Documents\StrandLock\Samples until you delete them.
+   - d. Load a song over 50 MB, set a Region of a few minutes and save. A message says the Region is too long to keep
+     in the project (over 50 MB). A short Region of the same song is kept: save again and the message does not come.
+
+8. **Tape far up, now clean.** Load a sound with bright, steady high notes (the Saw from the sound menu, a synth
+   stab, or a cymbal), set **ENGINE** to **Tape** on the Sample tab, and play C5 and C6 (two and three octaves above
+   C3). Before this build those notes had a harsh, gritty, metallic edge (tones that are not part of the note). Now
+   they should sound clean, only higher. Play a slow upward slide too (pitch bend, or a glide between two notes far
+   apart): does the sound stay smooth, with no click or step on the way up? Try a raised **FORMANT** on **Voice**
+   too. Is it clean? Is it any duller than you expected?
+
+9. **Hold the mouse on the waveform outside the Region.** Hold the mouse down on the waveform outside the orange box:
+   you now hear the song itself from that spot, as recorded, until you let go, and a line moves along the waveform
+   while it plays. The small box near the top right says the time and "outside the Region: the file as recorded".
+   (This replaces what M6 step 4 said: before this build nothing played there.) Inside the Region it is as before:
+   a note at the root from that spot. Does it start quickly and stop cleanly, with no click?
+
+10. **Play it back.** Make a short phrase on a part of your song, with notes that move through it (Sample mode,
+    **Travel**). Press Play in Cubase. Does it play what you see, the same on every loop? Save, close and reopen: are
+    the part, the Region, the root and the key as you left them?
+
+11. **Copy report.** Open the **Diagnostics** tab. In **POSITION AND TEMPO** a new line **Preview** says whether
+    Preview is off or on, and while it plays with Cubase stopped, at which beat. Click **Preview** on the Sample tab
+    with Cubase stopped and watch that line count the beats. Then press **Copy report** and paste the text into your
+    reply (it has the same Preview line).

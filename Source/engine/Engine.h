@@ -92,8 +92,10 @@ namespace sl::engine
         std::int32_t tapeStandIns = 0;
 
         // M7 V4: reads of an octave level (engine/OctaveLevels.h): a Tape or Lock head's runs, and Voice or Cloud grains,
-        // that read one. 0 means everything played read the sound itself, as M3 did.
+        // that read one, in all and by level (levelUses[0] is level 1). 0 means everything played read the sound itself,
+        // as M3 did.
         std::int64_t levelReads = 0;
+        std::array<std::int64_t, kMaxOctaveLevels> levelUses {};
     };
 
     class Engine

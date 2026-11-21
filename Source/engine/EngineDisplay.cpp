@@ -116,6 +116,7 @@ namespace sl::engine
         s.budget = budget;
         s.filterResets = ctx.filterResets;
         s.levelReads = ctx.levelReads;
+        s.levelUses = ctx.levelUses;
         return s;
     }
 
@@ -130,5 +131,6 @@ namespace sl::engine
         st.preLimiterPeak = 0.0;
         ctx.filterResets = 0;
         ctx.levelReads = 0;
+        ctx.levelUses.fill (0);
     }
 }

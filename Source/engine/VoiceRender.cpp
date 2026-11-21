@@ -251,6 +251,7 @@ namespace sl::engine
         h.raw = raw;
         h.off = off;
         h.stopG = sg;
-        ++ctx->levelReads;
+        if (to > 0)
+            ctx->countLevel (to);
     }
 }

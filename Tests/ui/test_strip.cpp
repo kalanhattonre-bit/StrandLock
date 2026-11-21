@@ -724,6 +724,74 @@ SL_TEST ("ui", stripHeadsFromDisplayFrames)
     resetUserSettings (proc);
 }
 
+SL_TEST ("ui", stripRawAuditionLine)
+{
+    section ("Strip (M7 V4, plan 7.9 decision 7a): holding the mouse outside the Region plays the sound as recorded from there; its moving line "
+             "is drawn where the engine's display frame says, and goes once the mouse lets go and the fade ends");
+
+    StrandLockProcessor proc;
+    resetUserSettings (proc);
+    proc.waitForSounds();
+    StrandLockEditor editor (proc);
+    editor.refreshNow();
+    auto& strip = editor.getView().getStrip();
+    const auto& dark = ui::palette (ThemeId::dark);
+    const auto render = [&strip] { return strip.createComponentSnapshot (strip.getLocalBounds(), true, 1.0f); };
+
+    // A Region from 50 to 90 %, so 20 % is outside it.
+    dragStrip (strip, { strip.xOf (0.5), midY (strip) }, { strip.xOf (0.9), midY (strip) });
+    editor.refreshNow();
+    drainCommands (proc);
+
+    proc.setPlayConfigDetails (0, 2, 48000.0, 256);
+    proc.prepareToPlay (48000.0, 256);
+    juce::AudioBuffer<float> buffer (2, 256);
+    juce::MidiBuffer midi;
+    auto blocks = [&] (int count)
+    {
+        float most = 0.0f;
+        for (int b = 0; b < count; ++b)
+        {
+            buffer.clear();
+            proc.processBlock (buffer, midi);
+            most = std::max (most, buffer.getMagnitude (0, 0, 256));
+        }
+        return most;
+    };
+    blocks (8);
+    editor.refreshNow();
+    render();
+    const bool noneBefore = ! strip.rawLineShown();
+
+    const float x = strip.xOf (0.2);
+    strip.mouseDown (mouse (strip, { x, midY (strip) }, { x, midY (strip) }, false));
+    const auto readout = strip.getReadout();
+    const float heard = blocks (40);   // about 0.2 s: the hold plays, and frames are written
+    editor.refreshNow();
+    const auto shot = render();
+    const auto* frame = strip.getOverlay().getFrame();
+    const double at = frame != nullptr && frame->rawOn ? (double) frame->rawPos : -1.0;
+    const int lineX = (int) std::lround (strip.xOf (at));
+    const auto column = juce::Rectangle<int> (lineX - 1, strip.getWaveArea().getY() + ui::WaveStrip::band, 3,
+                                              strip.getWaveArea().getHeight() - ui::WaveStrip::band);
+    const int linePixels = countNear (shot, column, dark[Tok::head], 40);
+    const bool shown = strip.rawLineShown();
+
+    strip.mouseUp (mouse (strip, { x, midY (strip) }, { x, midY (strip) }, false, juce::ModifierKeys()));
+    blocks (20);   // past the 30 ms fade
+    const float after = blocks (8);
+    editor.refreshNow();
+    render();
+    const bool gone = ! strip.rawLineShown();
+    check (noneBefore && readout.endsWith ("outside the Region: the file as recorded") && heard > 0.01f && shown && at > 0.2 && at < 0.35
+               && linePixels > 20 && gone && after < 1.0e-6f,
+           fmt ("pressed at 20 %%: \"%s\"; it plays (peak %.3f) and the line is drawn at %.3f of the sound (%d head-coloured pixels); let go: silence "
+                "(peak %.2e) and no line",
+                readout.toRawUTF8(), (double) heard, at, linePixels, (double) after));
+    proc.releaseResources();
+    resetUserSettings (proc);
+}
+
 //==================================================================================================
 // Snapshots: the strip with the chord loaded and a Region (dragged), the sound menu open (drawn with JUCE's own
 // menu drawing, since a real menu opens in a window of its own), zoomed in with heads.

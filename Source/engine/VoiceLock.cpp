@@ -99,7 +99,7 @@ namespace sl::engine
         const float* HANN = hannTable();
         const int lvl = h.lv;   // M7 V4: the taps read at the rate ratio; faster than 1.25x they read an octave level
         if (lvl != 0)
-            ++ctx->levelReads;
+            ctx->countLevel (lvl);
         if (h.needPrime)
         {
             h.needPrime = false;

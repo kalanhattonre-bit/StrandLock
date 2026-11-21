@@ -126,7 +126,7 @@ namespace sl::engine
                     // level its speed chooses, for its whole life; the grain windows crossfade one level into the next
                     gL[g] = static_cast<std::int8_t> (levels > 0 ? levelFor (step, levels) : 0);
                     if (gL[g] != 0)
-                        ++ctx->levelReads;
+                        ctx->countLevel (gL[g]);
                     h.gIdx++;
                     h.nextT += hop;
                 }
