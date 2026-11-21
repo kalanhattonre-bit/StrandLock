@@ -1664,6 +1664,49 @@ goes in NOTES-M6.
 6. **"Try this" (U3)** shows one suggestion at a time from the prototype's list, never covers the hint bar's mode
    text, and is plain English.
 
+### 7.9 M7: who builds what, and the architect's decisions (2026-11-20)
+
+**Order.** M7 is one chain on branch `m7-songs`, each part fast-forwarding main when CI is green: V1 (the analysis
+port: detectPitch, detectKey, suggestParts and its features, estimateTempo, the prototype's fft, all in
+`Source/analysis/`, no JUCE) -> V2 (long songs: int16 storage, the 10-minute limit and "load a part", the exact
+Region edges, analysis on the worker with its SMPL cache, the part chips and the suggestion line with root, key and
+engine suggestions and "Detect pitch & key") -> V3 (keeping the sound in the project: the SAUD chunk, the toggle and
+the saved 20-50 MB answer, the Region excerpt, the opt-in library and Locate) -> V4 (fast reads without aliasing: the
+octave levels, their rows, M6's two leftovers of decision 7, and an M7 section in `docs/CUBASE-CHECKLIST.md`). Then
+review and a fix pass. Each part writes its section in `docs/NOTES-M7.md` (V1-V4, Fix) with a Progress list.
+
+**Ownership.** V1 owns `Source/analysis/**`, `Tests/analysis/**`, `tools/fixtures/analysis.js` and
+`Tests/fixtures/analysis/**` (append-only). V2-V4 own `doc/SampleManager`, `state/StateChunks` (SMPL file references
+and SAUD), `engine/SampleData.h`, `engine/SourceRead.h`, `engine/Region` (the level choice only), `ui/strip/PartChips`,
+the suggestion line, and the M7 tests in `Tests/plugin/` and `Tests/engine/test_aliasing.cpp`; M2-M6 files where a
+part needs them. The model (M1) is not M7's: a need there goes in NOTES-M7.
+
+**Decisions.**
+1. **Analysis runs on the SampleManager worker** after every decode and on "Detect pitch & key", never on the audio or
+   message thread; a newer load cancels it; its results go in SMPL's analysis cache so a reload does not analyse again.
+2. **Suggestions never apply themselves.** A root suggestion is one click to accept and, like Detect, is not an undo
+   step (the root belongs to the sound, 2.4); applying a suggested key is one undo step; the engine suggestion (E3)
+   is a button; a part chip sets the Region in one undo step.
+3. **"No clear pitch" for silence and DC.** The prototype reads a DC input as MIDI 90; the plugin says "no clear
+   pitch" instead. The fixture case stays as recorded and its test checks the plugin's answer (a deviation for 8.2).
+4. **Drag sources.** Kalan's checklist answers are not in yet, so M2's drop handling stays; NOTES-M7 lists the drag
+   sources that only Cubase can test (MediaBay, the Pool, a trimmed audio event).
+5. **Embedding follows section 3**: "Keep the sound in the project" on by default; the 20-50 MB question asked once per
+   file with its answer saved in SMPL; above 50 MB never the whole file, and a Region excerpt (FLAC 24-bit) only up to
+   50 MB.
+6. **Octave levels** as the M7 deliverable describes, built on the worker after the decode, int16 when the sound is,
+   and inside the fast-reads memory budget.
+7. **M6's leftovers** (NOTES-M6, Fix, "For the architect"; decided 2026-11-20 when M6 landed). (a) V4 builds the raw
+   audition: holding the mouse on the waveform outside the Region plays the sound as recorded from that spot, as the
+   prototype's `rawAuditionStart` does (its own rate, the prototype's 12 ms fade in and 30 ms fade out, only inside
+   the loaded range when a part is loaded), through a CommandQueue command and a small allocation-free player on the
+   audio thread; the readout then says the prototype's "outside the Region: the file as recorded". Inside the Region
+   the M6 audition is unchanged. Its test: between the fades the output equals the stored samples from the held spot,
+   silence within 30 ms of the release, 0 allocations on the audio thread. (b) V4 adds Preview's state (on or off,
+   and its beat) as one line on the Diagnostics page and in Copy report. (c) Region start, Region end and Loop fade
+   stay M0's sliders (the prototype has no knobs for them to copy), and MidiRouter's stop-then-start at a Preview
+   hand-over stays as built: no restart flag on `engine::Transport` in v1.
+
 ---
 
 ## 8. Deviations
