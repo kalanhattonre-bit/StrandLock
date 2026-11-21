@@ -385,6 +385,8 @@ namespace sl::ui
         root = rootNow;
         cents = centsNow;
         makeHeader();
+        if (! chipRow && chips.preferredWidth() > 0)
+            resized();   // a starter's chips follow the file line's new text
         repaint();
     }
 

@@ -12,6 +12,7 @@
 #include "support/TestSignals.h"
 #include "ui/MainView.h"
 #include "ui/SampleTabRules.h"
+#include "ui/tabs/SoundTab.h"
 
 #include <cmath>
 #include <cstring>

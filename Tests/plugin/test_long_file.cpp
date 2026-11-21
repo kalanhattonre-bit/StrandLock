@@ -8,12 +8,15 @@
 //     samples as JUCE's reader gives them, and 0 allocations on the audio thread at and after the swap.
 //   - sixteenBitSwapAllocatesNothing (alloc, so the Debug CRT counts every heap call too): a 200 s file (16-bit) swapped
 //     in while a note plays.
+//   - newerRequestsStopTheWorker (songs, decision 1): a newer Detect replaces one still waiting, a new sound drops a
+//     waiting Detect, and a file overtaken while the worker reads it stops at the next question and never plays.
 
 #include "SongRig.h"
 
 #include "support/AllocCounter.h"
 #include "support/Check.h"
 #include "support/TestRegistry.h"
+#include "support/TestSignals.h"
 
 #include "core/Inst.h"
 #include "engine/Engine.h"
@@ -384,5 +387,70 @@ SL_TEST ("alloc", sixteenBitSwapAllocatesNothing)
            fmt ("the audio thread took the 16-bit sound (%lld frames)", played != nullptr ? (long long) played->n : -1LL));
     check (c.news == 0 && c.deletes == 0, fmt ("0 allocations and frees in the 30 blocks of the swap (%lld, %lld; %s)", c.news, c.deletes, alloc::coverage()));
     p.releaseResources();
+    dir.deleteRecursively();
+}
+
+SL_TEST ("songs", newerRequestsStopTheWorker)
+{
+    section ("Decision 1: a newer request stops the worker's decode and analysis, and a newer job replaces an older one");
+
+    const auto dir = songs::tempFolder ("stops");
+    const auto tone = dir.getChildFile ("tone.wav");
+    const auto song = dir.getChildFile ("four minutes.wav");
+    songs::Noise noise (4);
+    const bool written = songs::writeMono16 (tone, test::signals::tone (test::signals::midiHz (57.0), 2.0, 44100.0), 44100.0)
+                      && songs::writeWav16 (song, 1, 22050.0, 240 * 22050, [&noise] (std::int64_t, int count, float* const* out)
+                         {
+                             for (int i = 0; i < count; ++i)
+                                 out[0][i] = 0.2f * noise.next();
+                         });
+    check (written, "a 2 s tone and a 4-minute file written at test time");
+
+    StrandLockProcessor p;
+    p.waitForSounds();
+    p.loadSoundFile (tone);
+    p.waitForSounds (30000);
+    auto& m = p.getSampleManager();
+
+    // Two Detects asked for while the worker is busy: only the newer one runs.
+    const auto ran0 = m.jobsRun();
+    m.setHeld (true);
+    p.detectPitchAndKey();
+    p.detectPitchAndKey();
+    m.setHeld (false);
+    p.waitForAnalysis (30000);
+    check (m.jobsRun() == ran0 + 1 && ! p.getSuggestions().listening, fmt ("two Detects in a row: %d ran (the newer replaces the older)", (int) (m.jobsRun() - ran0)));
+
+    // A Detect and then a new sound: the job is dropped, the sound plays.
+    const auto ran1 = m.jobsRun();
+    m.setHeld (true);
+    p.detectPitchAndKey();
+    p.loadStarterSound (sounds::StarterId::pluck);
+    m.setHeld (false);
+    p.waitForSounds (30000);
+    p.waitForAnalysis (30000);
+    const auto now = p.getCurrentSound();
+    check (m.jobsRun() <= ran1 + 1 && now != nullptr && now->builtIn && now->starter == sounds::StarterId::pluck && ! p.getSuggestions().listening,
+           "a Detect that a new sound overtook gives nothing (only the starter's parts may run), and the new sound plays");
+
+    // A file whose request is overtaken while the worker makes it: its decode stops at the next question, nothing of it
+    // is published, and the newer sound plays.
+    const auto stops0 = m.stopsMade();
+    bool asked = false;
+    m.workerProbe = [&m, &asked] (bool starting)
+    {
+        if (starting && ! asked)
+        {
+            asked = true;
+            m.loadStarter (sounds::StarterId::vowel, 1, doc::LoadOrigin::user);   // a newer pick, while the file is being made
+        }
+    };
+    p.loadSoundFile (song);
+    p.waitForSounds (60000);
+    m.workerProbe = nullptr;
+    const auto after = p.getCurrentSound();
+    check (asked && m.stopsMade() > stops0 && after != nullptr && after->builtIn && after->starter == sounds::StarterId::vowel,
+           fmt ("the 4-minute file overtaken while it was read: %d stop(s), it never plays, the newer pick does",
+                (int) (m.stopsMade() - stops0)));
     dir.deleteRecursively();
 }

@@ -172,5 +172,135 @@ chips and the suggestion line. Branch `m7-songs`, from main 1e9f61c.
   after), runs Detect, root suggestions and the part picker's overview as jobs a newer request stops.
 - Done: the processor's suggestions (root, key, engine), SoundMeta (each sound's own root), part chips and "Use the
   whole file" as one undo step each, Detect pitch & key.
-- In progress: the strip's chips, suggestion line and part picker; the Sound tab's Detect, Key and Scale.
-- Next: the M7 tests (long file, part load, Region precision, root), the updated M2 tests, snapshots, CI, main.
+- Done: the strip's chips and suggestion line, the part picker, the Sound tab's Detect, Key, Scale and Scale lock.
+- Done: the M7 tests (long file, part load, Region precision, root), the chip tests, the M7 snapshots; two M2 checks
+  follow M7's rules. Run 44866817094 (f44fa83) built on both platforms.
+- In progress: CI on 42425cf and after (run 44869651538), the snapshots to look at, then main.
+
+### Files
+
+- `Source/engine/SampleData.h`: `SampleFormat::i16`, `L16`/`R16`, `toInt16`, `kInt16Scale`, `makeSampleData16`,
+  `hasSamples`, `at`, `sampleBytes`.
+- `Source/engine/SourceRead.h`: `sampleValue`, `hermite` and `readAbsOf` as templates over the stored type; `readAbs`
+  picks the format once per call. `Source/engine/Region.h/.cpp`: PlainStretch holds both pointer pairs and picks once
+  per run; seamRho reads through `SampleData::at`. `Source/engine/Engine.cpp`: setSample asks `hasSamples`.
+- `Source/doc/SampleManager.h/.cpp`: the 16-bit decode, the loaded part, the analysis (`SoundAnalysis`, `toCache`,
+  `fromCache`, `keyName`, `pitchToRoot`), the jobs (`detect`, `suggestRoot`, `requestOverview`, a starter's parts),
+  `JobResult`, `FileOverview`, `SoundView`'s 16-bit pointers, channels, origin and analysis, `workerProbe` (tests).
+- `Source/PluginProcessor.h/.cpp`: `Suggestions`, `EngineSuggestion`, `detectPitchAndKey`, `acceptRootSuggestion`,
+  `acceptKeySuggestion`, `acceptEngineSuggestion`, `dismissEngineSuggestion`, `usePart`, `useWholeFile`,
+  `setRegionStep`, `regionChanged`, `currentRegion`, `deliverAnalysis`, `waitForAnalysis`, `loadSoundFilePart`,
+  `requestOverview`, `getOverview`, `historySize`; SoundMeta in applyStep and deliverSoundLoads; the cache's sync.
+- `Source/doc/ClipDocument.cpp`: `sameNonParam` leaves the SMPL analysis cache out.
+- `Source/ui/strip/PartChips.h/.cpp` (new), `PartPicker.h/.cpp` (new, a file plan 1.1 does not list),
+  `WaveStrip.h/.cpp` (the file line's words, the chip row, the hover box, the picker), `WavePeaks.h/.cpp` and
+  `ui/roll/NoteDecor` (peaks of a 16-bit sound), `ui/tabs/SoundTab` (Detect, Key, Scale, Scale lock),
+  `ui/MainView` (the strip's height with its chip row, the Sound tab's refresh), `PluginEditor.cpp` (a report's
+  toast length).
+- Tests: `Tests/plugin/SongRig.h` (WAV files written at test time chunk by chunk, a one-minute song),
+  `test_long_file.cpp`, `test_part_load.cpp`, `test_region_precision.cpp`, `test_root.cpp`,
+  `Tests/ui/test_part_chips.cpp`, `test_m7_snapshots.cpp`; `test_state_clip.cpp` and `test_strip.cpp` updated.
+
+### Decisions and deviations
+
+- **16-bit above 3 minutes (plan 8.2 #14).** A loaded part longer than 180 s is kept as 16-bit samples, made chunk by
+  chunk from JUCE's floats with `toInt16` (round half away from zero of v x 32768, kept inside -32768 .. 32767, NaN
+  to 0). A 16-bit file comes back to its own values; a 24-bit or float file loses what is below -96 dB. A sample s is
+  read as `s * 2^-15`, which is exactly the float JUCE's 16-bit reader gives, so every read of a 16-bit sound is the
+  same double the same read of a float sound holding s / 32768 gives (`sixteenBitReadsLikeFloat` checks readAbs, the
+  fast path, both seams, Hold, Bounce, seamRho and the four engines bit for bit). Float sounds take the same
+  expressions as before, so every parity case stays bit for bit.
+- **The format is picked once per call or per run.** readAbs branches once; PlainStretch keeps both pointer pairs and
+  a flag set once per run, so its per-sample read has one predictable branch. No template of the voice code was
+  needed.
+- **A part is at most 10 minutes, from where it starts to 10 minutes on or the end of the file.** Plan 3's state test
+  loads a 12-minute file "from minute 6", which is 6 minutes, so a part is not always 10 minutes long. A project's
+  range is decoded again as it is (capped at 10 minutes, only a hand-made state could ask for more).
+- **The part picker** (question 9.3's "offers to load a part"): it opens by itself when the user loads a new file
+  longer than 10 minutes (StrandLock loads the first 10 minutes meanwhile, so something plays at once), and from the
+  strip's "Load another part..." chip. The whole file is drawn from an overview the worker reads only when the picker
+  asks (a job), never at load time, so a project load never reads a whole long file twice. A part picked from the
+  same file does not open the picker again.
+- **When the analysis runs (decision 1).** A file's load analysis runs on the worker before the sound is handed on,
+  so the load's one undo step already holds the Region U2 chooses and the SMPL cache. A starter's parts are made
+  right after it is handed on (a job result), so a state load's wait for its starter (7.4 decision 3) never waits for
+  them. Detect, a root suggestion for a new Region and the overview are jobs between sounds. A newer sound request
+  stops a decode, an analysis or a job at its next question, and its result is dropped.
+- **Decision 2 against the prototype's runDetect 'auto'.** After a load the prototype sets a short file's root at once;
+  StrandLock offers it as "Use A1 as the root" (suggestions never apply themselves). "Detect pitch & key" (the button)
+  sets the root (no undo step) and the key (one undo step), as the prototype's 'button' path does. The prototype's
+  "same root" rule (within 20 cents of the current root: no suggestion) covers the load's suggestion too.
+- **U2 inside the load's step.** The prototype puts a song's Region on a suggested part after the load and folds it
+  into the load's undo step; here the part is known before the hand-over, so the load's patch carries it. With no
+  part suggested, M2's 4 s from 35 % in stays.
+- **The SMPL cache describes the file, not an edit.** `sameNonParam` leaves it out, so a cache that arrives later never
+  makes or splits an undo step; Undo keeps the newest cache known for a file (`keepCacheOf`); a project's file that is
+  analysed after its load (its cache was empty, or held what this version cannot read: a part kind above 3, an unknown
+  scale, a key above 11, a number out of range) gets the cache into SMPL (`syncSound`). Detect's pitch and key replace
+  the cached ones, as the prototype's S.pitch and S.key do. The key's r is not stored (SMPL has no field for it).
+- **SoundMeta (plan 2.4).** Each sound's own root and cents are remembered when it leaves (whatever moved them: Detect,
+  a chip, the Sound tab's Root knob, automation) and when Detect or a chip sets them; Undo or Redo that changes the
+  sound writes that sound's own root and cents instead of the steps' values. A user load still sets 60 and 0 (plan
+  2.4's sound load), unlike the prototype's switchSound, which gives a starter back its remembered root.
+- **E3 is a chip on the strip** ("Try Cloud", or "Cloud suits this sound (on)" with the accent border; no light-bulb
+  glyph, which the plugin's fonts do not have). The prototype also shows it as a line on the Sample tab; that line is
+  not built here (the strip's chip does the same job).
+- **The suggestion line also has "Loop cleanly"** (the prototype's trimRegion: a short file whose whole Region loops,
+  the end pulled in, one undo step "Trim the Region").
+- **The chips' place.** A file's chips get a row of their own under the file line (the strip grows 26 px, the roll
+  gives them up); a starter's one "Parts" chip sits beside the file line, as the prototype's strip shows it.
+- **A click on a chip never makes the chips again inside that click**: they are made again on the editor's next tick
+  (a chip deleted during its own click would crash).
+- **Toasts of the processor's own** (Detect's sentence, "Root A1 +23 cents: the notes now play this part in tune",
+  the engine's why) come through `takeSoundReports` with `LoadReport::toastMs`.
+- **The Sound tab's Key, Scale and Scale lock** are INST state, one undo step each with the prototype's labels ("Key",
+  "Scale", "Scale lock on" / "off"); the scale names in full words (sl-ui.js scaleLabel).
+- **Two M2 checks follow M7's rules**: `sampleFileRecord` (the cache is filled on the worker; a song's Region is the
+  part U2 chooses) and the strip's file line (it now ends with what listening found).
+- **Drag sources (decision 4).** M2's drop handling stays. Only Cubase can test these, for V4's checklist: a file from
+  MediaBay, a clip from the Pool, a trimmed audio event from the project window, and a file longer than 10 minutes
+  (the picker should open).
+
+### Tests
+
+| Test | Plan row | What it checks |
+|---|---|---|
+| `engine/sixteenBitReadsLikeFloat` | long files | 16-bit samples s against floats holding s / 32768: readAbs (4000 reads, in, at and past the edges), the fast path and readReg (post and pre seams, Hold, Bounce) and seamRho, bit for bit; Tape, Voice, Cloud and Lock, half a second each, bit for bit; one sample one step away renders other bits (the control). Runs under the sanitizers. |
+| `songs/longFileLoadsAs16Bit` | long files | a 10-minute stereo 48 kHz 16-bit WAV made at test time: decoded on the worker (another thread, which allocated the samples), peak live on the worker at most 115.2 MB + 16 MB, the message thread under 4 MB meanwhile, the audio thread 16-bit with 115.2 MB of samples, 0 allocations and frees in the 40 blocks of the swap and a note on it, 4 x 4096 frames of each channel equal to JUCE's reader, SMPL's whole range, the cache filled. |
+| `alloc/sixteenBitSwapAllocatesNothing` | long files | a 200 s 16-bit sound swapped in while a note plays: 0 allocations (also on the Debug CRT, which counts every heap call). |
+| `songs/newerRequestsStopTheWorker` | decision 1 | two Detects asked while the worker is busy: only the newer runs; a Detect then a new sound: the Detect gives nothing and the sound plays; a file overtaken while the worker reads it stops at its next question and never plays. |
+| `songs/partOfLongFileLoads` | part load | a 12-minute file: its first 10 minutes by itself (the toast says so); the part from minute 6 (6 minutes, to the end) as one undo step, its frames the file's; SMPL's range through its record; a project saved and reloaded: the same range, every frame, the Region and the part chips the same, read from the cache, the state re-saved byte-identically; Undo brings the first part back; a part from minute 1 is 10 minutes. |
+| `songs/partPickerLoadsThePart` | part load | the picker opens by itself, draws the overview, moves to minute 6 ("6:00 to 12:00 of 12:00"), loads that part, closes, and the file line names the part. |
+| `songs/regionPrecisionOneBarPart` | Region precision | a one-bar part (2 s) at about 80 % of a 10-minute 48 kHz file, set the part chip's way (one undo step, exact edges); a live Tape note at the root: passes 2, 3, 9, 33 and 64 repeat pass 1 bit for bit exactly k periods on (0 frames of drift), where float32 edges would be at least 2 frames a pass off (the control shows no repeat at 63 float32 periods); host automation moves the start: readInst plays the parameter's value, the end keeps its exact edge, and the loop follows the new length. |
+| `songs/rootSuggestionsAndDetect` | root | a tone at A1 +23 cents loads at C3 with a root suggestion; accepting it, and Detect, set root A1 +23 cents with 0 undo steps; the suggested key A major is 1 undo step; Detect on a built-in sound does nothing; Undo of a sound change brings the tone back with its own root and cents, Redo the Saw at C3. |
+| `songs/analysisCacheReloadsAsSaved` | root | white noise: no clear pitch, no key; the cache says hasPitch 0, hasKey 0; a reload reads them as such and analyses nothing, and the strip says "no clear pitch"; the same project with its cache emptied is analysed again (the control). |
+| `ui/partChipsSetTheRegion` | decision 2 | a one-minute song opens on pickPart's part inside its load's step; every part has a chip, the Region's lit; a chip sets the Region in one undo step; a root suggestion only for its Region; Use the whole file is one step; Undo; a hovered chip's hint. |
+| `ui/suggestionLineDoesWhatItSays` | decision 2 | a short tone: "Use A1 as the root" (no step), "Use key A major" (one step, the Sound tab shows A), "Loop cleanly" (one step), "Voice suits this sound (on)" (hides); white noise: "Try Cloud" (one step), no key offered. |
+| `ui/starterPartsChip` | D10 | the Saw's parts behind one "Parts" chip beside the file line; its menu's first part is one undo step and the chip then names it. |
+| `ui/m7Pictures` and the `m7_*` snapshots | snapshots | the chips on a song with one hovered, the suggestion line, the part picker, the Sound tab; dark and light (the chips at 200 % too). |
+
+### Hand-off for V3
+
+- **Embedding the loaded part.** SAUD encoding 2 (16-bit PCM interleaved, the loaded range) can be written straight
+  from a 16-bit sound's `L16`/`R16` (`SoundView::left16`, `format`). A float sound (3 minutes or less) needs its own
+  conversion. Encoding 0 (the original bytes) reloads through the same part rule: `decodeFile` takes the project's
+  `SampleFile` (`expected`) and decodes its `loadedStartFrame` / `loadedFrames` again; it reads from a `juce::File`
+  today, so decoding the embedded bytes needs it to take an input stream (or a temporary file).
+- **The cache.** Every committed file sound carries its analysis in `SoundView::analysis` and `ref.file.cache`. A
+  project load with a readable cache is not analysed again; one without is analysed before it is committed, and the
+  processor's `syncSound` puts the cache into the document's SMPL. Keep that when the sound comes from the library or
+  the embedded bytes.
+- **Measuring memory on the worker.** `SampleManager::workerProbe` runs on the worker around each sound request; an
+  `alloc::Scope` made there counts what the worker allocates (see `longFileLoadsAs16Bit`).
+- **Files of the tests.** `Tests/plugin/SongRig.h` writes WAV files chunk by chunk at test time and reads frames back
+  as JUCE's reader gives them.
+
+### For the architect
+
+- Plan 1.1's `ui/strip` folder has a fifth file, `PartPicker` (the part picker).
+- Plan 3 "The loaded range": a part runs from where it starts to 10 minutes on or the end of the file, so it can be
+  shorter than 10 minutes (its own state test loads 6 minutes from minute 6 of a 12-minute file).
+- Plan 8.2 could take rows for: the short file's root offered as a chip instead of set at once (decision 2 against
+  runDetect 'auto'); a song's first Region inside the load's own undo step (U2, known before the hand-over); the
+  16-bit rounding (round half away from zero of v x 32768).
+- E3's line on the Sample tab (the prototype shows the suggestion there as well as on the strip) is not built.
