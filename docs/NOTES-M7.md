@@ -432,7 +432,9 @@ answer, the Region excerpt (FLAC 24-bit, never over 50 MB), the opt-in library a
   per test run in the test runner). Off unless turned on (UserSettings, per person); on, the file playing now and every
   file loaded after are copied on the worker (from the bytes in memory, or from the path hashed while copied, through a
   `.part` file renamed when whole), once each. A library file is used only when its SHA-256 is the project's. The Sound
-  tab shows the library's size, measured on the worker after each copy.
+  tab shows the library's size, on or off: measured on the worker once when the tab first needs it and after each copy.
+- **`jobsRun ()` still counts only Detect and root-suggestion jobs** (as its comment says); embed and library jobs are
+  jobs for `waitJobs` but not runs, so V2's job counts stay what they were.
 - **Locate** loads the chosen file with no patch: the Region (and its exact edges), the root, every parameter and the
   part loaded stay. The same file (its SHA-256) keeps the project's record and analysis with the new path; another file
   is a new record (analysed, asked about again) that keeps the project's part when it is long enough, and the toast says
@@ -448,3 +450,34 @@ answer, the Region excerpt (FLAC 24-bit, never over 50 MB), the opt-in library a
   a project saved with a small file reopened after the file is moved (it plays from the project, no banner); a 20-50 MB
   file (the question once, and not again after saving and reopening); a file moved with Keep off (the Locate banner, and
   Locate sample... brings it back with every setting); the library switch (a moved file found there).
+
+### Tests
+
+| Test | Plan row | What it checks |
+|---|---|---|
+| `state/saudChunkRecord` | embedding | the SAUD record's fields read back in place; a newer version's trailing bytes kept; an unknown encoding reads (kept, never played); every prefix shorter than the payload and a byteLength past its end refused; a container writes SAUD only when there is one, after SMPL, byte for byte |
+| `state/embeddedWavRoundTrip` | embedding: a WAV made at test time | a 2.1 MB stereo 16-bit TestSignals WAV (seeds 7 and 9) kept whole, the bytes identical, the header's channels, rate and range; the file moved: it plays from the project, every sample bit for bit, the toast says where, no banner, re-saved byte-identically; a copy with one byte changed is refused (its SHA-256) and the Locate banner shows (the control) |
+| `state/embedForwardCompatibility` | kept unreadable blobs and forward compatibility with SAUD | an unknown encoding: kept byte for byte with no banner, still written after a parameter edit, gone after another sound; 8 trailing bytes: plays and re-saves byte-identically; a bad CRC: kept with the banner, both gone after another sound; formatVersion 2 with a SAUD: kept whole with the banner; 2000 seeded mutations (half with CRCs made anew): no exception, every parameter in range, every save sound |
+| `songs/embedAnswerSavedOnce` | embedding: the saved answer | a 21.2 MB file asks (the text names it and its size); until answered the Region is kept; No: no SAUD, SMPL embedAnswer 2, no undo step, no second answer; save and load: no second question; another file: asked again; Yes: the whole file kept, bytes identical; Undo and Redo keep each file's answer; the switch off: no question, no SAUD |
+| `songs/embedFortyFiveMegabytes` | embedding: one 45 MB case | 44.9 MB kept whole after Yes; with the file gone it loads from the project, every sample the same; save and load timed (target 2 s, gate 10 s); the load's allocations inside plan 3's limits (51 MiB, 2 x the blob + 64 MiB) and the SAUD held once (1.25 x the blob) |
+| `songs/regionExcerptWithOriginalMissing` | embedding: a Region excerpt, FLAC 24-bit within 2^-23 | a 25 MB float WAV, Just the Region on 0:10 .. 0:14: SAUD encoding 1 covers it with up to 1 s either side; decoded apart from the plugin it is within 2^-23 of the original floats (and differs: real rounding), one frame off it is far off (the control); with the file gone the excerpt plays bit for bit, the banner says part was not saved; the Region maps onto the excerpt, automation before it plays its first edge and after it its last; for another sample the Region is the parameters' own (the control) |
+| `songs/noExcerptOverFiftyMegabytes` | embedding: no excerpt above 50 MB | a 52 MB white-noise file (no question): the whole file as the Region is not kept, the toast and the Sound tab say so; a 2 s Region of it is kept (the control) |
+| `songs/largestClipWithFiftyMegabyteEmbed` | state limits with M7 | the largest editable clip (4096 notes, one byte under 32 MiB) and a 49.99 MB file kept whole save together inside kMaxTotalBytes and load in another instance, re-saved byte-identically |
+| `songs/partLoadedFileReloadsEverywhere` | embedding: the part-loaded 12-minute file | loaded from minute 6, the Region on a part chip, the library on: the SAUD header names the part; reloaded from its path, from the library (moved, on) and from the project (off): every frame, the Region's bits and the chips the same (from the cache), re-saved byte-identically; with neither copy it is missing (the control) |
+| `songs/locateOrder` | locate order | the library (on) before the project's copy, the project's copy before the banner; the banner keeps every setting (every parameter, the exact edges, the SMPL record: re-saved byte-identically); a library that is off is not looked in (the control); in the editor, Locate sample... with the moved file plays it with every setting, one undo step "Locate a tone.wav", the banner goes; Undo brings the banner back |
+| `songs/libraryCopiesByHash` | the library | off by default, nothing copied; on: the file playing copied as its first 16 hex digits + ".wav", its size measured; the same file not copied twice; another file copied; the Sound tab's line shows the size |
+| `songs/locateAnotherFile` | Locate | another file: plays with every setting kept, its own record and analysis, the toast says it may differ; the project's switch stays, the new file has no answer yet |
+| `ui/m7EmbedPictures` and the `m7_locate_*`, `m7_question_*`, `m7_part_kept_*`, `m7_keep_row_*` snapshots | (pictures) | the Locate banner, the question with Yes / No / Just the Region in that order, a part kept (the strip shows the excerpt), the Sound tab's keep and library rows; dark and light |
+
+### For the architect
+
+- Plan 1.1's `ui` folder has a new file, `SoundBanner` (the sound line: the question, Locate, a part kept).
+- Plan 3 could say what a save holds before the 20-50 MB question is answered (V3: the Region, as above 50 MB), that
+  MB there is 1,000,000 bytes (the largest file kept whole is 49,999,963 bytes, with SAUD's 37-byte header), and that
+  encoding 2 is read but never written by v1.
+- Plan 3's switch has no field in a starter's SMPL record, so a project on a built-in sound opens with it on.
+- Plan 3's limits row ("with M7, plus a 50 MB embed") runs in the `songs` group (Release, both platforms), not `state`:
+  the case holds about a gigabyte at its peak, too much for the sanitizer job.
+- M0's `state/StateFormat` changed (plan 7.9 lets V3 touch M2-M6 files; this one is M0's): SAUD is a written but optional
+  tag, a container is made in one buffer, and a decoded SAUD is written again from its payload rather than kept twice.
+- Plan 8.2 #17 (embedding, library, Locate) is now built.

@@ -154,9 +154,10 @@ namespace sl::ui
 
     juce::String SoundTab::libraryText (bool on, std::int64_t bytes)
     {
-        const juce::String size = bytes < 0 ? juce::String ("not measured yet") : juce::String ((double) bytes / 1.0e6, 1) + " MB";
-        return on ? "On: copies of your sound files in Documents\\StrandLock\\Samples (" + size + ")"
-                  : juce::String ("Off: no copies are made (the library holds ") + size + ")";
+        const juce::String size = juce::String ((double) bytes / 1.0e6, 1) + " MB";
+        if (on)
+            return "On: a copy of each sound file you load goes to Documents\\StrandLock\\Samples" + (bytes >= 0 ? " (" + size + " there now)" : juce::String());
+        return "Off: no copies are made" + (bytes >= 0 ? " (the library holds " + size + ")" : juce::String());
     }
 
     void SoundTab::refresh()
@@ -191,6 +192,8 @@ namespace sl::ui
             moved = resizeItem (c, juce::jmax (40, c.preferredWidth() + 2)) || moved;
         };
         show (*keepStatus, juce::String::fromUTF8 (processor.getEmbedStatus().c_str()));
+        if (processor.getLibraryBytes() < 0)
+            processor.measureLibrary();   // once: the line shows the library's size, on or off
         show (*libraryStatus, libraryText (processor.isLibraryOn(), processor.getLibraryBytes()));
         if (moved)
             layoutChanged();

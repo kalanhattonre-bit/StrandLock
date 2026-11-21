@@ -607,8 +607,12 @@ namespace sl::doc
 
     std::uint64_t SampleManager::copyToLibrary()
     {
-        if (! isLibraryOn())
-            return 0;
+        return isLibraryOn() ? measureLibrary() : 0;
+    }
+
+    std::uint64_t SampleManager::measureLibrary()
+    {
+        // A library job copies the sound playing now when the library is on, and always measures the library.
         Job j;
         j.kind = JobKind::library;
         {
@@ -1529,7 +1533,6 @@ namespace sl::doc
         {
             {
                 const std::lock_guard<std::mutex> hold (lock);
-                ++jobRuns;
                 embedResults.push_back (std::move (res));
             }
             if (onJobDone)
@@ -1697,7 +1700,6 @@ namespace sl::doc
 
     void SampleManager::runLibrary (const Job& j)
     {
-        const SoundView& v = *j.view;
         const auto folder = libraryFolder();
         auto measure = [this, &folder]
         {
@@ -1708,6 +1710,7 @@ namespace sl::doc
             librarySize.store (total, std::memory_order_release);
         };
 
+        const SoundView& v = *j.view;
         const auto& f = v.ref.file;
         if (isLibraryOn() && v.ref.kind == state::kSampleFile && ! v.missing && f.fileSize > 0)
         {
@@ -1755,10 +1758,6 @@ namespace sl::doc
             }
         }
         measure();
-        {
-            const std::lock_guard<std::mutex> hold (lock);
-            ++jobRuns;
-        }
         if (onJobDone)
             onJobDone();
     }

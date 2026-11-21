@@ -293,6 +293,9 @@ public:
     /** The bytes the library holds (-1 until the worker has measured it). Any thread. */
     std::int64_t getLibraryBytes() const noexcept { return sampleManager->libraryBytes(); }
 
+    /** Asks the worker to measure the library, once (the Sound tab shows its size, the library on or off). */
+    void measureLibrary();
+
     /** What the sound line under the top bar says now: the 20-50 MB question; the Locate banner (the project's file was
         found nowhere: every setting is kept until a file is chosen); or that only part of the sound was kept. */
     struct SoundNotice
@@ -520,6 +523,7 @@ private:
     std::pair<double, double> embedRegion { -1.0, -1.0 };   // a Region excerpt waits for the Region to settle
     double embedRegionSince = 0.0;
     std::atomic<bool> keepInProject { true };      // the project's switch (a file's SMPL holds it too)
+    bool libraryMeasureAsked = false;              // message thread: measureLibrary asked the worker once
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StrandLockProcessor)
 };

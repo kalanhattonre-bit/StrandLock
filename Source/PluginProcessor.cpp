@@ -1434,6 +1434,13 @@ bool StrandLockProcessor::isLibraryOn() const
     return userSettings->libraryOn();
 }
 
+void StrandLockProcessor::measureLibrary()
+{
+    if (libraryMeasureAsked)
+        return;
+    libraryMeasureAsked = sampleManager->measureLibrary() != 0;
+}
+
 void StrandLockProcessor::setLibraryOn (bool on)
 {
     userSettings->setLibraryOn (on);

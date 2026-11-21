@@ -387,8 +387,11 @@ namespace sl::doc
         juce::File libraryFileFor (const state::SampleFile& f) const;
 
         /** A job: copies the file playing now into the library when it is on and the copy is not there yet (from the
-            bytes in memory, else from its path, its SHA-256 checked), then measures the library. */
+            bytes in memory, else from its path, its SHA-256 checked), then measures the library. 0 when the library is off. */
         std::uint64_t copyToLibrary();
+
+        /** The same job whether the library is on or not: it measures the library (and copies only when it is on). */
+        std::uint64_t measureLibrary();
 
         /** The bytes the library's files take, measured by the last library job (-1 before the first). */
         std::int64_t libraryBytes() const noexcept { return librarySize.load (std::memory_order_acquire); }
