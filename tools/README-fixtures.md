@@ -61,7 +61,7 @@ default lanes, `"NaN"` strings), rebuilt the inputs from the JSON alone, ran the
 | support/signals.json | 12 | 33,888 |
 | engine/defs.json | 6 | 33,165 |
 | engine/renders.json | 73 | 986,629 |
-| analysis/detect.json | 28 | 12,546 |
+| analysis/detect.json | 34 | 16,134 |
 | ui/theme.json | 2 | 4,279 |
 | ui/inspector.json | 408 | 106,025 |
 | ui/sample-rules.json | 382 | 189,014 |
@@ -92,7 +92,7 @@ Strand Demo at res 256 is 176 KB inside snapshots.json, as the plan measured.
 | `support/signals.json` | ports the prototype tests' signal makers (`lcg`, `tone`, `noise`, `chord`, `formantTone`, `smoothNoise`, `rampSource`, `dc`) exactly, so engine and analysis cases can name them. |
 | `engine/defs.json` | uses the same engine constants: control rate, head and grain caps, budgets per sample rate, head tunings, the Hann and fade tables, the seed salts, and the engine's own instrument clamps. |
 | `engine/renders.json` | plays the same audio: 73 renders (36 tagged `needs: "tape"` for M2, 37 `"grains"`) covering Tape (every Motion, Scatter with two seeds, Refresh stutter, Region loop with both seam fades, Hold, Stop), Path kind, chains, glide 0, restart, an engine change inside a chain, chase, tempo change, transport jump, stop/start, loop passes, live keys (legato, sustain, mod wheel to Travel and Heads, bend, polyphony steals, all off), Voice at C1/C3/C5 and with formant, Cloud (Spray, Skip, Refresh, each grain backwards, Tape switch), Lock from noise and from a chord, fractional and 8 heads, Drift, Head tune, the voice budget at 44.1, 48 and 96 kHz, live Scatter while the host plays, a 44.1 kHz source in a 48 kHz session, Strand Demo, three recipes, random block sizes, a note deleted while playing, an instrument change while playing and an engine-only snapshot. Each carries a whole-render hash, per-256-sample RMS and peak, 256-frame windows, voice/grain stats every 1024 samples and the display every 4800. |
-| `analysis/detect.json` | detects the same pitch, key and suggested parts on the starters, the test signals, silence, and four long files joined from them. |
+| `analysis/detect.json` | detects the same pitch, key and suggested parts on the starters, the test signals, silence, and four long files joined from them. Since M7 V1 also at 96, 32 and 22.05 kHz (the 11 kHz copy's other steps) and on the 5-minute song of `tests/test-analysis.js` (its own `buildSong`, read from that file). |
 | `ui/theme.json` | has the 77 colour tokens of each theme with the prototype's exact values. |
 | `ui/inspector.json` | parses and prints bar positions, lengths, note names, rates and typed lane values like the inspector, and simulates what head 1 reads for the note thumbnails. |
 | `ui/sample-rules.json` | fades the same Sample-tab controls with the same reasons, finds the same contexts and grain kind, and makes the same engine suggestion and default part. Since M6 also the whole sound preset x recipe x clip preset product (864 pairs), as one digest per pair. |
@@ -155,7 +155,10 @@ The C++ test must drive its engine exactly like this, or the hashes cannot match
 - **Format:** the 41 values per lane are crossed only with the settings that lane depends on (heads 1/3/7.5; the four
   grain engines plus edges; Refresh smooth/free/sync at 120 and 87 bpm; Travel speed/path), plus the Float32 band edges.
 - **Analysis:** the plan names no long input for part suggestions, so four 15-20 s files are joined from starters,
-  signals and silence (`{concat: [...]}`, `{silence: s, sampleRate}`).
+  signals and silence (`{concat: [...]}`, `{silence: s, sampleRate}`). M7 V1 appended six cases: a chord, a tone, noise
+  and two joined files at 96, 22.05 and 32 kHz (every earlier case is at 44.1 or 48 kHz, where the 11 kHz copy's step
+  is 4), and `{song: {seconds, sampleRate, sections, hits}}`, the 5-minute song of `tests/test-analysis.js` made by
+  that file's own `buildSong` and `hash` (read from it by name, so the header now also hashes `tests/test-analysis.js`).
 - **Engine renders:** windows are placed at note starts, seams, joints, jumps and changes for each case (at most 4).
   Transport, chain and live cases play the Tape engine so M2 can run them; eight Voice cases have Tape twins
   (`tape-...`).
