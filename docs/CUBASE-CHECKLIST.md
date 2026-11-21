@@ -563,10 +563,10 @@ What is new, and where it is:
    double-click to put the default back, or click the value under the knob and type one (for example, with Lock on,
    type 4.3 into **GRAIN**: it stays 4.3). After each change click **Undo** once: does each change undo in one step?
    Hold the mouse over each control: does the hint bar say what it does? Three knobs work the older way:
-   **REGION START**, **REGION END** and **LOOP FADE** take Ctrl (not Shift) for fine steps, have no value to type
-   into, and show nothing in the hint bar. With **Keys** on, click a knob's value so its box opens and press Ctrl+Z
-   and Ctrl+D: nothing happens on the roll while the box is open (as in the inspector's boxes, M4 step 10). After
-   Enter they work again.
+   **REGION START**, **REGION END** and **LOOP FADE** take Ctrl (not Shift) for fine steps and have no value to type
+   into, and the hint bar keeps its usual line over them. With **Keys** on, click a knob's value so its box opens and
+   press Ctrl+Z and Ctrl+D: nothing happens on the roll while the box is open (as in the inspector's boxes, M4 step
+   10). After Enter they work again.
 
 6. **What the faded controls mean.** On the default settings (**Voice**, **HEADS** at 1, **REFRESH** on **Smooth**,
    **▶ Forward**) several controls are faded: **SPREAD** and **HEAD TUNE** (one head), **SPRAY** (Voice), **REFRESH

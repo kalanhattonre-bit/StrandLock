@@ -602,7 +602,12 @@ R6UI-1 (the knob boxes' keys), M6R-PAR-2 and R6UI-3 (the audition outside the Re
   on 2b925e7 is green on every job and step the first time (figures below); its 127 pictures are byte for byte main's.
 - Done: the checklist (steps 4, 5 and 11), these notes, and the 8.08-beat hand-over case's negative control (the run
   skipped it: the test asked for cases under 4.5 beats instead of all but 4.5).
-- Next: a green run on this head, then the fast-forward of main and CI on main.
+- Done: run 44828414157 on e0d73b7 (the notes and the 8.08 control) is green on every job and step (figures below).
+- Done: after a cut-off, the pass was continued from this branch. Every finding, fix and new check was read again
+  against the code and the JUCE source; nothing changed but this progress, the figures and one checklist phrase
+  (step 5: the hint bar keeps its usual line for the three older knobs; "show nothing" read as an empty bar).
+- Last: main is fast-forwarded to the commit that adds these lines once its own run is green, and the run on main
+  builds the VST3 for Kalan.
 
 ### The findings
 
@@ -695,7 +700,7 @@ R6UI-1 (the knob boxes' keys), M6R-PAR-2 and R6UI-3 (the audition outside the Re
 - F1 (`previewHandsOverOnTheBeat`, both platforms): at 120 and 87 bpm, after 4.05, 3.95, 8.08 and 4.5 beats of Preview,
   every start after Cubase's Play in [0, 1) sample of Cubase's beat (7 or 8 starts each), one restart each; the cursor
   move to 0.05 beat behind Preview's clock: 7 starts on the new clock's beat; the negative controls (the clock carried
-  on, for 4.05, 3.95 and the cursor move; 8.08's from the next run) fail as they should.
+  on, for 4.05, 3.95, 8.08 and the cursor move) fail as they should (8.08's from run 44828414157).
   `previewRestartStopsFirst`: the flag only on Cubase's first playing block after a Preview
   block and on a cursor move while Preview plays; that block sends a stopped transport, then the start at beat 0, both
   before it renders. `previewNeverWhileHostPlays`: the block at ppq 8 restarts, once.
@@ -714,3 +719,9 @@ R6UI-1 (the knob boxes' keys), M6R-PAR-2 and R6UI-3 (the audition outside the Re
   Play (each a restart); 0 allocations and 0 frees in processBlock.
 - The editor's tick: `alloc/hostChangesWithEditorOpen` 1016 ticks in the Debug-CRT run, 1593 in Windows Release, 1716
   on Linux (T3: 1028, 1594, 1710).
+- Run 44828414157 on e0d73b7 (the 8.08 control, the notes and the checklist), green on every job and step: Windows
+  Release 2034 checks in 350 tests and Linux Release 2026 in 350 (the two new checks: 8.08's negative control at 120
+  and 87 bpm, both passing); the sanitizers' groups 872 checks in 146 tests and 142 in 20; the Debug-CRT allocation run
+  41 checks in 8 tests, 0 JUCE assertions; the Debug pictures 0 JUCE assertions; pluginval strictness 10 SUCCESS; the
+  fixture check passed (26 files, 4,958,478 bytes). Its 127 pictures are byte for byte main's (md5 of each file); the
+  Sample tab's (`m6_sample_tab_dark`) looked at. The editor's tick: 1033 (Debug-CRT), 1598 (Windows), 1706 (Linux).
