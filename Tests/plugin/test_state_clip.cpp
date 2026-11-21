@@ -622,8 +622,9 @@ SL_TEST ("state", sampleFileRecord)
                && f.fileSize == (std::uint64_t) wavFile.getSize() && f.sha256 == digestOfFile (wavFile),
            fmt ("SMPL kind 1: the path, the name, %d bytes and the SHA-256 of those bytes (%s)", (int) f.fileSize, doc::toHex (f.sha256).substr (0, 16).c_str()));
     check (juce::exactlyEqual (f.fileSampleRate, sr) && f.channels == 2 && f.fileFrames == left.size() && f.loadedStartFrame == 0
-               && f.loadedFrames == left.size() && f.keepInProject == 1 && f.embedAnswer == 0 && f.cache.analysed == 0 && f.cache.parts.empty(),
-           fmt ("48 kHz, 2 channels, %d frames, the whole file loaded, keep in project on, the analysis cache empty", (int) f.fileFrames));
+               && f.loadedFrames == left.size() && f.keepInProject == 1 && f.embedAnswer == 0 && f.cache.analysed == 1,
+           fmt ("48 kHz, 2 channels, %d frames, the whole file loaded, keep in project on, the analysis cache filled on the worker (M7: %d parts)",
+                (int) f.fileFrames, (int) f.cache.parts.size()));
 
     const auto sound = p.getCurrentSound();
     check (sound != nullptr && ! sound->builtIn && ! sound->missing && sound->frames == (std::int64_t) left.size() && sound->stereo
@@ -643,7 +644,8 @@ SL_TEST ("state", sampleFileRecord)
     check (qs != nullptr && ! qs->builtIn && ! qs->missing && samplesAre (qs->left, left) && samplesAre (qs->right, right) && saveOf (q) == saved,
            "a project reload decodes the path again: the same samples, and the state re-saves byte-identically");
 
-    // A song: longer than 20 s, so its Region starts as 4 s from 35 % in.
+    // A song: longer than 20 s, so its Region starts on the part the suggestions offer first (M7, U2: a held note,
+    // then a loop, a quiet texture, a hit), or as 4 s from 35 % in when there is none (M2's rule, which M7 replaces).
     {
         const auto song = dir.getChildFile ("song.wav");
         const double rate = 8000.0;
@@ -651,15 +653,30 @@ SL_TEST ("state", sampleFileRecord)
         StrandLockProcessor s;
         s.loadSoundFile (song);
         s.waitForSounds();
-        const double a = 0.35, b = 0.35 + 4.0 / 30.0;
+        double a = 0.35, b = 0.35 + 4.0 / 30.0;
+        std::string which = "4 s from 35 % in";
+        const auto& parts = s.getSuggestions().analysis.parts;
+        for (const char* kind : { "steady", "loop", "quiet", "hit" })
+        {
+            const auto it = std::find_if (parts.begin(), parts.end(), [kind] (const analysis::Part& q)
+                                          { return std::string (analysis::partKindName (q.kind)) == kind && q.end > q.start; });
+            if (it != parts.end())
+            {
+                a = it->start;
+                b = it->end;
+                which = "the suggested part " + it->label;
+                break;
+            }
+        }
         const auto si = s.getInstState();
         const auto reports = s.takeSoundReports();
         bool said = false;
         for (const auto& r : reports)
             said = said || r.message.find ("song") != std::string::npos;
         check (juce::exactlyEqual (plainOf (s, params::P::regionStart), (float) a) && juce::exactlyEqual (plainOf (s, params::P::regionEnd), (float) b)
-                   && si.regionStartExact == a && si.regionEndExact == b && said,
-               fmt ("the Region is %.6f .. %.6f (4 s from 35 %% in), the exact edges kept in INST, and the toast says so", si.regionStartExact, si.regionEndExact));
+                   && std::memcmp (&si.regionStartExact, &a, sizeof a) == 0 && std::memcmp (&si.regionEndExact, &b, sizeof b) == 0 && said,
+               fmt ("the Region is %.6f .. %.6f (%s), the exact edges kept in INST, and the toast says so", si.regionStartExact, si.regionEndExact,
+                    which.c_str()));
     }
 
     // Longer than 10 minutes: its first 10 minutes (question 9.3).

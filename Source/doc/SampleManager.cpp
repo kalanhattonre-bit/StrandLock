@@ -812,8 +812,9 @@ namespace sl::doc
         }
         else if (partStart.has_value() && length > maxFrames)
         {
-            start = static_cast<juce::int64> (std::min<std::uint64_t> (*partStart, static_cast<std::uint64_t> (length - maxFrames)));
-            count = maxFrames;
+            // the part the user picked: from there, 10 minutes or up to the end of the file
+            start = static_cast<juce::int64> (std::min<std::uint64_t> (*partStart, static_cast<std::uint64_t> (length - kMinFileFrames)));
+            count = std::min (maxFrames, length - start);
         }
         if (count < kMinFileFrames)
         {
@@ -1103,6 +1104,7 @@ namespace sl::doc
         auto handOver = [&] (Made m, double a, double b, std::optional<RootHeard> heard, std::optional<analysis::Part> part)
         {
             m.view->request = r.id;
+            m.view->origin = r.origin;
             report.ok = true;
             report.name = m.view->name;
             if (r.origin == LoadOrigin::user)

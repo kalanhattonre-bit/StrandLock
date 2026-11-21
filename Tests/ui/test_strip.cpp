@@ -357,7 +357,8 @@ SL_TEST ("ui", stripLoadsSounds)
     auto s = proc.getCurrentSound();
     check (s != nullptr && ! s->builtIn && s->name == "strip chord.wav" && s->frames == 132300 && strip.shownSound() == s.get(),
            fmt ("the chord loads: %d frames, and the strip shows it", s != nullptr ? (int) s->frames : 0));
-    check (strip.headerText() == "strip chord.wav" + dot() + "3.00 s" + dot() + "root C3",
+    // M7: what listening found follows (" · key C major"), and nothing retunes by itself (the root stays C3).
+    check (strip.headerText().startsWith ("strip chord.wav" + dot() + "3.00 s" + dot() + "root C3"),
            fmt ("the file line: \"%s\"", strip.headerText().toRawUTF8()));
     check (view.getToastText() == "Loaded strip chord.wav", fmt ("then the toast says \"%s\"", view.getToastText().toRawUTF8()));
     check (menu.getNumItems() == 9 && menu.getSelectedId() == 100 && menu.getText() == "File: strip chord.wav",
@@ -428,7 +429,7 @@ SL_TEST ("ui", stripLoadToasts)
         const auto& toast = editor.getView().getToastText();
         const auto& header = editor.getView().getStrip().headerText();
         check (toast == "strip long.wav is longer than 10 minutes, so StrandLock loaded its first 10 minutes"
-                   && header == "strip long.wav" + dot() + "600.00 s" + dot() + "root C3" + dot() + "its first 10 minutes",
+                   && header.startsWith ("strip long.wav" + dot() + "600.00 s" + dot() + "root C3" + dot() + "its first 10 minutes"),
                fmt ("the toast \"%s\"; the file line \"%s\"", toast.toRawUTF8(), header.toRawUTF8()));
         longFile.deleteFile();
     }

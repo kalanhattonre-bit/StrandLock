@@ -344,7 +344,11 @@ namespace sl::ui
             panels[sampleTab] = std::move (sp);
             panels[macrosTab] = std::move (mp);
         }
-        panels[soundTab] = std::make_unique<SoundTab> (t, apvts);
+        {
+            auto sp = std::make_unique<SoundTab> (t, processor);   // M7: Detect pitch & key, Key, Scale and Scale lock
+            soundPanel = sp.get();
+            panels[soundTab] = std::move (sp);
+        }
         {
             // M5 S3: the Slides and Copy / Paste tabs act on the roll's notes
             auto slidesPanel = std::make_unique<SlidesTab> (t, apvts, roll, processor);
@@ -404,6 +408,13 @@ namespace sl::ui
             roll.refresh();
             syncRollControls();
         };
+        // M7: a file's chips take a row of their own (the page lays out again); a hovered part chip says what it is
+        strip.onLayoutChange = [this]
+        {
+            resized();
+            repaint();
+        };
+        strip.onHint = [this] (const juce::String& text) { hintBar.setHelp (text); };
         addAndMakeVisible (hintBar);
         toast = std::make_unique<Toast> (t);
         addChildComponent (*toast);
@@ -474,6 +485,8 @@ namespace sl::ui
         if (noteSettings != nullptr)
             noteSettings->onLayoutChange = nullptr;
         strip.onEdit = nullptr;
+        strip.onLayoutChange = nullptr;
+        strip.onHint = nullptr;
         roll.onToast = nullptr;
         roll.onToastFor = nullptr;
         roll.onEdit = nullptr;
@@ -804,6 +817,8 @@ namespace sl::ui
         roll.refresh();
         syncRollControls();
         strip.refresh();
+        if (soundPanel != nullptr)
+            soundPanel->refresh();   // M7: the Key, Scale and Scale lock follow the INST state
 
         // Clear all lets go of its first click after 2.5 s
         if (clearArmedAt >= 0.0 && juce::Time::getMillisecondCounterHiRes() - clearArmedAt >= kClearArmMs)
@@ -1064,7 +1079,7 @@ namespace sl::ui
         // the pane keeps a scrolling row when a tab is open. A new width can change the drawer's height: it takes it now
         // unless the roll holds the bar's room still.
         {
-            const int below = kTabsHeight + kHintHeight + WaveStrip::heightFor (getHeight());
+            const int below = kTabsHeight + kHintHeight + strip.preferredHeight (getHeight());
             const bool paneOpen = ! folded && openTabIndex != diagTab;
             const int rollMin = juce::jlimit (140, 400, juce::roundToInt ((double) getHeight() * 0.26));
             const int room = area.getHeight() - kSelRowHeight - kInspectorRowHeight - roll::SelectionBar::lineHeight - 4 - below
@@ -1079,7 +1094,7 @@ namespace sl::ui
         // controls above the roll's floor, or the tabs fold while the window is too short for that (the person's fold
         // stays as it is); with the tabs folded and a drawer open, a window too short for the roll's floor gives the
         // inspector's line to the roll.
-        const int stripHeight = WaveStrip::heightFor (getHeight());
+        const int stripHeight = strip.preferredHeight (getHeight());   // M7: a file's chips add a row
         const bool diag = openTabIndex == diagTab && ! folded;
         const int shared = area.getHeight() - kSelRowHeight - barHeight - kInspectorRowHeight - kTabsHeight - kHintHeight - stripHeight;
         int paneHeight = 0;

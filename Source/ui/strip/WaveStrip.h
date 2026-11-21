@@ -18,8 +18,16 @@
 //
 // The heads' playheads (numbered lines with direction arrows) and the grains (dots) come from the engine's display
 // frames, through the HeadsOverlay (M6), with the selected notes' Start markers under them.
+//
+// M7: the file line also says what listening found ("key A minor", "no clear pitch", "listening...") and which part of
+// a long file is loaded; the suggestions and the part chips (ui/strip/PartChips) sit beside it (a starter's one
+// "Parts" chip) or, for a file, on a row of their own under it; a hovered part chip's box is drawn dashed on the
+// waveform; the part picker (ui/strip/PartPicker) covers the waveform while it is open; a Region drag asks for a root
+// suggestion for the new Region (sl-ui.js stripUp: suggestRoot).
 
 #include "HeadsOverlay.h"
+#include "PartChips.h"
+#include "PartPicker.h"
 #include "WavePeaks.h"
 
 #include "engine/DisplayFrame.h"
@@ -39,8 +47,27 @@ namespace sl::ui
         WaveStrip (const Theme&, StrandLockProcessor&);
         ~WaveStrip() override;
 
-        /** The editor's timer: a new sound (its peaks), the Region, the root, the sound menu. */
+        /** The editor's timer: a new sound (its peaks), the Region, the root, the sound menu, the suggestions and the
+            part picker. */
         void refresh();
+
+        /** The strip's height for this window: heightFor's, plus a row for a file's suggestions and part chips when
+            it has any (M7). */
+        int preferredHeight (int windowHeight) const noexcept;
+        bool hasChipRow() const noexcept { return chipRow; }
+
+        /** Called when preferredHeight changed (the chips' row came or went): MainView lays the page out again. */
+        std::function<void()> onLayoutChange;
+
+        /** The hint line while a part chip is hovered ("" = back to the mode's hint). */
+        std::function<void (const juce::String&)> onHint;
+
+        /** sl-ui-sample.js showPart: zoom so a small part fills about half the strip (the view is not an undo step). */
+        void showPart (double start, double end);
+
+        PartChips& getChips() noexcept { return chips; }
+        PartPicker& getPicker() noexcept { return picker; }
+        static constexpr int chipRowHeight = 26;
 
         /** The engine's newest display frame (copied), or null: no heads drawn. */
         void setDisplayFrame (const engine::DisplayFrame* frame);
@@ -140,6 +167,8 @@ namespace sl::ui
         void paintWave (juce::Graphics&, juce::Rectangle<float> area);
         void setStartAt (double pos, bool inside);
         bool updateStarts();
+        juce::String headerExtra() const;   // M7: the loaded part and what listening found
+        void layoutChips();
 
         const Theme& theme;
         StrandLockProcessor& processor;
@@ -160,7 +189,7 @@ namespace sl::ui
         double exactStart = 0.0, exactEnd = 1.0;
         int root = 60;
         float cents = 0.0f;
-        juce::String header, headerName, headerRest;
+        juce::String header, headerName, headerRest, extra;
 
         // The mouse.
         Drag drag = Drag::none;
@@ -181,6 +210,12 @@ namespace sl::ui
         FlatButton browseButton, presetsButton, zoomOut, zoomIn, showAllButton;
         std::unique_ptr<ChoiceBox> atEnd;
         std::unique_ptr<juce::FileChooser> chooser;
+
+        // M7: the suggestions and part chips, the part picker, and whether the chips have a row of their own.
+        PartChips chips;
+        PartPicker picker;
+        bool chipRow = false;
+        std::uint64_t pickerOffered = 0;   // the user load the picker opened for by itself
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WaveStrip)
     };

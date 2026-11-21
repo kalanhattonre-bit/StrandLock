@@ -99,6 +99,7 @@ namespace sl::doc
         bool missing = false;                   // the project names a file that was not found; the default starter plays
         bool cut = false;                       // a part of a file longer than 10 minutes (ref.file's loaded range)
         std::uint64_t request = 0;              // the load that made it
+        LoadOrigin origin = LoadOrigin::startup;   // who asked for it
         SoundAnalysis analysis;                 // what the worker found (or the SMPL cache said) before it was handed on
 
         double seconds() const noexcept { return sampleRate > 0.0 ? static_cast<double> (frames) / sampleRate : 0.0; }

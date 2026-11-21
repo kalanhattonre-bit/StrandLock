@@ -54,7 +54,9 @@ namespace sl::ui
           presetsButton (t, "Sound presets", FlatButton::Icon::notes),
           zoomOut (t, "-"),
           zoomIn (t, "+"),
-          showAllButton (t, "Show all")
+          showAllButton (t, "Show all"),
+          chips (t, p),
+          picker (t, p)
     {
         startBinding = std::make_unique<ParamBinding> (p.getParam (params::P::regionStart));
         endBinding = std::make_unique<ParamBinding> (p.getParam (params::P::regionEnd));
@@ -91,6 +93,24 @@ namespace sl::ui
         };
         addAndMakeVisible (*atEnd);
 
+        // M7: the suggestions and the part chips beside the file line (or on a row of their own), and the part picker
+        // over the waveform while it is open.
+        chips.onToast = [this] (const juce::String& text, int ms) { toast (text, ms); };
+        chips.onShowPart = [this] (double a, double b) { showPart (a, b); };
+        chips.onShowAll = [this] { showAll(); };
+        chips.onPickPart = [this] { picker.open(); };
+        chips.onHint = [this] (const juce::String& text)
+        {
+            if (onHint)
+                onHint (text);
+        };
+        // A click on a chip runs inside that chip: the chips are made again on the editor's next tick, never here.
+        chips.onChange = [this] { repaint(); };
+        addAndMakeVisible (chips);
+        picker.onToast = [this] (const juce::String& text, int ms) { toast (text, ms); };
+        picker.onClose = [this] { repaint(); };
+        addChildComponent (picker);
+
         // The view the project was left on (UIST); checked against the sound once it is there.
         const auto ui = p.getUiState();
         viewA = std::isfinite (ui.stripViewA) ? ui.stripViewA : 0.0;
@@ -106,11 +126,42 @@ namespace sl::ui
         auditionStop();
         endRegionGesture();
         chooser.reset();
+        chips.onChange = nullptr;
     }
 
     int WaveStrip::heightFor (int windowHeight) noexcept
     {
         return windowHeight > 820 ? 124 : windowHeight > 720 ? 112 : 104;
+    }
+
+    int WaveStrip::preferredHeight (int windowHeight) const noexcept
+    {
+        return heightFor (windowHeight) + (chipRow ? chipRowHeight : 0);
+    }
+
+    void WaveStrip::showPart (double start, double end)
+    {
+        // sl-ui-sample.js showPart: zoom so a small part fills about half of the strip
+        const double w = end - start, vw = viewB - viewA;
+        const bool outside = start < viewA - 1e-9 || end > viewB + 1e-9;
+        if (! outside && w >= vw * 0.3)
+            return;
+        const double m = w * 0.5;
+        setView (start - m, end + m);
+    }
+
+    void WaveStrip::layoutChips()
+    {
+        // A file's suggestions and part chips get a row of their own under the file line; a starter's one "Parts"
+        // chip sits beside it (the prototype's stripSugs follow the file line when there is room).
+        const bool want = sound != nullptr && ! sound->builtIn && chips.preferredWidth() > 0;
+        if (want != chipRow)
+        {
+            chipRow = want;
+            if (onLayoutChange)
+                onLayoutChange();
+        }
+        resized();
     }
 
     //==============================================================================================
@@ -223,8 +274,9 @@ namespace sl::ui
             headerRest = dot() + toFixed (sound->seconds(), 2) + " s" + dot() + "root " + juce::String (core::noteName (root))
                          + (juce::exactlyEqual (cents, 0.0f) ? juce::String() : " " + fmtCents ((double) cents))
                          + (sound->builtIn ? " (built-in)" : "");
-            if (sound->cut)
-                headerRest << dot() << "its first 10 minutes";
+            extra = headerExtra();
+            if (extra.isNotEmpty())
+                headerRest << dot() << extra;
             if (sound->missing)
             {
                 const auto& f = sound->ref.file;
@@ -236,6 +288,41 @@ namespace sl::ui
         header = headerName + headerRest;
     }
 
+    juce::String WaveStrip::headerExtra() const
+    {
+        // M7: which part of a long file is loaded, then what listening found (sl-ui.js updateStripText's S.detected,
+        // or its 'listening...' while Detect runs). A built-in sound is tuned to C3 already, and says nothing.
+        juce::String out;
+        if (sound == nullptr || sound->missing)
+            return out;
+        auto add = [&out] (const juce::String& s)
+        {
+            if (s.isNotEmpty())
+                out << (out.isEmpty() ? juce::String() : dot()) << s;
+        };
+        if (sound->cut && sound->ref.kind == state::kSampleFile && sound->ref.file.fileSampleRate > 0.0)
+        {
+            const auto& f = sound->ref.file;
+            const auto mmss = [] (double s)
+            {
+                const auto w = (juce::int64) std::floor (std::max (0.0, s) + 1e-9);
+                return juce::String (w / 60) + ":" + (w % 60 < 10 ? "0" : "") + juce::String (w % 60);
+            };
+            if (f.loadedStartFrame == 0)
+                add ("its first 10 minutes");
+            else
+                add (mmss ((double) f.loadedStartFrame / f.fileSampleRate) + " to " + mmss ((double) (f.loadedStartFrame + f.loadedFrames) / f.fileSampleRate)
+                     + " of " + mmss ((double) f.fileFrames / f.fileSampleRate));
+        }
+        if (! sound->builtIn)
+        {
+            const auto& s = processor.getSuggestions();
+            if (s.soundRequest == sound->request)
+                add (s.listening ? juce::String ("listening...") : juce::String::fromUTF8 (s.analysis.detectedText().c_str()));
+        }
+        return out;
+    }
+
     void WaveStrip::refresh()
     {
         auto now = processor.getCurrentSound();
@@ -245,7 +332,17 @@ namespace sl::ui
 
         const bool newSound = now != sound;
         const bool startsMoved = updateStarts();
-        if (! newSound && juce::exactlyEqual (r.start, exactStart) && juce::exactlyEqual (r.end, exactEnd) && rootNow == root
+        const auto before = sound;
+        if (newSound)
+            sound = std::move (now);
+
+        // M7: the chips (and whether they need a row of their own), the part picker's overview, the file line's words.
+        if (chips.refresh() || newSound)
+            layoutChips();
+        picker.refresh();
+        const bool extraMoved = headerExtra() != extra;
+
+        if (! newSound && ! extraMoved && juce::exactlyEqual (r.start, exactStart) && juce::exactlyEqual (r.end, exactEnd) && rootNow == root
             && juce::exactlyEqual (centsNow, cents))
         {
             if (startsMoved)
@@ -255,7 +352,6 @@ namespace sl::ui
 
         if (newSound)
         {
-            sound = std::move (now);
             peaks = WavePeaks::of (sound);
             columnsSound = nullptr;
             if (sound != nullptr)
@@ -268,6 +364,21 @@ namespace sl::ui
                 firstSound = false;
             }
             fillSoundMenu();
+
+            // A new file longer than 10 minutes that the user loaded: the picker offers the other parts (question 9.3).
+            // A part picked from the same file does not open it again.
+            const bool newFile = before == nullptr || before->ref.kind != state::kSampleFile || sound == nullptr
+                              || before->ref.file.path != sound->ref.file.path;
+            if (sound != nullptr && sound->cut && ! sound->missing && sound->origin == doc::LoadOrigin::user && newFile
+                && sound->request != pickerOffered)
+            {
+                pickerOffered = sound->request;
+                picker.open();
+            }
+            else if (picker.isOpen() && (sound == nullptr || ! sound->cut))
+            {
+                picker.close();
+            }
         }
         exactStart = r.start;
         exactEnd = r.end;
@@ -489,7 +600,23 @@ namespace sl::ui
         head.removeFromRight (8);
         const int aw = atEnd->preferredWidth();
         atEnd->setBounds (head.removeFromRight (aw).withSizeKeepingCentre (aw, 22));
+
+        // M7: a file's chips on their own row; a starter's beside the file line, right after its text when there is room.
+        if (chipRow)
+        {
+            chips.setBounds (r.removeFromTop (chipRowHeight).reduced (8, 2));
+        }
+        else
+        {
+            head.removeFromRight (8);
+            const auto bold = Theme::px (11.5f, true);
+            const int textW = (int) std::ceil (Theme::textWidth (bold, headerName) + Theme::textWidth (Theme::px (11.5f), headerRest)) + 12;
+            const int cw = juce::jmin (chips.preferredWidth(), head.getWidth());
+            const int x = juce::jlimit (head.getX(), juce::jmax (head.getX(), head.getRight() - cw), head.getX() + textW);
+            chips.setBounds (juce::Rectangle<int> (x, head.getY(), cw, head.getHeight()));
+        }
         waveArea = r;
+        picker.setBounds (waveArea);
         columnsSound = nullptr;
     }
 
@@ -501,9 +628,11 @@ namespace sl::ui
         g.fillRect (columnWidth - 1, 0, 1, getHeight());
         g.fillRect (0, 0, getWidth(), 1);   // the line under the roll
 
-        // The file line: the name in bold, then the length and the root (cut short with ... when there is no room).
+        // The file line: the name in bold, then the length and the root (cut short with ... when there is no room; a
+        // starter's chips beside it take their room first).
         {
-            auto line = juce::Rectangle<int> (columnWidth + 8, 0, juce::jmax (0, atEnd->getX() - columnWidth - 16), headerHeight);
+            const int lineEnd = ! chipRow && chips.preferredWidth() > 0 ? chips.getX() - 6 : atEnd->getX() - 8;
+            auto line = juce::Rectangle<int> (columnWidth + 8, 0, juce::jmax (0, lineEnd - columnWidth - 8), headerHeight);
             const auto bold = Theme::px (11.5f, true);
             const int nameWidth = juce::jmin (line.getWidth(), (int) std::ceil (Theme::textWidth (bold, headerName)) + 1);
             g.setColour (theme (Tok::txt));
@@ -521,6 +650,20 @@ namespace sl::ui
         const auto area = waveArea.toFloat();
         paintWave (g, area);
         overlay.paint (g, area, [this] (double p) { return xOf (p); }, exactStart, exactEnd, theme);
+
+        // M7: the part chip under the mouse, as a dashed box over its stretch (sl-ui-sample.js drawHoverPart).
+        if (const auto hp = chips.hoveredPart(); hp.has_value())
+        {
+            const float x0 = xOf (hp->start), x1 = xOf (hp->end);
+            g.setColour (theme (Tok::regionBand).withMultipliedAlpha (0.35f));
+            g.fillRect (juce::Rectangle<float> (x0, area.getY(), juce::jmax (1.0f, x1 - x0), area.getHeight()));
+            juce::Path box, dashed;
+            box.addRectangle (x0 + 0.75f, area.getY() + 0.75f, juce::jmax (1.0f, x1 - x0 - 1.5f), area.getHeight() - 1.5f);
+            const float dashes[] = { 5.0f, 4.0f };
+            juce::PathStrokeType (1.5f).createDashedStroke (dashed, box, dashes, 2);
+            g.setColour (theme (Tok::regionEdge));
+            g.fillPath (dashed);
+        }
 
         // The view, when zoomed in: a bar along the bottom (drag it to move the view).
         if (viewB - viewA < 0.999)
@@ -743,6 +886,7 @@ namespace sl::ui
         }
         endRegionGesture();
         processor.pushUndoStep ("Region", { params::P::regionStart, params::P::regionEnd });
+        processor.regionChanged();   // sl-ui.js stripUp: a new part of a user file suggests its root (M7)
         refresh();
     }
 
