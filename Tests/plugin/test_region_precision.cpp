@@ -1,9 +1,9 @@
 // M7 "Region precision" (PLUGIN-PLAN 3, 1.6 #12, 2.2, 8.2 #26): a one-bar part on a 10-minute 48 kHz file loops with a
 // period equal to the f64 Region length in frames. The part is set the way a part chip sets it (processor::usePart: the
 // parameters and the exact f64 edges in INST, one undo step), a live Tape note at the root reads one frame per sample,
-// and after 64 passes the output repeats the first pass bit for bit at exactly 63 periods (0 frames of drift). The edges
-// are chosen where float32 edges (what the parameters hold) would make a period frames off, and the test shows that
-// such a period would not match. Then a host moves the Region start (automation): the parameter's value plays (readInst
+// and after 64 passes the output repeats the first pass exactly 63 periods on (the best lag 0 frames, the largest
+// difference under 1e-6: 0 frames of drift). The edges are chosen where float32 edges (what the parameters hold) would
+// make a period frames off, and the test shows that such a period would not match. Then a host moves the Region start (automation): the parameter's value plays (readInst
 // and the period follow it), and the end, which the host left alone, keeps its exact edge.
 
 #include "SongRig.h"
@@ -31,20 +31,40 @@ namespace
         return std::max (64.0, std::min (n - rs, std::floor ((end - start) * n)));
     }
 
-    bool sameRun (const std::vector<float>& x, std::int64_t a, std::int64_t b, int count)
+    /** Where pass k's window matches pass 0's best: the lag (-range .. range) from k periods on with the least squared
+        difference, and the largest difference at that lag. (The voice's output runs through its tone low-pass, an IIR
+        filter, so a repeat is measured, not assumed bit for bit; the noise in the file makes a lag of one frame differ
+        by about the signal's own size.) */
+    struct Match
     {
-        return a >= 0 && b >= 0 && a + count <= (std::int64_t) x.size() && b + count <= (std::int64_t) x.size()
-            && std::memcmp (x.data() + a, x.data() + b, (std::size_t) count * sizeof (float)) == 0;
-    }
+        int lag = 0;
+        double largest = 1.0e9;
+    };
 
-    /** The lag (-range .. range) at which pass k's window repeats pass 0's bit for bit, or a value past range when none. */
-    int driftAt (const std::vector<float>& x, std::int64_t window0, std::int64_t period, int k, int count, int range)
+    Match driftAt (const std::vector<float>& x, std::int64_t window0, std::int64_t period, int k, int count, int range)
     {
-        for (int d = 0; d <= range; ++d)
-            for (const int s : { d, -d })
-                if (sameRun (x, window0, window0 + (std::int64_t) k * period + s, count))
-                    return s;
-        return range + 1;
+        Match best;
+        double bestErr = 1.0e300;
+        for (int d = -range; d <= range; ++d)
+        {
+            const std::int64_t b = window0 + (std::int64_t) k * period + d;
+            if (b < 0 || b + count > (std::int64_t) x.size())
+                continue;
+            double err = 0.0, largest = 0.0;
+            for (int i = 0; i < count; ++i)
+            {
+                const double e = (double) x[(std::size_t) (b + i)] - (double) x[(std::size_t) (window0 + i)];
+                err += e * e;
+                largest = std::max (largest, std::abs (e));
+            }
+            if (err < bestErr)
+            {
+                bestErr = err;
+                best.lag = d;
+                best.largest = largest;
+            }
+        }
+        return best;
     }
 
     double rms (const std::vector<float>& x, std::int64_t from, int count)
@@ -134,17 +154,22 @@ SL_TEST ("songs", regionPrecisionOneBarPart)
     const double level = rms (out.left, window0, window);
     check (level > 0.01, fmt ("a live Tape note at the root plays the part (rms %.4f)", level));
     int worst = 0;
+    double largest = 0.0;
     std::string drifts;
     for (const int k : { 1, 2, 8, 32, 63 })
     {
-        const int d = driftAt (out.left, window0, (std::int64_t) exactPeriod, k, window, 8);
-        worst = std::max (worst, std::abs (d));
-        drifts += fmt ("%s%d", drifts.empty() ? "" : ", ", d);
+        const auto m = driftAt (out.left, window0, (std::int64_t) exactPeriod, k, window, 8);
+        worst = std::max (worst, std::abs (m.lag));
+        largest = std::max (largest, m.largest);
+        drifts += fmt ("%s%d", drifts.empty() ? "" : ", ", m.lag);
     }
-    check (worst == 0, fmt ("pass 2, 3, 9, 33 and 64 repeat pass 1 bit for bit exactly k periods on: drift %s frames (0 frames over 64 passes)", drifts.c_str()));
-    check (! sameRun (out.left, window0, window0 + 63 * (std::int64_t) floatPeriod, window),
-           fmt ("negative control: at 63 float32 periods the window does not repeat (float32 edges would be %.0f frames off after 64 passes)",
-                63.0 * std::abs (floatPeriod - exactPeriod)));
+    check (worst == 0 && largest < 1.0e-6,
+           fmt ("pass 2, 3, 9, 33 and 64 repeat pass 1 exactly k f64 periods on: drift %s frames (0 frames over 64 passes), the largest difference %.2e",
+                drifts.c_str(), largest));
+    const auto wrong = driftAt (out.left, window0, (std::int64_t) floatPeriod, 63, window, 8);
+    check (wrong.largest > 0.01,
+           fmt ("negative control: near 63 float32 periods nothing repeats (the best lag differs by %.3f; float32 edges would be %.0f frames off after "
+                "64 passes)", wrong.largest, 63.0 * std::abs (floatPeriod - exactPeriod)));
 
     // Host automation moves the start: the parameter's value plays.
     const float moved = (float) (start - 0.0004);
@@ -158,9 +183,10 @@ SL_TEST ("songs", regionPrecisionOneBarPart)
     const double autoPeriod = periodOf (movedStart, end);
     const auto total2 = window0 + 8 * (std::int64_t) autoPeriod + window + 64;
     const auto out2 = harness::render (p, kRate, total2, harness::fixedBlocks (512), { harness::noteOn (0, 60, 100) });
-    const int d2 = driftAt (out2.left, window0, (std::int64_t) autoPeriod, 8, window, 8);
-    check (d2 == 0 && std::abs (autoPeriod - exactPeriod) > 100.0,
-           fmt ("and the loop follows it: %.0f frames a pass (was %.0f), pass 9 repeats pass 1 at 8 of those periods (drift %d)", autoPeriod, exactPeriod, d2));
+    const auto d2 = driftAt (out2.left, window0, (std::int64_t) autoPeriod, 8, window, 8);
+    check (d2.lag == 0 && d2.largest < 1.0e-6 && std::abs (autoPeriod - exactPeriod) > 100.0,
+           fmt ("and the loop follows it: %.0f frames a pass (was %.0f), pass 9 repeats pass 1 at 8 of those periods (drift %d, the largest difference %.2e)",
+                autoPeriod, exactPeriod, d2.lag, d2.largest));
     p.releaseResources();
     dir.deleteRecursively();
 }

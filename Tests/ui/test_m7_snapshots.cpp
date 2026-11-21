@@ -154,8 +154,9 @@ namespace
                     editor.refreshNow();
                     auto& tab = view.getSoundTab();
                     const int pane = view.getPaneArea().getHeight();
-                    out.shows = tab.getDetectButton().isShowing() && tab.getKeyBox().getText() == "A" && tab.getScaleBox().getText() == "Major"
-                             && tab.getScaleLock().getBottom() <= pane;
+                    // isVisible, not isShowing: the test's editor is on no screen (it has no window of its own)
+                    out.shows = tab.getDetectButton().isVisible() && tab.isVisible() && tab.getKeyBox().getText() == "A"
+                             && tab.getScaleBox().getText() == "Major" && tab.getScaleLock().getBottom() <= pane;
                     out.what = fmt ("Detect pitch & key, Key \"%s\", Scale \"%s\", Scale lock in the %d px pane", tab.getKeyBox().getText().toRawUTF8(),
                                     tab.getScaleBox().getText().toRawUTF8(), pane);
                     break;

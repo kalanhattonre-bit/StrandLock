@@ -64,7 +64,8 @@ SL_TEST ("songs", partOfLongFileLoads)
 
     const auto dir = songs::tempFolder ("part-load");
     const auto file = dir.getChildFile ("twelve minutes.wav");
-    check (writeTwelveMinutes (file), fmt ("a 12-minute mono 8 kHz 16-bit WAV written at test time (%lld bytes)", (long long) file.getSize()));
+    const bool written = writeTwelveMinutes (file);
+    check (written, fmt ("a 12-minute mono 8 kHz 16-bit WAV written at test time (%lld bytes)", (long long) file.getSize()));
 
     StrandLockProcessor p;
     p.waitForSounds();

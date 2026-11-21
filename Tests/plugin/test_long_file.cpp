@@ -23,6 +23,7 @@
 #include "engine/Region.h"
 #include "engine/SourceRead.h"
 
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -45,6 +46,20 @@ namespace
     double msSince (std::chrono::steady_clock::time_point t0)
     {
         return std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - t0).count();
+    }
+
+    /** Waits (at most ms) until count reaches want: the worker calls its probe's end after the request is finished (a
+        wait for the request returns first), so a test reads what the probe kept only once the probe says it is done. */
+    bool waitUntil (const std::atomic<int>& count, int want, int ms)
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        while (count.load() < want)
+        {
+            if (msSince (t0) > (double) ms)
+                return false;
+            std::this_thread::sleep_for (std::chrono::milliseconds (1));
+        }
+        return true;
     }
 
     engine::RegionState regionOf (double rs, double L, double X, bool post, bool loop, bool fold, double rho)
@@ -237,6 +252,7 @@ SL_TEST ("songs", longFileLoadsAs16Bit)
 
     StrandLockProcessor p;
     p.waitForSounds();
+    p.waitForAnalysis();   // the starter's parts too, so the worker is idle when the probe goes in
     p.prepareToPlay (sr, 512);
     juce::AudioBuffer<float> buffer (2, 512);
     juce::MidiBuffer midi;
@@ -258,6 +274,7 @@ SL_TEST ("songs", longFileLoadsAs16Bit)
         std::thread::id thread;
         alloc::Counts counts;
         int runs = 0;
+        std::atomic<int> ended { 0 };
         std::unique_ptr<alloc::Scope> scope;
     } probe;
     auto& manager = p.getSampleManager();
@@ -268,11 +285,13 @@ SL_TEST ("songs", longFileLoadsAs16Bit)
             probe.thread = std::this_thread::get_id();
             alloc::reset();
             probe.scope = std::make_unique<alloc::Scope>();
+            ++probe.runs;
             return;
         }
-        probe.counts = alloc::counts();
+        if (probe.scope != nullptr)
+            probe.counts = alloc::counts();
         probe.scope.reset();
-        ++probe.runs;
+        probe.ended.fetch_add (1);
     };
 
     const auto t0 = std::chrono::steady_clock::now();
@@ -284,7 +303,9 @@ SL_TEST ("songs", longFileLoadsAs16Bit)
     }
     const auto messageThread = alloc::counts();
     const double loadMs = msSince (t0);
-    manager.workerProbe = nullptr;
+    const bool probeDone = waitUntil (probe.ended, 1, 10000);
+    manager.workerProbe = nullptr;   // the worker is idle now: nothing calls it while it goes
+    check (probeDone, "the worker finished the request (its probe's end came)");
 
     const std::int64_t bytes16 = frames * 2 * 2;   // 115,200,000
     const double mb = 1.0e6;
@@ -435,18 +456,24 @@ SL_TEST ("songs", newerRequestsStopTheWorker)
 
     // A file whose request is overtaken while the worker makes it: its decode stops at the next question, nothing of it
     // is published, and the newer sound plays.
+    p.waitForAnalysis (30000);   // the Pluck's parts: the worker is idle when the probe goes in
     const auto stops0 = m.stopsMade();
     bool asked = false;
-    m.workerProbe = [&m, &asked] (bool starting)
+    std::atomic<int> ended { 0 };
+    m.workerProbe = [&m, &asked, &ended] (bool starting)
     {
         if (starting && ! asked)
         {
             asked = true;
             m.loadStarter (sounds::StarterId::vowel, 1, doc::LoadOrigin::user);   // a newer pick, while the file is being made
         }
+        if (! starting)
+            ended.fetch_add (1);
     };
     p.loadSoundFile (song);
     p.waitForSounds (60000);
+    waitUntil (ended, 2, 10000);   // the file's request and the newer pick's
+    p.waitForAnalysis (30000);
     m.workerProbe = nullptr;
     const auto after = p.getCurrentSound();
     check (asked && m.stopsMade() > stops0 && after != nullptr && after->builtIn && after->starter == sounds::StarterId::vowel,
