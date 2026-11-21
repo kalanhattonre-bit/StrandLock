@@ -174,8 +174,14 @@ chips and the suggestion line. Branch `m7-songs`, from main 1e9f61c.
   whole file" as one undo step each, Detect pitch & key.
 - Done: the strip's chips and suggestion line, the part picker, the Sound tab's Detect, Key, Scale and Scale lock.
 - Done: the M7 tests (long file, part load, Region precision, root), the chip tests, the M7 snapshots; two M2 checks
-  follow M7's rules. Run 44866817094 (f44fa83) built on both platforms.
-- In progress: CI on 42425cf and after (run 44869651538), the snapshots to look at, then main.
+  follow M7's rules. Run 44866817094 (f44fa83) built on both platforms; run 44869651538 (42425cf) stopped at one
+  missing include; run 44871606929 (abdd828) failed 3 checks, all in the tests (fixed in 80c2578, below).
+- Done: every M7 snapshot looked at (the chips on a song with one hovered, the suggestion line, the part picker, the
+  Sound tab, dark and light, the chips at 200 %): each shows what it should.
+- Done: run 44873689608 on 80c2578 is green on every job and step (totals below). Its log showed one check that could
+  not fail: the Region test's control read past its render (63 float32 periods are longer than 63 f64 ones), so it
+  compared nothing and passed; the render now covers that window and the control must have compared a lag.
+- Last: the commit with these lines gets its own green run, then main is fast-forwarded to it.
 
 ### Files
 
@@ -278,6 +284,34 @@ chips and the suggestion line. Branch `m7-songs`, from main 1e9f61c.
 | `ui/suggestionLineDoesWhatItSays` | decision 2 | a short tone: "Use A1 as the root" (no step), "Use key A major" (one step, the Sound tab shows A), "Loop cleanly" (one step), "Voice suits this sound (on)" (hides); white noise: "Try Cloud" (one step), no key offered. |
 | `ui/starterPartsChip` | D10 | the Saw's parts behind one "Parts" chip beside the file line; its menu's first part is one undo step and the chip then names it. |
 | `ui/m7Pictures` and the `m7_*` snapshots | snapshots | the chips on a song with one hovered, the suggestion line, the part picker, the Sound tab; dark and light (the chips at 200 % too). |
+
+### Results (run 44873689608 on 80c2578, all green; the M7 figures from it and from run 44871606929)
+
+- Windows Release: 2169 checks in 371 tests, 0 failed (songs 7 tests, 55 checks; ui 134, 653; alloc 9, 43). Linux
+  Release: 2161 checks in 371 tests, 0 failed. Sanitizers: contract, model, engine and analysis 920 checks in 155 tests
+  (`sixteenBitReadsLikeFloat` among them); state 142 checks in 20 tests. Debug CRT `--only alloc`: 44 checks in 9 tests,
+  0 JUCE assertions; Debug snapshots: 0 JUCE assertions. pluginval strictness 10: SUCCESS. Fixture check: passed (26
+  files, 4,962,066 bytes). No new compiler warning from V2's files (the float-equal one in SampleData.h is M2's
+  makeSampleData, moved down the file).
+- 16-bit reads: 4000 readAbs reads and 15,000 fast-path, seam and seamRho positions (6358 on the fast path), 0 differ;
+  Tape, Voice, Cloud and Lock bit for bit from 16-bit and from float (peaks 0.74 to 0.90); the nudged sample differs.
+- Long files: the 10-minute stereo 48 kHz WAV (115,200,104 bytes, written in 1.1 s) loads as 16-bit: peak live on the
+  worker 118.94 MB on Windows, 118.83 MB on Linux, against 131.20 MB (115.2 MB + 16 MB; the largest block 57.6 MB, one
+  channel); the message thread 0.000 MB meanwhile; hash, decode and analysis 1170 ms on Windows (the analysis 316 ms),
+  1167 ms on Linux (365 ms). 0 allocations and frees on the audio thread in the 40 blocks of the swap (Windows: operator
+  new and delete; Linux: malloc too), and 0 in the 30 blocks of the 200 s swap on the Debug CRT (every heap call).
+- Region precision: the part 0.803333... (one bar at 120 bpm) is 95,999 frames long in f64 and would be 96,001 with
+  float32 edges (126 frames off after 64 passes); passes 2, 3, 9, 33 and 64 repeat pass 1 at exactly k f64 periods
+  (drift 0 frames, the largest difference 0: bit for bit). Host automation of the start to 0.0004 earlier: the
+  parameter's value plays, the loop is 107,519 frames a pass and repeats on it (drift 0). In both runs the control at 63
+  float32 periods read past the render and compared nothing; the last commit renders far enough (its run's figure is
+  the first real one).
+- Root: the tone at A1 +23 cents is suggested as MIDI 45 +23; accepting it and Detect push 0 undo steps; the suggested
+  key A major is 1 step ("Key from the sound: A major"); Undo of the Saw brings the tone back at MIDI 45, +23 cents.
+  White noise: no clear pitch, no key, and its reload reads both from the cache with no new analysis.
+- The one-minute song gets 4 parts (Steady note 0:10, Big hit 0:21, Quiet texture 0:14, One-bar loop 120 bpm 0:29)
+  and opens on the steady note inside its load's one undo step; the Saw that opens up gets 2 parts behind its "Parts"
+  chip; white noise offers "One-bar loop 120 bpm (guess) 0:00", "Try Cloud" and "Loop cleanly", and no key.
 
 ### Hand-off for V3
 

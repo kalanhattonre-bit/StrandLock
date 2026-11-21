@@ -149,7 +149,8 @@ SL_TEST ("songs", regionPrecisionOneBarPart)
     cleanTape (p);
     const int window = 2048;
     const std::int64_t window0 = 24000;   // after the attack and the gains' 20 ms slews
-    const auto total = window0 + 63 * (std::int64_t) exactPeriod + window + 64;
+    // long enough for the control's window at 63 float32 periods too (it ends later when that period is longer)
+    const auto total = window0 + 63 * (std::int64_t) std::max (exactPeriod, floatPeriod) + window + 64;
     const auto out = harness::render (p, kRate, total, harness::fixedBlocks (512), { harness::noteOn (0, 60, 100) });
     const double level = rms (out.left, window0, window);
     check (level > 0.01, fmt ("a live Tape note at the root plays the part (rms %.4f)", level));
@@ -167,7 +168,7 @@ SL_TEST ("songs", regionPrecisionOneBarPart)
            fmt ("pass 2, 3, 9, 33 and 64 repeat pass 1 exactly k f64 periods on: drift %s frames (0 frames over 64 passes), the largest difference %.2e",
                 drifts.c_str(), largest));
     const auto wrong = driftAt (out.left, window0, (std::int64_t) floatPeriod, 63, window, 8);
-    check (wrong.largest > 0.01,
+    check (wrong.largest > 0.01 && wrong.largest < 10.0,   // a lag was compared (the window is inside the render), and none repeats
            fmt ("negative control: near 63 float32 periods nothing repeats (the best lag differs by %.3f; float32 edges would be %.0f frames off after "
                 "64 passes)", wrong.largest, 63.0 * std::abs (floatPeriod - exactPeriod)));
 
