@@ -184,12 +184,14 @@ jobs:
         if: ${{ !cancelled() }}
         run: cmake --build build-san --parallel "$(nproc)" --target StrandLockTests
 
-      - name: Run the contract, model and engine groups (sanitizers)
+      # analysis (M7): the pitch, key and part analysis reads long files in blocks, so a read past a block or past
+      # the sound is an AddressSanitizer error here.
+      - name: Run the contract, model, engine and analysis groups (sanitizers)
         if: ${{ !cancelled() }}
         env:
           ASAN_OPTIONS: detect_leaks=1:abort_on_error=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
-        run: build-san/StrandLockTests_artefacts/Release/StrandLockTests --only contract,model,engine
+        run: build-san/StrandLockTests_artefacts/Release/StrandLockTests --only contract,model,engine,analysis
 
       # The state tests load every prefix, cut, mutation and random blob from a heap block of exactly its size,
       # so here a read past the end of the data is an AddressSanitizer error, not a silent pass (PLUGIN-PLAN 3).
