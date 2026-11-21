@@ -85,6 +85,18 @@ namespace sl::engine
         frame.peakL = peakL;
         frame.peakR = peakR;
         peakL = peakR = 0.0f;
+
+        // M7 V4: the newest raw audition on the sound now playing (the strip draws a line there, as sl-ui.js rawPos)
+        frame.rawOn = false;
+        frame.rawPos = 0.0f;
+        std::uint64_t newest = 0;
+        for (const RawPlayer& r : raw)
+            if (r.data != nullptr && r.data == src && r.serial > newest && src->n > 0)
+            {
+                newest = r.serial;
+                frame.rawOn = true;
+                frame.rawPos = static_cast<float> (clampJs (r.pos / static_cast<double> (src->n), 0, 1));
+            }
     }
 
     Stats Engine::stats() const noexcept
@@ -103,6 +115,7 @@ namespace sl::engine
         }
         s.budget = budget;
         s.filterResets = ctx.filterResets;
+        s.levelReads = ctx.levelReads;
         return s;
     }
 
@@ -116,5 +129,6 @@ namespace sl::engine
         st.nonFinite = 0;
         st.preLimiterPeak = 0.0;
         ctx.filterResets = 0;
+        ctx.levelReads = 0;
     }
 }

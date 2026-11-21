@@ -434,6 +434,14 @@ namespace sl::engine
             h.spray = spray * jsMin (Ssr, L / 2);
             h.smooth = smooth;
 
+            // M7 V4 (fast reads, OctaveLevels.h): the octave level this head reads this tick, and last tick's (a change
+            // crossfades across this tick in runTape). Tape reads at its speed and Lock's taps at the rate ratio; each
+            // Voice or Cloud grain chooses its own from its read speed (runGrains).
+            const double readRate = kcNow == Kc::tape ? h.spd : kcNow == Kc::lock ? ratio : 0.0;
+            const int lvNow = E.levels ? levelFor (readRate, S.numLevels) : 0;
+            h.lvPrev = first ? lvNow : h.lv;
+            h.lv = lvNow;
+
             // events: scatter jumps, refresh
             if (jumpEvent)
             {

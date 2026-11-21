@@ -90,6 +90,10 @@ namespace sl::engine
         // yet and plays as Tape instead (Voice::asTape). Always 0 since M3 part L (every engine plays itself); kept
         // so the engine tests can check that no note stands in. The diagnostics page no longer shows it.
         std::int32_t tapeStandIns = 0;
+
+        // M7 V4: reads of an octave level (engine/OctaveLevels.h): a Tape or Lock head's runs, and Voice or Cloud grains,
+        // that read one. 0 means everything played read the sound itself, as M3 did.
+        std::int64_t levelReads = 0;
     };
 
     class Engine
@@ -224,6 +228,27 @@ namespace sl::engine
             where they are instead of at their next start. */
         void rechase() noexcept;
 
+        /** M7 V4, a test-only switch (plan 4 M7 "fast reads"): off, every read plays the sound itself, as M3 and the
+            prototype do, even on a sound with octave levels; on (the default, and always in the plugin), a read faster
+            than 1.25x reads a level (engine/OctaveLevels.h). Kept across prepare (). */
+        void setOctaveLevels (bool on) noexcept
+        {
+            levelsOn = on;
+            ctx.levels = on;
+        }
+        bool octaveLevelsOn() const noexcept { return levelsOn; }
+
+        /** M7 V4 (plan 7.9 decision 7a; sl-ui.js rawAuditionStart): holding the mouse on the waveform outside the
+            Region plays the sound as recorded from pos (0..1 of its frames, the frame floor (pos x n)) at its own rate
+            (its rate over the engine's), at 0.7 with a 12 ms fade in, until rawAuditionOff or the sound's end. A held
+            one fades out first (a second hold replaces the first). It is added after the output stage, as the
+            prototype's goes straight to its master: outGain and the limiter do not touch it, the bypass fade does. A
+            read above 1.25x reads an octave level, as every read does. Ignored with no sound. */
+        void rawAuditionOn (double pos) noexcept;
+
+        /** The raw audition fades out over 30 ms (sl-ui.js rawAuditionStop) and then stops. */
+        void rawAuditionOff() noexcept;
+
         //==========================================================================================
         // Read-only (any thread while the audio thread is idle; the audio thread itself at any time).
 
@@ -253,9 +278,28 @@ namespace sl::engine
                 if (v.src.data != nullptr)
                     f (VersionKind::sample, static_cast<const void*> (v.src.data), v.src.epoch);
             }
+            for (const RawPlayer& r : raw)   // M7 V4: a raw audition fades out on the sound it started on
+                if (r.data != nullptr)
+                    f (VersionKind::sample, static_cast<const void*> (r.data), r.epoch);
         }
 
     private:
+        /** M7 V4: one raw audition (rawAuditionOn). It keeps the sound it started on, and that sound's epoch, until it is
+            done, as a stolen voice does (8.2 #23). */
+        struct RawPlayer
+        {
+            const SampleData* data = nullptr;   // null: free
+            std::uint64_t epoch = 0;
+            double pos = 0;                     // the frame it reads at the next sample
+            double step = 1;                    // frames of the sound per output sample: its rate over the engine's
+            int level = 0;                      // the octave level its step reads (0 = the sound itself)
+            double age = 0;                     // samples played: the envelope rises from 0 to 1 over 12 ms of them
+            double relEnv = 0, relAge = 0;      // once let go: the envelope then, and the samples since (it falls to 0 in 30 ms)
+            bool held = false;                  // the output is 0.7 x the envelope x the sound
+            std::uint64_t serial = 0;           // newer ones have higher numbers (the display shows the newest)
+        };
+        static constexpr int kRawPlayers = 4;
+
         struct VoicePoolDeleter
         {
             void operator() (Voice* pool) const noexcept;   // Engine.cpp: delete[] once Voice is complete
@@ -313,6 +357,11 @@ namespace sl::engine
         void plan() noexcept;
         void measure() noexcept;
 
+        // EngineRaw.cpp (M7 V4): the raw audition. renderRaw adds the players to out[from .. from + count), the bypass
+        // fade going from byp0 to byp1 over the grid cell (gridPos, as outputStage); stopRaw ends them at once.
+        void renderRaw (float* L, float* R, int from, int count, int gridPos, double byp0, double byp1) noexcept;
+        void stopRaw() noexcept;
+
         //------------------------------------------------------------------------------------------
         std::unique_ptr<Voice[], VoicePoolDeleter> voicePool;   // kVoicePool voices, made by the first prepare
         std::array<std::uint8_t, kVoicePool> order {};          // the voice list: pool slots in insertion order
@@ -366,5 +415,10 @@ namespace sl::engine
         double rampMs = kRampMs;
         Stats st;
         float peakL = 0.0f, peakR = 0.0f;
+
+        // M7 V4: the octave levels' switch (kept across prepare) and the raw auditions
+        bool levelsOn = true;
+        std::array<RawPlayer, kRawPlayers> raw {};
+        std::uint64_t rawSerial = 0;
     };
 }

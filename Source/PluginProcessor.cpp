@@ -267,6 +267,9 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
         buffer.clear();
     }
     previewPlaying.store (hostSync.isPreviewing(), std::memory_order_release);
+    // M7 V4 (plan 7.9 decision 7b): Preview's switch as this block read it, and its clock's beat, for the Diagnostics
+    // page and Copy report.
+    diag.audioPreview (hostSync.isPreviewOn(), hostSync.isPreviewing(), hostSync.previewBeat());
 
     // The versions the engine still reads (a releasing voice's old note, a stolen voice's old sample) stay;
     // the 10 Hz collect frees the rest.
@@ -317,6 +320,12 @@ void StrandLockProcessor::applyCommand (const doc::UiCommand& command) noexcept
             break;
         case doc::UiCommandKind::allNotesOff:
             eng.allNotesOff();
+            break;
+        case doc::UiCommandKind::rawAuditionOn:   // M7 V4: the sound as recorded, held outside the Region
+            eng.rawAuditionOn (command.startPos);
+            break;
+        case doc::UiCommandKind::rawAuditionOff:
+            eng.rawAuditionOff();
             break;
         case doc::UiCommandKind::previewStart:   // Preview's switch is setPreview's atomic word, read every block (M6)
         case doc::UiCommandKind::previewStop:

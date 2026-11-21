@@ -8,7 +8,8 @@
 // - drag across it: a new Region there;
 // - drag an orange edge: move that edge; drag the band along the top of the Region: move the whole Region;
 // - hold the mouse down inside the Region: hear that spot (an audition at the root, from there, through the command
-//   queue); outside the Region the readout says where you are;
+//   queue); outside the Region (M7 V4, sl-ui.js rawAuditionStart) the sound itself plays from there as recorded, with a
+//   moving line on the waveform, and the readout says "outside the Region: the file as recorded";
 // - a short click (under 300 ms) with notes selected sets their Start there (M6: model::setNoteSample, one undo step
 //   "Set start", and a toast); outside the Region it says notes start inside it;
 // - the wheel zooms around the pointer, Shift + wheel (or a sideways wheel) moves the view; when zoomed in, the
@@ -121,6 +122,8 @@ namespace sl::ui
         /** How many heads and grains the last paint drew. */
         int headsDrawn() const noexcept { return overlay.headsDrawn(); }
         int grainsDrawn() const noexcept { return overlay.grainsDrawn(); }
+        /** M7 V4: the last paint drew the line of the sound playing as recorded. */
+        bool rawLineShown() const noexcept { return rawLineDrawn; }
 
         /** The live heads and the Start markers (M6). */
         HeadsOverlay& getOverlay() noexcept { return overlay; }
@@ -199,6 +202,8 @@ namespace sl::ui
         bool dragMoved = false, dragInside = false;
         double dragAt = 0.0;
         int auditionNote = -1;
+        bool rawAudition = false;    // M7 V4: the sound plays as recorded (a press outside the Region)
+        bool rawLineDrawn = false;
         juce::String readout;
         std::unique_ptr<ParamBinding> startBinding, endBinding;
 

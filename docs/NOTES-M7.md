@@ -524,3 +524,21 @@ answer, the Region excerpt (FLAC 24-bit, never over 50 MB), the opt-in library a
 - M0's `state/StateFormat` changed (plan 7.9 lets V3 touch M2-M6 files; this one is M0's): SAUD is a written but optional
   tag, a container is made in one buffer, and a decoded SAUD is written again from its payload rather than kept twice.
 - Plan 8.2 #17 (embedding, library, Locate) is now built.
+
+## V4
+
+Fast reads without aliasing (plan 7.9 V4, decision 6, question 9.6), M6's two leftovers (decision 7: the raw audition,
+Preview on the Diagnostics page) and the M7 part of the Cubase checklist. Branch `m7-songs`, from main d1e2c9a.
+
+### Progress
+
+- Done: the design, tried in node on the prototype engine with the levels patched into a copy of it (scratch
+  `m7v4/sim-engine.js`, `sim-design.js`, `sim-sweep.js`): the decimation filter, the level read and the level rule.
+- Done (code, not yet built): `engine/OctaveLevels` (the levels, their read, the rule), the level choice in VoiceTick,
+  runTapeLevels, the grains' and Lock's level reads, `Engine::setOctaveLevels` (the tests' switch) and
+  `Stats::levelReads`; the SampleManager builds the levels after every decode and keeps a starter's with it; the raw
+  audition (`Engine::rawAuditionOn` / `Off`, two CommandQueue commands, the strip's press outside the Region, its
+  readout and moving line); Preview's line on the Diagnostics page and in Copy report.
+- In progress: the tests (test_aliasing's gated rows, the sweeps, the parity on and off, memory, CPU, the raw audition,
+  the Preview line).
+- Next: the Cubase checklist's M7 section, these notes' results and the M7 summary, then the merge.

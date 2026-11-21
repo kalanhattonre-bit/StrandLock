@@ -587,6 +587,12 @@ namespace sl::ui
 
     void WaveStrip::auditionStop()
     {
+        // sl-ui.js stopAudition: the note held inside the Region, and the file playing as recorded outside it (M7 V4)
+        if (rawAudition)
+        {
+            processor.getCommandQueue().push (doc::UiCommand::rawAuditionOff());
+            rawAudition = false;
+        }
         if (auditionNote < 0)
             return;
         processor.getCommandQueue().push (doc::UiCommand::auditionOff (auditionNote));
@@ -665,6 +671,24 @@ namespace sl::ui
         const auto area = waveArea.toFloat();
         paintWave (g, area);
         overlay.paint (g, area, [this] (double p) { return xOf (p); }, exactStart, exactEnd, theme);
+
+        // M7 V4: the sound playing as recorded (held outside the Region): a moving line with an arrow, as sl-ui.js draws
+        // rawPos.
+        rawLineDrawn = false;
+        if (const auto* f = overlay.getFrame(); f != nullptr && f->rawOn)
+        {
+            const float x = xOf (static_cast<double> (f->rawPos));
+            if (x >= area.getX() && x <= area.getRight())
+            {
+                const float top = area.getY() + (float) band, bottom = area.getBottom();
+                g.setColour (theme (Tok::head).withMultipliedAlpha (0.9f));
+                g.fillRect (juce::Rectangle<float> (x - 1.0f, top, 2.0f, bottom - top));
+                juce::Path arrow;
+                arrow.addTriangle (x + 2.0f, bottom - 13.0f, x + 10.0f, bottom - 8.0f, x + 2.0f, bottom - 3.0f);
+                g.fillPath (arrow);
+                rawLineDrawn = true;
+            }
+        }
 
         // M7: the part chip under the mouse, as a dashed box over its stretch (sl-ui-sample.js drawHoverPart).
         if (const auto hp = chips.hoveredPart(); hp.has_value())
@@ -824,7 +848,10 @@ namespace sl::ui
         }
         else
         {
-            readout = fmtTime (pos0 * soundSeconds()) + dot() + "outside the Region";
+            // M7 V4 (sl-ui.js rawAuditionStart): outside the Region the engine's voices cannot go, so the sound itself plays
+            // from there, as recorded (only what is loaded: a part of a long file, or a Region excerpt kept in the project).
+            rawAudition = processor.getCommandQueue().push (doc::UiCommand::rawAuditionOn (pos0));
+            readout = fmtTime (pos0 * soundSeconds()) + dot() + "outside the Region: the file as recorded";
         }
         repaint();
     }

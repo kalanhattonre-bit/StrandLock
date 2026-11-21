@@ -114,6 +114,11 @@ namespace sl::engine
     // Tape: Hermite read at rate (f/root) x speed; Scatter jumps and Refresh stutters crossfade 5 ms.
     void Voice::runTape (Head& h, int run) noexcept
     {
+        if (h.lv != 0 || h.lvPrev != 0)
+        {
+            runTapeLevels (h, run);   // M7 V4: faster than 1.25x this tick or the last (the M3 reads below are untouched)
+            return;
+        }
         const SampleData& S = *src.data;
         const RegionState& G = reg;
         double* bL = bufL;
@@ -168,5 +173,84 @@ namespace sl::engine
         h.raw = raw;
         h.off = off;
         h.stopG = sg;
+    }
+
+    // M7 V4 (fast reads, OctaveLevels.h): runTape's loop with every read from the head's octave level. When the level
+    // changed at this tick (h.lvPrev to h.lv), each read is the two levels' reads crossfaded with the weight
+    // (ph + j + 1) / 32, so by the tick's end only the new level plays: a pitch sweep never steps. The two levels are the
+    // same sound at the same frame (each level's frame j is the sound's frame j x 2^L), so the fade is a plain line.
+    void Voice::runTapeLevels (Head& h, int run) noexcept
+    {
+        const SampleData& S = *src.data;
+        const RegionState& G = reg;
+        double* bL = bufL;
+        double* bR = bufR;
+        const int p0 = ph;
+        const double L = G.L;
+        const bool stp = G.stop;
+        const double sgStep = 1 / (kSlewSeconds * ctx->sr);
+        double raw = h.raw, off = h.off, sg = h.stopG;
+        const double spd = h.spd, dOff = h.dOff, g0L = h.g0L, g0R = h.g0R, dL = h.dL, dR = h.dR;
+        const int to = h.lv, from = h.lvPrev;
+        const bool fading = to != from;
+        // one read at x: the new level's, faded in over the tick from the old level's (level 0 is the sound itself)
+        auto readAt = [&S, &G, to, from, fading] (double x, double w, double& a, double& b) noexcept {
+            if (to > 0)
+                readRegLevel (S, G, to, x, a, b);
+            else
+                readReg (S, G, x, a, b);
+            if (! fading)
+                return;
+            double oa = 0, ob = 0;
+            if (from > 0)
+                readRegLevel (S, G, from, x, oa, ob);
+            else
+                readReg (S, G, x, oa, ob);
+            a = oa + (a - oa) * w;
+            b = ob + (b - ob) * w;
+        };
+        for (int j = 0; j < run; ++j)
+        {
+            const int kk = p0 + j + 1;
+            const double gl = g0L + dL * kk, gr = g0R + dR * kk;
+            const double wNew = static_cast<double> (kk) / kCtrl;
+            double x = raw + off;
+            if (stp)
+            {
+                sg += (x >= 0 && x < L) ? sgStep : -sgStep;
+                sg = sg < 0 ? 0 : sg > 1 ? 1 : sg;
+            }
+            if (G.fold)
+                x = mapPos (G, x);
+            double a = 0, b = 0;
+            readAt (x, wNew, a, b);
+            if (h.xLeft > 0)
+            {
+                const double w = static_cast<double> (h.xLeft) / h.xLen;
+                double xo = h.xRaw + off;
+                if (G.fold)
+                    xo = mapPos (G, xo);
+                double ol = 0, orr = 0;
+                readAt (xo, wNew, ol, orr);
+                const double gi = fadeIn (1 - w), go = fadeIn (w);
+                a = a * gi + ol * go;
+                b = b * gi + orr * go;
+                h.xRaw += spd;
+                h.xLeft--;
+                h.peak = 2;
+            }
+            else if (h.peak < 1)
+            {
+                h.peak = 1;
+            }
+            bL[j] += a * gl * sg;
+            bR[j] += b * gr * sg;
+            raw += spd;
+            off += dOff;
+        }
+        h.raw = raw;
+        h.off = off;
+        h.stopG = sg;
+        ++ctx->levelReads;
     }
 }

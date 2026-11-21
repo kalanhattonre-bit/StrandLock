@@ -68,6 +68,8 @@ namespace sl::engine
         DisplayGrain grains[kDisplayGrains];
         DisplayStats stats;
         float peakL, peakR;        // the largest |output| per channel since the frame before (after the limiter)
+        bool rawOn;                // M7 V4: a raw audition plays the sound now playing (holding the mouse outside the Region)
+        float rawPos;              // M7 V4: where the newest one reads, 0..1 of that sound (when rawOn)
     };
 
     static_assert (std::is_trivially_copyable_v<DisplayFrame>, "the display frame crosses threads as plain bytes");

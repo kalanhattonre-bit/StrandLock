@@ -38,6 +38,7 @@
 //   library are jobs too. Every read, hash, encode and copy happens on the worker.
 
 #include "analysis/Analysis.h"
+#include "engine/OctaveLevels.h"
 #include "engine/SampleData.h"
 #include "rt/VersionExchange.h"
 #include "sounds/StarterSounds.h"
@@ -572,6 +573,7 @@ namespace sl::doc
             std::int32_t seed;
             std::shared_ptr<const sounds::StarterSound> sound;
             std::shared_ptr<const std::vector<analysis::Part>> parts;   // its suggested parts, once made
+            engine::LevelSet levels;                                    // M7 V4: its octave levels, once made
         };
         std::deque<CachedStarter> starters;   // most recently used last
         std::atomic<int> starterCount { 0 };

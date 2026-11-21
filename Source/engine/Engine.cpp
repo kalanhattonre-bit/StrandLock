@@ -67,6 +67,9 @@ namespace sl::engine
         ctx.sr = sr;
         ctx.inst = &smoother.current();
         ctx.clock = &clock;
+        ctx.levels = levelsOn;   // M7 V4: the tests' switch survives prepare
+        stopRaw();
+        rawSerial = 0;
 
         clock = Clock();
         clock.db = 2 / sr;   // this.db = 2 / this.sr (120 bpm)
@@ -99,6 +102,7 @@ namespace sl::engine
     {
         for (int i = 0; i < numVoices; ++i)
             voiceAt (order[static_cast<std::size_t> (i)]).done = true;
+        stopRaw();   // M7 V4: a raw audition holds a sound too
         numVoices = 0;
         slotUsed.fill (false);
         anyChasing = false;
@@ -205,6 +209,7 @@ namespace sl::engine
     {
         for (int i = 0; i < numVoices; ++i)
             voiceAt (order[static_cast<std::size_t> (i)]).done = true;
+        stopRaw();   // M7 V4: the raw audition stops at once too
         numVoices = 0;
         slotUsed.fill (false);
         anyChasing = false;
@@ -231,6 +236,7 @@ namespace sl::engine
         for (int i = 0; i < numVoices; ++i)
             voiceAt (order[static_cast<std::size_t> (i)]).steal();
         dropReleasedChases();
+        rawAuditionOff();   // M7 V4: a raw audition fades out on the sound it started on, as a stolen voice does
         if (sample == nullptr || ! sample->hasSamples() || sample->n < 8)
         {
             src = nullptr;
@@ -507,6 +513,7 @@ namespace sl::engine
             voiceAt (order[static_cast<std::size_t> (i)]).steal();
         dropReleasedChases();
         liveCount = 0;
+        rawAuditionOff();   // M7 V4
     }
 
     void Engine::setController (Ctrl controller, double value) noexcept
@@ -565,6 +572,8 @@ namespace sl::engine
         {
             k += n;
             catchUpPending = false;
+            const double byp = smoother.value (InstSmoother::bypass);
+            renderRaw (L, R, 0, n, 0, byp, byp);   // M7 V4: a raw audition fading on the sound before
             return;
         }
         int i = 0;
@@ -639,6 +648,7 @@ namespace sl::engine
             }
             compactVoices();
             outputStage (L, R, i, seg, gridPos);
+            renderRaw (L, R, i, seg, gridPos, cellByp0, cellByp1);   // M7 V4: the raw audition, after the output stage
             k += seg;
             i += seg;
         }
@@ -730,6 +740,9 @@ namespace sl::engine
                 if (! v.done && v.src.data != nullptr && v.src.epoch != 0 && v.src.epoch < e)
                     e = v.src.epoch;
             }
+            for (const RawPlayer& r : raw)   // M7 V4: a raw audition fading on the sound it started on
+                if (r.data != nullptr && r.epoch != 0 && r.epoch < e)
+                    e = r.epoch;
         }
         return e;
     }

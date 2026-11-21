@@ -73,5 +73,11 @@ namespace sl::engine
         double drift = 0, tiny = 0;
         bool regrab = false;
         double rho = 0;
+
+        // M7 V4 (fast reads, OctaveLevels.h): the octave level this head reads this tick (Tape: from its speed; Lock: from
+        // the rate ratio), and last tick's; when they differ, Tape crossfades from one to the other across the tick. Each
+        // Voice or Cloud grain keeps the level its own read speed chose when it started (gL). 0 = the sound itself.
+        int lv = 0, lvPrev = 0;
+        std::array<std::int8_t, 8> gL {};
     };
 }

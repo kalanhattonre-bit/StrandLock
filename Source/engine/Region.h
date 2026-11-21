@@ -13,9 +13,15 @@
 //    X frames into the X frames that lead into the Region start, landing exactly on frame 0.
 //  - none (the Region is the whole file, or there is no room on either side): a plain wrap.
 // Hold and Stop clamp to the Region; Bounce folds (mapPos).
+//
+// M7 V4: a read faster than 1.25x reads an octave level of the sound (engine/OctaveLevels.h). readRegLevel is readReg
+// line for line with every read from the level, so the seams, folds and edges are the same; readReg itself and
+// PlainStretch (the M3 reads) are unchanged.
 
+#include "engine/OctaveLevels.h"
 #include "engine/SampleData.h"
 #include "engine/SourceRead.h"
+#include "engine/Tables.h"
 
 #include <cmath>
 #include <cstdint>
@@ -44,6 +50,56 @@ namespace sl::engine
 
     /** readReg (S, G, x): l and r get the Region read at x (frames from the Region start, unbounded). */
     void readReg (const SampleData& s, const RegionState& g, double x, double& l, double& r) noexcept;
+
+    /** readReg at octave level `level` (1 .. S.numLevels; M7 V4): the same seams, folds and edges, line for line, every
+        read from the level (readLevel) at the same frame of the sound. */
+    inline void readRegLevel (const SampleData& S, const RegionState& G, int level, double x, double& RL, double& RR) noexcept
+    {
+        if (G.loop)
+        {
+            const double L = G.L, X = G.X;
+            if (x >= 0 && (G.post ? x < L : x < L - X))   // first pass, plain stretch
+            {
+                readLevel (S, level, G.rs + x, RL, RR);
+                return;
+            }
+            double v = x - L * std::floor (x / L);
+            if (v >= L)
+                v -= L;
+            if (X > 0)
+            {
+                if (G.post)
+                {
+                    if (v < X && (x >= L || x < 0))
+                    {
+                        const double w = v * G.invX, gi = fadeIn (w), go = fadeIn (1 - w), kc = 1 / std::sqrt (1 + 2 * G.rho * gi * go);
+                        double ol = 0, orr = 0;
+                        readLevel (S, level, G.rs + L + v, ol, orr);
+                        readLevel (S, level, G.rs + v, RL, RR);
+                        RL = (RL * gi + ol * go) * kc;
+                        RR = (RR * gi + orr * go) * kc;
+                        return;
+                    }
+                }
+                else if (v >= L - X)
+                {
+                    const double w = (v - (L - X)) * G.invX, gi = fadeIn (w), go = fadeIn (1 - w), kc = 1 / std::sqrt (1 + 2 * G.rho * gi * go);
+                    double il = 0, ir = 0;
+                    readLevel (S, level, G.rs + v - L, il, ir);
+                    readLevel (S, level, G.rs + v, RL, RR);
+                    RL = (RL * go + il * gi) * kc;
+                    RR = (RR * go + ir * gi) * kc;
+                    return;
+                }
+            }
+            readLevel (S, level, G.rs + v, RL, RR);
+        }
+        else
+        {
+            const double u = x < 0 ? 0 : x > G.L - 1 ? G.L - 1 : x;
+            readLevel (S, level, G.rs + u, RL, RR);
+        }
+    }
 
     /** seamRho (S, G): the correlation of the two sides of the seam fade (both channels summed), 0..1. */
     double seamRho (const SampleData& s, const RegionState& g) noexcept;

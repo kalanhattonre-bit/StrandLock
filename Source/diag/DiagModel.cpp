@@ -324,6 +324,22 @@ namespace sl::diag
         bump (blocksWaitingForSound);
     }
 
+    void DiagModel::audioPreview (bool switchOn, bool playing, double beat) noexcept
+    {
+        previewOnNow.store (switchOn, relaxed);
+        previewPlayingNow.store (playing, relaxed);
+        previewBeatNow.store (std::isfinite (beat) ? beat : 0.0, relaxed);
+    }
+
+    juce::String DiagModel::previewText (bool switchOn, bool playing, double beat)
+    {
+        if (! switchOn)
+            return "off";
+        if (playing)
+            return "on, at beat " + juce::String (beat, 3) + " (Cubase is stopped, so StrandLock plays the clip on its own clock)";
+        return "on, not playing (it plays while Cubase is stopped)";
+    }
+
     void DiagModel::audioEngine (const EngineFigures& f) noexcept
     {
         engineVoices.store (f.voices, relaxed);
@@ -495,6 +511,9 @@ namespace sl::diag
         s.cuts = engineCuts.load (relaxed);
         s.nonFinite = engineNonFinite.load (relaxed);
         s.filterResets = engineFilterResets.load (relaxed);
+        s.previewOn = previewOnNow.load (relaxed);
+        s.previewPlaying = previewPlayingNow.load (relaxed);
+        s.previewBeat = previewBeatNow.load (relaxed);
 
         s.blockStarts = listOf (blockStartHistory);
         s.wraps = listOf (wrapHistory);
@@ -566,6 +585,9 @@ namespace sl::diag
         for (const auto& w : s.wraps)
             wraps << "; " << (w.looping ? "wrap " : "jump ") << fixed (w.before, 4) << " -> " << fixed (w.after, 4);
         lines.add (wraps);
+
+        // Preview (M7 V4, plan 7.9 decision 7b): the switch and its clock's beat, in one line.
+        lines.add ("Preview: " + previewText (s.previewOn, s.previewPlaying, s.previewBeat));
 
         // MIDI.
         lines.add ("MIDI: " + juce::String ((juce::int64) s.noteOns) + " note on, " + juce::String ((juce::int64) s.noteOffs) + " note off (last "

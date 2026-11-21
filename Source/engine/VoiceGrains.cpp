@@ -50,6 +50,8 @@ namespace sl::engine
         double* gS = h.gS.data();
         double* gN = h.gN.data();
         double* gA = h.gA.data();
+        std::int8_t* gL = h.gL.data();                       // M7 V4: each grain's octave level (0 = the sound itself)
+        const int levels = ctx->levels ? S.numLevels : 0;    // the levels a grain may read (none: every read as in M3)
         // cap = Math.max (1, Math.min (voice ? VOICE_GRAINS : CLOUD_GRAINS, h.grant))
         const int most = voice ? kVoiceGrains : kCloudGrains;
         const int granted = most < h.grant ? most : h.grant;
@@ -120,6 +122,11 @@ namespace sl::engine
                     gS[g] = step;
                     gN[g] = h.len;
                     gA[g] = h.norm;
+                    // M7 V4: a grain faster than 1.25x (a raised formant, the Tape switch, Cloud far up) reads the octave
+                    // level its speed chooses, for its whole life; the grain windows crossfade one level into the next
+                    gL[g] = static_cast<std::int8_t> (levels > 0 ? levelFor (step, levels) : 0);
+                    if (gL[g] != 0)
+                        ++ctx->levelReads;
                     h.gIdx++;
                     h.nextT += hop;
                 }
@@ -140,6 +147,7 @@ namespace sl::engine
                     gS[g] = gS[e];
                     gN[g] = gN[e];
                     gA[g] = gA[e];
+                    gL[g] = gL[e];
                     --g;
                     continue;
                 }
@@ -150,7 +158,9 @@ namespace sl::engine
                 const double w = (HANN[ii] + (fi - ii) * (static_cast<double> (HANN[ii + 1]) - HANN[ii])) * gA[g];
                 const double xr = gX[g] + a * gS[g];
                 double l = 0, r = 0;
-                if (! plain.read (xr, l, r))   // fast path: plain stretch of this pass (same maths as readAbs)
+                if (gL[g] != 0)
+                    readRegLevel (S, G, gL[g], xr, l, r);   // M7 V4: the grain's octave level
+                else if (! plain.read (xr, l, r))          // fast path: plain stretch of this pass (same maths as readAbs)
                     readReg (S, G, xr, l, r);
                 sL += l * w;
                 sR += r * w;

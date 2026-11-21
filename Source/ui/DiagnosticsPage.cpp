@@ -132,6 +132,8 @@ namespace sl::ui
             for (std::size_t i = lastN (s.blockStarts, 6); i < s.blockStarts.size(); ++i)
                 starts << (starts.isEmpty() ? "" : " ") << (s.blockStarts[i].hasPosition ? fixed (s.blockStarts[i].ppq, 3) : juce::String ("-"));
             c.rows.push_back ({ "Block starts (ppq)", starts.isEmpty() ? juce::String ("none yet") : starts });
+            // M7 V4 (plan 7.9 decision 7b): the same line as Copy report's
+            c.rows.push_back ({ "Preview", diag::DiagModel::previewText (s.previewOn, s.previewPlaying, s.previewBeat) });
             next.push_back (std::move (c));
         }
 

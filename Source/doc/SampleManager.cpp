@@ -868,12 +868,14 @@ namespace sl::doc
     {
         std::shared_ptr<const sounds::StarterSound> sound;
         std::shared_ptr<const std::vector<analysis::Part>> parts;
+        engine::LevelSet levels;
         for (auto it = starters.begin(); it != starters.end(); ++it)
         {
             if (it->id == id && it->seed == seed)
             {
                 sound = it->sound;
                 parts = it->parts;
+                levels = it->levels;
                 starters.erase (it);
                 break;
             }
@@ -887,16 +889,25 @@ namespace sl::doc
             ++made;
             starterMs = ms;
         }
-        starters.push_back ({ id, seed, sound, parts });
-        while (starters.size() > static_cast<std::size_t> (kStarterCacheSize))
-            starters.pop_front();
-        starterCount.store (static_cast<int> (starters.size()));
 
         const auto& info = sounds::starterInfo (id);
         const std::shared_ptr<const void> storage (sound, sound.get());
         Made m;
         m.data = engine::makeSampleData (storage, sound->left.data(), sound->right.data(), static_cast<std::int64_t> (sound->left.size()),
                                          static_cast<std::int64_t> (sound->right.size()), sound->sampleRate, info.name);
+        // M7 V4 (fast reads): a starter's octave levels are built once and kept with it in the cache of 4, like its parts.
+        // A starter is a few seconds long, so this takes milliseconds and nothing stops it.
+        if (m.data != nullptr)
+        {
+            if (levels.storage == nullptr)
+                levels = engine::buildOctaveLevels (*m.data);
+            engine::attachOctaveLevels (*m.data, levels);
+        }
+        starters.push_back ({ id, seed, sound, parts, levels });
+        while (starters.size() > static_cast<std::size_t> (kStarterCacheSize))
+            starters.pop_front();
+        starterCount.store (static_cast<int> (starters.size()));
+
         auto view = std::make_shared<SoundView>();
         if (m.data != nullptr)
             viewOf (*view, *m.data);
@@ -2025,6 +2036,14 @@ namespace sl::doc
         {
             report.message = "Could not read that file as sound";
             finish (r.id, report, nullptr, nullptr, nullptr);
+            return;
+        }
+        // M7 V4 (fast reads, 7.9 decision 6): the sound's octave levels, built here on the worker before anything else sees
+        // the sound, in its own format (16-bit for a part longer than 3 minutes). A copy from the library or the project,
+        // and a Region excerpt, come this way too. A newer request stops the build, and this sound is dropped.
+        if (! engine::addOctaveLevels (*m.data, stop))
+        {
+            dropStopped();
             return;
         }
         if (fromProject)

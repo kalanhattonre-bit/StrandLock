@@ -98,6 +98,11 @@ namespace sl::engine
 
     inline constexpr double kRampMs = 20.0;          // the ramp20ms smoothers (engine/InstSmoother, 2.3)
 
+    // M7 V4: the raw audition (Engine::rawAuditionOn; sl-ui.js rawAuditionStart and rawAuditionStop).
+    inline constexpr double kRawGain = 0.7;                // the prototype's gain node: 0.7
+    inline constexpr double kRawFadeInSeconds = 0.012;     // linearRampToValueAtTime (0.7, t + 0.012)
+    inline constexpr double kRawFadeOutSeconds = 0.030;    // linearRampToValueAtTime (0, t + 0.03)
+
     static_assert (kVoicePool >= 2 * kMaxPolyphony, "every playable voice can leave a steal tail");
     static_assert (kMaxHeads * 2 * kLockMaxN == kBudget48k, "8 heads x 2 captures x 12 taps = the 48 kHz budget");
 }

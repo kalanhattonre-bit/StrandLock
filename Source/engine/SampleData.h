@@ -14,7 +14,13 @@
 // which is exact in float and in double and is the value JUCE's own 16-bit decoder gives. So the engine reads a
 // 16-bit sound as exactly the doubles a float sound holding s / 32768 would give, and plays it bit for bit the
 // same (test_long_file checks it). Every read path goes through SourceRead.h's helpers, which pick the format.
+//
+// Octave levels (M7 V4, plan 4 M7 "fast reads", 7.9 decision 6): after the decode the SampleManager's worker builds
+// levels 1 to 3 of the sound (engine/OctaveLevels.h): each one the level below low-passed and decimated by 2, stored
+// in the sound's own format. A read faster than 1.25x reads a level instead of the sound, so Tape far up does not
+// alias. A sound made anywhere else (a test, a starter in an engine test) has none, and plays as in M3.
 
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <memory>
@@ -63,6 +69,20 @@ namespace sl::engine
         }
     };
 
+    /** M7 V4: one octave level of a sound (engine/OctaveLevels.h): the sound low-passed and decimated by 2, L times, in
+        the sound's own format. Frame j of level L stands for the sound's frame j x 2^L. */
+    struct OctaveLevel
+    {
+        const float* L = nullptr;            // f32: n frames
+        const float* R = nullptr;            // f32: the same pointer as L when the sound is not stereo
+        const std::int16_t* L16 = nullptr;   // i16: n frames
+        const std::int16_t* R16 = nullptr;   // i16: the same pointer as L16 when the sound is not stereo
+        std::int64_t n = 0;                  // frames
+    };
+
+    /** Levels 1 to 3: reads up to 8 x 1.25 = 10 times faster than the sound stay clean. */
+    inline constexpr int kMaxOctaveLevels = 3;
+
     struct SampleData
     {
         std::uint64_t epoch = 0;                  // stamped by VersionExchange::publish (first: a live one is never 0xDD.. there)
@@ -78,6 +98,12 @@ namespace sl::engine
         std::string name;                         // display name (message side only)
         std::shared_ptr<const void> storage;      // keeps the samples alive
         ExcerptMap excerpt;                       // M7 V3: a Region excerpt (the Region maps onto it), else inactive
+
+        // M7 V4: octave levels 1 .. numLevels (levels[0] is level 1), built by the worker after the decode; none until
+        // then. levelStorage keeps their samples alive. The audio thread reads them only for reads faster than 1.25x.
+        int numLevels = 0;
+        std::array<OctaveLevel, kMaxOctaveLevels> levels {};
+        std::shared_ptr<const void> levelStorage;
 
         /** True when the left channel is there in the stored format. */
         bool hasSamples() const noexcept { return format == SampleFormat::i16 ? L16 != nullptr : L != nullptr; }
@@ -95,6 +121,16 @@ namespace sl::engine
         {
             const std::int64_t each = format == SampleFormat::i16 ? 2 : 4;
             return n * each * (stereo ? 2 : 1);
+        }
+
+        /** The bytes the octave levels take (M7 V4: at most sampleBytes () again). */
+        std::int64_t levelBytes() const noexcept
+        {
+            const std::int64_t each = (format == SampleFormat::i16 ? 2 : 4) * (stereo ? 2 : 1);
+            std::int64_t total = 0;
+            for (int i = 0; i < numLevels && i < kMaxOctaveLevels; ++i)
+                total += levels[static_cast<std::size_t> (i)].n * each;
+            return total;
         }
     };
 

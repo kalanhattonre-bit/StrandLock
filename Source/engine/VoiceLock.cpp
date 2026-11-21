@@ -44,6 +44,7 @@ namespace sl::engine
         const SampleData& S = *src.data;
         const RegionState& G = reg;
         const double PR = h.PR;
+        const int lvl = h.lv;   // M7 V4: the taps' octave level (0 = the sound itself)
         double ab = 0, aa = 0, bb = 0;
         for (int q = 0; q < 16; ++q)
         {
@@ -53,14 +54,20 @@ namespace sl::engine
             {
                 const double p = th + k, w = h.nA > 1 ? hannTab (p / h.nA) : 1;
                 double l = 0, r = 0;
-                readReg (S, G, h.capA + p * PR, l, r);
+                if (lvl != 0)
+                    readRegLevel (S, G, lvl, h.capA + p * PR, l, r);
+                else
+                    readReg (S, G, h.capA + p * PR, l, r);
                 a += (l + r) * w;
             }
             for (int k = 0; k < h.nB; ++k)
             {
                 const double p = th + k, w = h.nB > 1 ? hannTab (p / h.nB) : 1;
                 double l = 0, r = 0;
-                readReg (S, G, h.capB + p * PR, l, r);
+                if (lvl != 0)
+                    readRegLevel (S, G, lvl, h.capB + p * PR, l, r);
+                else
+                    readReg (S, G, h.capB + p * PR, l, r);
                 b += (l + r) * w;
             }
             a *= h.nA > 1 ? std::sqrt (2.0 / h.nA) : 1;
@@ -90,6 +97,9 @@ namespace sl::engine
         // inline reads (mono or stereo) on the plain stretch of any loop pass; the result equals readReg's exactly
         const PlainStretch plain (S, G);
         const float* HANN = hannTable();
+        const int lvl = h.lv;   // M7 V4: the taps read at the rate ratio; faster than 1.25x they read an octave level
+        if (lvl != 0)
+            ++ctx->levelReads;
         if (h.needPrime)
         {
             h.needPrime = false;
@@ -132,7 +142,9 @@ namespace sl::engine
                 }
                 const double xr = h.capA + p * PR;
                 double l = 0, r = 0;
-                if (! plain.read (xr, l, r))
+                if (lvl != 0)
+                    readRegLevel (S, G, lvl, xr, l, r);
+                else if (! plain.read (xr, l, r))
                     readReg (S, G, xr, l, r);
                 aL += l * w;
                 aR += r * w;
@@ -157,7 +169,9 @@ namespace sl::engine
                     }
                     const double xr = h.capB + p * PR;
                     double l = 0, r = 0;
-                    if (! plain.read (xr, l, r))
+                    if (lvl != 0)
+                        readRegLevel (S, G, lvl, xr, l, r);
+                    else if (! plain.read (xr, l, r))
                         readReg (S, G, xr, l, r);
                     bl += l * w;
                     br += r * w;

@@ -41,6 +41,8 @@ namespace sl::engine
         bool wheelTouched[2] = { false, false };
         double bend = 0;                      // E.bend: -1..1
         std::int64_t filterResets = 0;        // biquad NaN resets, counted by every voice (Stats::filterResets)
+        bool levels = true;                   // M7 V4: reads faster than 1.25x read an octave level (the tests' switch)
+        std::int64_t levelReads = 0;          // M7 V4: head runs (Tape, Lock) and grains that read a level (Stats::levelReads)
     };
 
     /** The sample a voice plays, with the rate it plays it at, for the voice's whole life. */
@@ -146,8 +148,13 @@ namespace sl::engine
             envelope and the gain. */
         void renderRun (float* outL, float* outR, int o, int run) noexcept;
 
-        /** runTape (h, run): Hermite reads at the head's speed; Scatter jumps and Refresh stutters crossfade 5 ms. */
+        /** runTape (h, run): Hermite reads at the head's speed; Scatter jumps and Refresh stutters crossfade 5 ms. A head
+            that reads an octave level this tick (M7 V4, Head::lv) runs runTapeLevels instead. */
         void runTape (Head& h, int run) noexcept;
+
+        /** M7 V4: runTape with every read from the head's octave level (readRegLevel), crossfading from last tick's level
+            across this tick when it changed (the weight (ph + j + 1) / 32, as the head gains ramp). */
+        void runTapeLevels (Head& h, int run) noexcept;
 
         /** runGrains (h, run, voice) (VoiceGrains.cpp): Voice (voice = true: root-grid PSOLA, the formant kept)
             and Cloud (free grains in ms, Spray) grains, Hann windows with fractional start times; at most

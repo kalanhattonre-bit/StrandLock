@@ -90,6 +90,14 @@ namespace sl::diag
         /** Audio thread: the engine's figures now. */
         void audioEngine (const EngineFigures& figures) noexcept;
 
+        /** Audio thread, every block (M7 V4, plan 7.9 decision 7b): Preview's switch as the block read it, whether the block
+            played Preview's own clock (Cubase stopped), and that clock's beat at the next block. */
+        void audioPreview (bool switchOn, bool playing, double beat) noexcept;
+
+        /** The words the Diagnostics page and Copy report give Preview: "off"; "on, at beat 3.250 (Cubase is stopped, so
+            StrandLock plays the clip on its own clock)"; or "on, not playing (it plays while Cubase is stopped)". */
+        static juce::String previewText (bool switchOn, bool playing, double beat);
+
         //==========================================================================================
         // Message thread.
 
@@ -164,6 +172,10 @@ namespace sl::diag
             int voices = 0, maxVoices = 0;
             long long steals = 0, cuts = 0, nonFinite = 0, filterResets = 0;
 
+            // Preview (audioPreview, M7 V4): the switch, whether its clock played the last block, and its beat.
+            bool previewOn = false, previewPlaying = false;
+            double previewBeat = 0.0;
+
             std::vector<BlockStart> blockStarts;   // recent, oldest first
             std::vector<Wrap> wraps;
             std::vector<BlockOverEnd> blocksOverEnd;
@@ -221,6 +233,8 @@ namespace sl::diag
         std::atomic<std::uint64_t> engineReports { 0 };
         std::atomic<int> engineVoices { 0 }, maxEngineVoices { 0 };
         std::atomic<long long> engineSteals { 0 }, engineCuts { 0 }, engineNonFinite { 0 }, engineFilterResets { 0 };
+        std::atomic<bool> previewOnNow { false }, previewPlayingNow { false };   // M7 V4
+        std::atomic<double> previewBeatNow { 0.0 };
 
         // The audio thread's own state (only it touches these, or prepare while no audio runs).
         std::uint64_t blockIndex = 0;

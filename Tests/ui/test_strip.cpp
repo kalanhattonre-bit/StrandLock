@@ -562,12 +562,19 @@ SL_TEST ("ui", stripRegionGestures)
                fmt ("a held press plays from the middle of the Region (%.4f) and stops; no undo step; the readout says \"%s\"",
                     cmds.empty() ? -1.0 : cmds[0].startPos, readout.toRawUTF8()));
 
-        // Outside the Region: the readout says so, and nothing is asked to play.
+        // Outside the Region the readout says so, and (M7 V4, plan 7.9 decision 7a; before V4 nothing played there) the
+        // sound plays as recorded from that spot until the mouse lets go: no note, and no undo step.
         const float out = strip.xOf (std::max (0.0, before.start - 0.05));
+        const double outPos = std::min (1.0, std::max (0.0, strip.posOf (out)));
         strip.mouseDown (mouse (strip, { out, midY (strip) }, { out, midY (strip) }, false));
         const auto outside = strip.getReadout();
         strip.mouseUp (mouse (strip, { out, midY (strip) }, { out, midY (strip) }, false, juce::ModifierKeys()));
-        check (drainCommands (proc).empty() && outside.endsWith ("outside the Region"), fmt ("outside the Region: \"%s\"", outside.toRawUTF8()));
+        const auto outCmds = drainCommands (proc);
+        check (outCmds.size() == 2 && outCmds[0].kind == doc::UiCommandKind::rawAuditionOn && std::abs (outCmds[0].startPos - outPos) < 1e-12
+                   && outCmds[1].kind == doc::UiCommandKind::rawAuditionOff && outside.endsWith ("outside the Region: the file as recorded")
+                   && proc.undoLabel() == label,
+               fmt ("outside the Region: the sound as recorded from %.4f, then its fade (%d commands); \"%s\"", outPos, (int) outCmds.size(),
+                    outside.toRawUTF8()));
     }
 
     // 7. At the end on the strip: one undo step named as the prototype names it.

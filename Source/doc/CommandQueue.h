@@ -14,6 +14,10 @@
 //   previewStart   taken and ignored: Preview (U5, M6) is a switch the audio thread reads every block and turns off
 //   previewStop    itself when the host plays (StrandLockProcessor::setPreview), so it is an atomic word, not a command
 //   midiLearnArm   MidiRouter reports the next other CC for that wheel (M8); wheel -1 disarms
+//   rawAuditionOn  engine.rawAuditionOn (startPos)              M7 V4: holding the mouse on the waveform outside the
+//                                                                Region (startPos = where, 0..1 of the sound): the sound
+//                                                                as recorded from there
+//   rawAuditionOff engine.rawAuditionOff ()                      its 30 ms fade out
 
 #include "rt/SpscFifo.h"
 
@@ -32,7 +36,9 @@ namespace sl::doc
         allNotesOff,
         previewStart,
         previewStop,
-        midiLearnArm
+        midiLearnArm,
+        rawAuditionOn,    // M7 V4
+        rawAuditionOff
     };
 
     struct UiCommand
@@ -95,6 +101,22 @@ namespace sl::doc
             UiCommand c;
             c.kind = UiCommandKind::midiLearnArm;
             c.wheel = static_cast<std::int8_t> (wheelIndex == 0 || wheelIndex == 1 ? wheelIndex : -1);
+            return c;
+        }
+
+        /** M7 V4: the sound as recorded from where (0..1 of the sound's frames). */
+        static UiCommand rawAuditionOn (double where) noexcept
+        {
+            UiCommand c;
+            c.kind = UiCommandKind::rawAuditionOn;
+            c.startPos = where;
+            return c;
+        }
+
+        static UiCommand rawAuditionOff() noexcept
+        {
+            UiCommand c;
+            c.kind = UiCommandKind::rawAuditionOff;
             return c;
         }
     };
