@@ -153,7 +153,8 @@ SL_TEST ("songs", partLoadedFileReloadsEverywhere)
     const auto dir = songs::tempFolder ("locate-part");
     const auto lib = dir.getChildFile ("library");
     const auto file = dir.getChildFile ("twelve minutes.wav");
-    check (writeTwelveMinutes (file), fmt ("a 12-minute mono 8 kHz 16-bit WAV written at test time (%lld bytes)", (long long) file.getSize()));
+    const bool written = writeTwelveMinutes (file);   // before the check: its message is made before its condition on some compilers
+    check (written, fmt ("a 12-minute mono 8 kHz 16-bit WAV written at test time (%lld bytes)", (long long) file.getSize()));
     const std::uint64_t from = 6 * 60 * 8000;
 
     StrandLockProcessor p;

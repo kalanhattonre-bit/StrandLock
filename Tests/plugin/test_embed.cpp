@@ -483,8 +483,9 @@ SL_TEST ("songs", embedAnswerSavedOnce)
     const auto a = dir.getChildFile ("song a.wav");
     const auto b = dir.getChildFile ("song b.wav");
     const std::int64_t frames = 240 * 44100;   // 4 minutes, mono 16-bit: 21.2 MB
-    check (writeTone (a, 110.0, 44100.0, frames) && writeTone (b, 147.0, 44100.0, frames) && a.getSize() > 20000000 && b.getSize() > 20000000
-               && a.getSize() < 50000000,
+    // (written before the check: its message is made before its condition on some compilers)
+    const bool written = writeTone (a, 110.0, 44100.0, frames) && writeTone (b, 147.0, 44100.0, frames);
+    check (written && a.getSize() > 20000000 && b.getSize() > 20000000 && a.getSize() < 50000000,
            fmt ("two 4-minute mono 16-bit WAVs written at test time (%lld bytes each)", (long long) a.getSize()));
 
     StrandLockProcessor p;
@@ -673,7 +674,8 @@ SL_TEST ("songs", largestClipWithFiftyMegabyteEmbed)
     const auto file = dir.getChildFile ("fifty.wav");
     // 16-bit mono at 44.1 kHz, just under the largest file kept whole (50,000,000 bytes with SAUD's 37-byte header)
     const auto frames = (std::int64_t) ((doc::SampleManager::kEmbedMost - 4096) / 2);
-    check (writeTone (file, 110.0, 44100.0, frames) && file.getSize() > 49900000 && (std::uint64_t) file.getSize() <= doc::SampleManager::kEmbedMost,
+    const bool written = writeTone (file, 110.0, 44100.0, frames);   // before the check: its message is made before its condition on some compilers
+    check (written && file.getSize() > 49900000 && (std::uint64_t) file.getSize() <= doc::SampleManager::kEmbedMost,
            fmt ("a 9.4-minute WAV of %lld bytes written at test time (the most kept whole: %llu)", (long long) file.getSize(),
                 (unsigned long long) doc::SampleManager::kEmbedMost));
 

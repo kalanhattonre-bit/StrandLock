@@ -359,9 +359,12 @@ answer, the Region excerpt (FLAC 24-bit, never over 50 MB), the opt-in library a
   kept, and the library line.
 - Done: run 44927526903 on f2a61a6 (the code, the two M2 checks updated, no new test yet) built on both platforms;
   every earlier test passed on Windows and Linux and under the sanitizers.
-- In progress: run 44929619697 on 1591391: the tests (`test_embed.cpp`, `test_locate.cpp`) and the pictures
-  (`Tests/ui/test_m7_embed_pictures.cpp`).
-- Next: the tests green on both platforms, the snapshots looked at, the results below, main fast-forwarded.
+- Done: runs 44929619697 (1591391, the tests and pictures), 44930610865 (4993c37, the limits case and the load's
+  allocations) and 44931859255 (18859c9, the library line) green on every job and step. Every V3 picture looked at
+  (the Locate banner, the question, a part kept with the strip on the excerpt, the Sound tab's rows; dark and light):
+  each shows what it should. Before 18859c9 the library line read "the library holds not measured yet".
+- Last: the commit with these lines (it also makes three test messages print the size of a file written inside a
+  check's call, which MSVC printed as 0 bytes) gets its own green run, then main is fast-forwarded to it.
 
 ### Files
 
@@ -468,6 +471,46 @@ answer, the Region excerpt (FLAC 24-bit, never over 50 MB), the opt-in library a
 | `songs/libraryCopiesByHash` | the library | off by default, nothing copied; on: the file playing copied as its first 16 hex digits + ".wav", its size measured; the same file not copied twice; another file copied; the Sound tab's line shows the size |
 | `songs/locateAnotherFile` | Locate | another file: plays with every setting kept, its own record and analysis, the toast says it may differ; the project's switch stays, the new file has no answer yet |
 | `ui/m7EmbedPictures` and the `m7_locate_*`, `m7_question_*`, `m7_part_kept_*`, `m7_keep_row_*` snapshots | (pictures) | the Locate banner, the question with Yes / No / Just the Region in that order, a part kept (the strip shows the excerpt), the Sound tab's keep and library rows; dark and light |
+
+### Results (run 44931859255 on 18859c9, all green)
+
+- Windows Release: 2275 checks in 384 tests, 0 failed (songs 16 tests, 126 checks; state 23, 168; ui 135, 661). Linux
+  Release: 2267 checks in 384 tests, 0 failed. Sanitizers: contract, model, engine and analysis 920 checks in 155 tests;
+  state 169 checks in 23 tests (the three V3 state tests under AddressSanitizer and UBSan). Debug CRT `--only alloc`: 44
+  checks in 9 tests, 0 JUCE assertions; Debug snapshots: 0 JUCE assertions. pluginval strictness 10: SUCCESS. Fixture
+  check: passed (26 files, 4,962,066 bytes). No compiler warning from V3's files (GCC's float-equal warning in
+  SampleData.h is M2's makeSampleData, moved down the file again, by ExcerptMap).
+- A 2,099,264-byte WAV kept whole: its bytes identical in SAUD; with the file gone every sample bit for bit, re-saved
+  byte-identically; one changed byte refused.
+- The 45 MB case (44,928,141-byte SAUD): saved in 99 ms and loaded, its sound decoded from the project, in 291 ms on
+  Windows (186 and 432 ms on Linux), against a target of 2 s (gate 10 s). The load's largest allocation 44.9 MB (limit
+  51 MiB) and 45.0 MB live at most for a 45.0 MB project (plan 3's limit is 2 x the blob + 64 MiB): the SAUD is held once.
+- The Region excerpt: frames 432,000 + 288,000 for the Region 480,000 .. 672,000; within 5.96e-08 (2^-24) of the original
+  floats, against 2^-23 = 1.19e-07; one frame off, 0.111. With the file gone the Region plays as 0.166667 .. 0.833333 of
+  the excerpt; automation before it plays 0 .. 0, after it 1 .. 1.
+- No excerpt over 50 MB: the whole 52,032,104-byte noise file as the Region is refused (the encoder stops at 50 MB);
+  a 2 s Region of it is kept in 768,689 bytes (192,000 frames).
+- The limits case: the largest clip and a 49,996,007-byte SAUD in a 83,551,596-byte project (the limit 87,748,736),
+  loaded in another instance and re-saved byte-identically.
+- The part-loaded 12-minute file from its path, the library and the project: the same frames, Region bits and 2 chips,
+  re-saved byte-identically each time. The library: 569793c776a5bfc3.wav, 44,204 bytes measured, then 110,458 with a
+  second file. 2000 mutations of a project with SAUD: 0 exceptions, 0 parameters out of range, 0 unsound saves.
+
+### Hand-off for V4
+
+- **Sounds from a copy.** A sound found in the library or in the project (`SoundView::source`) comes through
+  `fileSound` like any file, so the octave levels V4 builds after a decode apply to it too. A Region excerpt is an
+  ordinary `SampleData` with `excerpt.active`: `ParamBridge::readInst (refs, state, playing)` maps the Region onto it
+  before the engine sees it, so the level choice needs nothing more.
+- **Memory.** A file of up to 20 MB is held twice in memory while it plays: its samples, and its bytes ready to save
+  (`SoundView::original`). The octave levels' budget (the fast-reads row) is of the samples, so the bytes are outside it.
+- **Saves wait.** `getStateInformation` waits (at most 5 s) for a Region excerpt the worker is making; a save never waits
+  otherwise. `waitForEmbed` and `getEmbeddedPayload` are there for tests.
+- **For the Cubase checklist (M7 section)**, besides V2's list: reopen a project after moving its small file (it plays
+  from the project, the toast says so); load a 20-50 MB file (the question once; save, reopen: not asked again); with
+  Keep the sound in the project off, move the file (the Locate banner; Locate sample... brings it back with every
+  setting); turn the library on in the Sound tab, move a file, reopen (it plays from the library); a song over 50 MB
+  with a long Region (the toast says it is too long to keep).
 
 ### For the architect
 
