@@ -16,8 +16,10 @@ The analysis port: `prototype-v4/src/sl-analysis.js` (SLAnalysis) in `Source/ana
 - Done: `analysis/detect.json` gains 6 cases (other sample rates, the 5-minute song); `tools/fixtures/analysis.js` and
   `tools/README-fixtures.md` follow. `node tools/make-fixtures.js --check` passes (4.96 MB).
 - Done: `Tests/analysis/test_detect.cpp` (group `analysis`); the sanitizer job runs the group.
-- In progress: the first CI run on the branch.
-- Next: the CI figures below, then the fast-forward of main.
+- Done: run 44856126113 on fc592ac green on every job and step (figures below). After it, the test holds the starters
+  while it builds the song (it was making repeated ones again) and names any case that is within tolerance but not
+  bit for bit; these notes took the figures.
+- Next: a green run on the new head, then the fast-forward of main.
 
 ### Files
 
@@ -95,9 +97,31 @@ The analysis port: `prototype-v4/src/sl-analysis.js` (SLAnalysis) in `Source/ana
 | `tempoOfResampledBeats` | (extra) | the prototype test's Beat loop resampled to 92, 100, 108, 128 and 140 bpm: a found tempo within 1 bpm |
 | `analysisPieces` | (extra) | fft (512) against a direct DFT; the bit reversal a permutation; overlapOk at and past half; estimateTempo on 4 onset curves against SLAnalysis._estimateTempo's values (120, 139.67, 84.72, and 120 not found), and a flat curve |
 
-### Results (CI)
+### Results (CI run 44856126113 on fc592ac, all green)
 
-- (to come)
+- Windows Release: 2074 checks in 358 tests, 0 failed. Linux Release: 2066 checks in 358 tests, 0 failed. Sanitizers:
+  contract, model, engine and analysis 912 checks in 154 tests; state 142 checks in 20 tests. Debug CRT `--only alloc`:
+  41 checks in 8 tests, 0 JUCE assertions; Debug snapshots: 0 JUCE assertions. pluginval strictness 10: SUCCESS.
+  Fixture check: passed (26 files, 4,962,066 bytes). No compiler warning from the new files (MSVC /W4, GCC).
+- detect.json: 34 of 34 cases within the plan's tolerances on Windows, on Linux and under the sanitizers; 33 bit for
+  bit. 23 of the 34 inputs are bit-exact copies of the prototype's (the rest use the starters, within 2e-7). The DC
+  case: the plugin says no clear pitch; the port with the prototype's rule gives the recorded MIDI 90 +23.3 c,
+  1500 Hz. Decision 3 changes none of the other 33 cases. 41,700 reads, 0 outside the sound.
+- Detection: the largest errors over 12 tones each are 0.00 (C1), 0.00 (A1), 0.00 (A2), 0.30 (A3) and 2.00 cents
+  (C5), against 10. Keys: C major (r 0.877), G major (0.841), A minor (0.804). Six seeds of white noise, silence, a
+  30 ms note and DC: no clear pitch. A3 on a DC offset: MIDI 69 +0.1 c.
+- Speed, suggestParts on the 5-minute stereo 44.1 kHz song (target 1.0 s, gate 5 s, the slowest of 3 runs): Windows
+  87.5 / 87.5 / 88.2 ms, Linux 62.9 / 63.0 / 63.1 ms; under the sanitizers 216 / 215 / 224 ms (not gated). On the
+  same song detectPitch takes 57.8 ms on Windows (22.0 ms Linux) and detectKey 28.3 ms (24.4 ms). No target is
+  missed.
+- Memory on the same song (both platforms): peak live heap 0.23 MB in detectPitch, 0.07 MB in detectKey and 1.66 MB
+  in suggestParts (the largest block 0.21 MB), against the gate of 6.6 MB (half the prototype's 13.23 MB 11 kHz copy;
+  its mono copy would be 52.92 MB). Stop was asked 56, 40 and 407 times; one that fires on its fifth question ends
+  each analysis with its empty answer.
+- The tempo of the resampled Beat loop: 92, 100, 108, 128 and 140 bpm found exactly. fft (512) against a direct DFT:
+  1.42e-13 at most (the largest bin 183.3). estimateTempo: the prototype's 120, 139.67, 84.72 and 120 (not found).
+- The 5-minute song took 1279 ms to make on Windows (571 ms on Linux): the test let each starter go after its section,
+  and the shared cache made it again for the next. The test now holds them.
 
 ### Hand-off for V2
 
@@ -108,10 +132,19 @@ The analysis port: `prototype-v4/src/sl-analysis.js` (SLAnalysis) in `Source/ana
   Region's frames is enough (or a FloatSource over offset pointers).
 - **Cancelling.** Pass a `Stop` that returns true once a newer request is waiting (the SampleManager's "newest wins").
   A stopped call returns no pitch, no key or no parts, so check the Stop yourself before storing a result.
-- **Memory.** No full-length buffer is made: on the 5-minute stereo song each function stays under 6.6 MB live (CI
-  figures above); a 10-minute file at 48 kHz has about twice the frames, so about twice the per-frame values.
+- **Memory.** No full-length buffer is made: on the 5-minute stereo song suggestParts peaks at 1.66 MB live and the
+  others far less (CI figures above). A 10-minute file at 48 kHz has 2.2 times the frames, so about 3.6 MB, well
+  inside the long-files row's 16 MB.
 - **SMPL's cache.** `Pitch` {midi, cents, hz}, `Key` {key, scale, r} and `Part` {kind, label, start, end, bpm,
   tempoFound} hold every field plan 3's cache stores; `scaleName` and `partKindName` give the prototype's strings, and
   `PartKind`'s values (steady 0, hit 1, quiet 2, loop 3) can be the cache's u8. Labels hold the part's time, so store
   them as they are. Part start and end are fractions of what was analysed (the loaded range, plan 3).
-- **Times.** See the CI figures: suggestParts on 5 minutes of stereo 44.1 kHz, detectPitch and detectKey on the same.
+- **Times.** On 5 minutes of stereo 44.1 kHz: suggestParts 88 ms, detectPitch 58 ms, detectKey 28 ms (Windows CI). A
+  10-minute 48 kHz file should take about twice that, a few tenths of a second in all, so no progress display is needed.
+
+### For the architect
+
+- Plan 8.2 could take a row for decision 3 (DC is "no clear pitch": a lag whose running sum is still 0 scores 1) and
+  one for the three guards (suggestParts below 1 kHz, a 1-frame lag below 3 kHz, estimateTempo's refinement).
+- Plan 1.1's analysis folder has a sixth file, `Detail.h` (internal: the block readers).
+- Plan 1.11's sanitizer run now takes the `analysis` group as well as `contract`, `model` and `engine`.
