@@ -21,10 +21,15 @@
 
 #include "SongRig.h"
 
+#include "support/AllocCounter.h"
 #include "support/Check.h"
 #include "support/TestRegistry.h"
 #include "support/TestSignals.h"
 
+#include "core/Lanes.h"
+#include "model/Clip.h"
+#include "model/ClipCodec.h"
+#include "model/Node.h"
 #include "state/Crc32.h"
 #include "state/StateChunks.h"
 #include "state/StateFormat.h"
@@ -589,15 +594,111 @@ SL_TEST ("songs", embedFortyFiveMegabytes)
     file.deleteFile();
     StrandLockProcessor q;
     q.waitForSounds();
+    // The load from a block of exactly the blob's size, its allocations counted on this thread (the worker decodes on its own).
+    auto exact = std::make_unique<std::uint8_t[]> (saved.size());
+    std::memcpy (exact.get(), saved.data(), saved.size());
+    alloc::reset();
     const auto t1 = std::chrono::steady_clock::now();
-    loadInto (q, saved);
+    {
+        const alloc::Scope counting;
+        q.setStateInformation (exact.get(), (int) saved.size());
+    }
     const double loadMs = msSince (t1);
+    const auto counts = alloc::counts();
     q.waitForSounds (60000);
     const auto ps = p.getCurrentSound(), qs = q.getCurrentSound();
     check (qs != nullptr && ps != nullptr && qs->source == doc::SoundSource::embedded && sameSamples (*qs, *ps),
            "with the file gone it loads from the project: every sample the same as from the file");
     note (fmt ("the 45 MB project saved in %.0f ms and loaded (its sound decoded from the project) in %.0f ms (target 2000 ms, gate 10000 ms)", saveMs, loadMs));
     check (saveMs <= 10000.0 && loadMs <= 10000.0, fmt ("neither past 10 s (%.0f ms, %.0f ms)", saveMs, loadMs));
+    const double size = (double) saved.size();
+    check (counts.largest <= 51u * 1024u * 1024u && (double) counts.peakLiveBytes <= 2.0 * size + 64.0 * 1048576.0,
+           fmt ("the load stays inside plan 3's limits: the largest allocation %.1f MB (51 MiB), at most %.1f MB live (2 x the blob + 64 MiB; %s)",
+                (double) counts.largest / 1.0e6, (double) counts.peakLiveBytes / 1.0e6, alloc::coverage()));
+    check ((double) counts.peakLiveBytes <= 1.25 * size,
+           fmt ("and the SAUD is held once, not twice: %.1f MB live at most for a %.1f MB project", (double) counts.peakLiveBytes / 1.0e6, size / 1.0e6));
+    dir.deleteRecursively();
+}
+
+//==================================================================================================
+namespace
+{
+    // test_state_clip's largest clip (test_limits.cpp's notes): count notes whose encoded sizes add up to total bytes.
+    model::Note heavyNote (int i, int extra, const std::string& id)
+    {
+        model::Note n = model::mkNote (36 + i % 48, (i % 256) * 1.0, 1.0, id);
+        for (int lane = 0; lane < core::kNumLanes && extra > 0; ++lane)
+        {
+            const int more = std::min (extra, model::kMaxNodes - 2);
+            const int count = 2 + more;
+            model::NodeList nodes;
+            for (int j = 0; j < count; ++j)
+                nodes.push_back (model::mkNode (static_cast<double> (j) / (count - 1), static_cast<double> ((j + i) % 10) / 10.0, model::NodeShape::linear));
+            n.lane (static_cast<core::LaneId> (lane)) = nodes;
+            extra -= more;
+        }
+        return n;
+    }
+
+    std::string heavyId (int i) { return "L" + std::to_string (10000 + i); }
+
+    model::Clip clipOfSize (int count, std::size_t total)
+    {
+        model::Clip c = model::newClip (64);
+        const std::size_t header = model::encodedHeaderSize (c);
+        const std::size_t plain = model::encodedNoteSize (heavyNote (0, 0, heavyId (0)));
+        const std::size_t perNote = (total - header) / static_cast<std::size_t> (count);
+        const std::size_t extra = (perNote - plain) / 25;
+        std::size_t left = total - header - static_cast<std::size_t> (count) * (plain + 25 * extra);
+        const std::size_t moreNodes = left / 25;
+        left -= moreNodes * 25;
+        c.notes.reserve (static_cast<std::size_t> (count));
+        for (int i = 0; i < count; ++i)
+        {
+            std::string id = heavyId (i);
+            if (i == 0)
+                id += std::string (left, 'x');
+            const int nodes = static_cast<int> (extra) + (static_cast<std::size_t> (i) < moreNodes ? 1 : 0);
+            c.notes.push_back (std::make_shared<const model::Note> (heavyNote (i, nodes, id)));
+        }
+        return c;
+    }
+}
+
+SL_TEST ("songs", largestClipWithFiftyMegabyteEmbed)
+{
+    section ("State limits (plan 3, with M7): the largest editable clip and a 50 MB embed save and load together");
+
+    const auto dir = songs::tempFolder ("embed-limit");
+    const auto file = dir.getChildFile ("fifty.wav");
+    // 16-bit mono at 44.1 kHz, just under the largest file kept whole (50,000,000 bytes with SAUD's 37-byte header)
+    const auto frames = (std::int64_t) ((doc::SampleManager::kEmbedMost - 4096) / 2);
+    check (writeTone (file, 110.0, 44100.0, frames) && file.getSize() > 49900000 && (std::uint64_t) file.getSize() <= doc::SampleManager::kEmbedMost,
+           fmt ("a 9.4-minute WAV of %lld bytes written at test time (the most kept whole: %llu)", (long long) file.getSize(),
+                (unsigned long long) doc::SampleManager::kEmbedMost));
+
+    StrandLockProcessor p;
+    p.waitForSounds();
+    p.loadSoundFile (file);
+    p.waitForSounds (60000);
+    check (p.answerEmbedQuestion (Answer::yes) && p.waitForEmbed (60000), "it asks; Yes");
+    const auto made = p.editClip ("The largest clip", clipOfSize (model::kMaxClipNotes, model::kMaxClipBytes - 1));
+    check (made.accepted && p.getDocument().encodedBytes() == model::kMaxClipBytes - 1, "the largest editable clip (4096 notes, one byte under 32 MiB) is accepted");
+    const auto saved = saveOf (p);
+    const auto s = saudOf (saved);
+    check (s.has_value() && s->size() == state::kSaudHeaderBytes + (std::size_t) file.getSize() && s->size() <= state::kMaxSaudBytes
+               && saved.size() <= state::kMaxTotalBytes,
+           fmt ("the project holds both: %d bytes in all (the limit %d), its SAUD %d bytes (the limit 50,000,000)", (int) saved.size(),
+                (int) state::kMaxTotalBytes, s.has_value() ? (int) s->size() : -1));
+
+    StrandLockProcessor q;
+    q.waitForSounds();
+    loadInto (q, saved);
+    q.waitForSounds (60000);
+    const auto qs = q.getCurrentSound();
+    check (q.getDocument().current()->notes.size() == 4096 && q.getDocument().encodedBytes() == model::kMaxClipBytes - 1 && qs != nullptr && ! qs->missing
+               && saveOf (q) == saved && q.getStateBanner().isEmpty(),
+           "it loads in another instance (the clip, the sound) and re-saves byte-identically, with no banner");
     dir.deleteRecursively();
 }
 

@@ -357,5 +357,94 @@ answer, the Region excerpt (FLAC 24-bit, never over 50 MB), the opt-in library a
   `ParamBridge::readInst` maps the Region onto an excerpt; the strip draws and drags the Region on one.
 - Done: the UI: `ui/SoundBanner` (the question, Locate, a part kept) under the top bar; the Sound tab's switch, what is
   kept, and the library line.
-- In progress: the first CI run of the code; the tests (`test_embed.cpp`, `test_locate.cpp`) and the pictures.
-- Next: the tests green on both platforms, the snapshots looked at, these notes finished, main fast-forwarded.
+- Done: run 44927526903 on f2a61a6 (the code, the two M2 checks updated, no new test yet) built on both platforms;
+  every earlier test passed on Windows and Linux and under the sanitizers.
+- In progress: run 44929619697 on 1591391: the tests (`test_embed.cpp`, `test_locate.cpp`) and the pictures
+  (`Tests/ui/test_m7_embed_pictures.cpp`).
+- Next: the tests green on both platforms, the snapshots looked at, the results below, main fast-forwarded.
+
+### Files
+
+- `Source/state/StateChunks.h/.cpp`: `SaudHeader`, `SaudView` (read in place), `decodeSaud`, `writeSaudHeader`,
+  `patchSaudHeader`, `encodeSaud`, `kSaudOriginal`/`kSaudFlac24`/`kSaudPcm16`, `kSaudHeaderBytes` (37); `sameBytes` (the
+  same file's bytes: size and SHA-256).
+- `Source/state/StateFormat.h/.cpp` (M0's file; plan 7.9 lets V3 touch it): SAUD in `kWrittenTags` after SMPL,
+  `isOptionalTag` (a null payload writes no chunk), a container made in one buffer (`beginContainer`/`endContainer`), and
+  a decoded SAUD written again from the processor's payload (`reframe`) instead of keeping a raw copy of up to 50 MB.
+- `Source/state/UserSettings.h/.cpp`: `libraryOn` / `setLibraryOn` (the person's switch, off by default).
+- `Source/engine/SampleData.h`: `ExcerptMap` (base, span) on `SampleData::excerpt`.
+- `Source/params/ParamBridge.h/.cpp`: `readInst (refs, state, playing)` maps the Region onto an excerpt and keeps it inside.
+- `Source/doc/SampleManager.h/.cpp`: `SoundSource`; `SoundView::original`, `excerpt`, `toSound`, `toLoaded`,
+  `fileFrameOf`; `EmbedResult`; `loadFile`/`loadRef` take `keepOriginal` (and `loadRef` the project's SAUD); `locate`;
+  `embedOriginal`, `embedExcerpt`, `takeEmbedResults`; the library (`defaultLibraryFolder`, `setLibraryOn`,
+  `libraryFileFor`, `copyToLibrary`, `libraryBytes`, `libraryCopies`); `decodeFile` split into the hash/read and
+  `decodeReader`; `decodeEmbedded`; `readerForBytes`; `runEmbed`, `runLibrary`.
+- `Source/PluginProcessor.h/.cpp`: `get/setKeepInProject`, `EmbedAnswer`, `answerEmbedQuestion`, `is/setLibraryOn`,
+  `getLibraryBytes`, `SoundNotice`/`getSoundNotice`, `locateSound`, `getEmbedStatus`, `getEmbeddedPayload`,
+  `waitForEmbed`, `readInstFor`; the policy (`syncEmbed`, `deliverEmbed`, `askEmbed`, `setEmbedded`, `saudFor`,
+  `keepAnswerOf`, `rememberAnswer`); SAUD read in `loadState`, written in `currentPayloads`; `getStateInformation` waits
+  (at most 5 s) for a Region excerpt on its way; the excerpt map in `processBlock`.
+- `Source/doc/ClipDocument.cpp`: `sameNonParam` leaves the switch and the answer out, as it does the cache.
+- `Source/ui/SoundBanner.h/.cpp` (new, a file plan 1.1 does not list), `ui/MainView` (the line under the banner),
+  `ui/tabs/SoundTab` (the keep row and the library row), `ui/strip/WaveStrip` (the Region on an excerpt),
+  `ui/strip/PartChips` ("Load another part..." only for a file read from its path).
+- Tests: `Tests/plugin/test_embed.cpp`, `test_locate.cpp`, `Tests/ui/test_m7_embed_pictures.cpp` (new);
+  `test_state_clip.cpp` (`sampleFileRecord`) and `Tests/ui/test_strip.cpp` (a project whose file is gone) save with the
+  switch off, so their missing-file checks still test a project that kept nothing.
+
+### Decisions and deviations
+
+- **What is kept (decision 5).** Switch on: a file of up to 20,000,000 bytes is kept whole (SAUD encoding 0) without
+  asking; from there to 49,999,963 bytes (50,000,000 with SAUD's 37-byte header) StrandLock asks once; above, the Region
+  and up to 1 s either side (encoding 1, FLAC 24-bit). MB here are 1,000,000 bytes, as plan 3's 50 MB limit is.
+- **Until the question is answered, the Region is kept** (as above 50 MB). Plan 3 does not say what a save holds before
+  the answer; keeping nothing would lose the sound if the file moved before Kalan answered, and the whole file is what
+  the question asks about. "No" keeps nothing; "Just the Region" the excerpt; "Yes" the file.
+- **Answers and the switch are no undo steps.** They say how the project holds the sound, not what plays (like the
+  analysis cache, `sameNonParam` leaves them out). Undo and Redo keep each file's newest answer (by its bytes) and the
+  project's switch as it is now. A file loaded again (the same bytes) keeps the answer it was given in this session.
+- **The switch lives in SMPL's file record**, so a project on a built-in sound has no place for it: such a project
+  opens with the switch on (the default). Appending a field to the starter record would be a format change of its own.
+- **A file is read into memory only up to 20 MB** (the size kept without asking): it is hashed and decoded from those
+  bytes, which then are the SAUD payload (no second read, no copy at save). A 20-50 MB file is read again, on the
+  worker, only once Kalan says Yes; a file bigger than that never is.
+- **Bytes in memory decode as the file does**: `readerForBytes` tries the formats whose extensions the file's name has,
+  in the order `createReaderFor (File)` tries them, so a sound from memory, the library or the project is bit for bit the
+  sound from disk.
+- **The Region excerpt is made from the sound as it plays** (`SoundView`'s samples), each sample rounded to the nearest
+  24-bit step: a 16-bit sound keeps every bit (s x 256), a float sound is within 2^-24. For a loaded part longer than 3
+  minutes the plugin already holds 16-bit samples, so its excerpt is those. Its FLAC rate field is the sound's rate when
+  libFLAC's streamable subset takes it (a whole number, a multiple of 10 above 65,535 Hz), else 48 kHz; SAUD's own f64
+  rate is the one read back.
+- **The excerpt follows the Region.** It is made again when it no longer covers the Region or is more than twice the
+  length now needed, once the Region has stayed put for 300 ms (a drag moves it many times), and at once before a save:
+  `getStateInformation` waits for an excerpt on its way, at most 5 s. Over 50 MB (the encoder stops as soon as the
+  output passes it) nothing is kept, the Sound tab says so and a toast says it once per Region.
+- **SAUD encoding 2 is read, never written.** Plan 3's embedding rules only ever call for the file's bytes or the Region
+  excerpt. When the file cannot be read again for a Yes (moved after the load), the sound as it plays is kept instead,
+  as FLAC 24-bit of the whole loaded part (lossless for 16- and 24-bit files under 3 minutes); it reloads as the whole
+  sound, not an excerpt.
+- **The project's own SAUD stays as it was while its sound is the project's**: written back byte for byte, so a project
+  re-saves byte-identically. A SAUD this version cannot play (an encoding it does not know) is kept that way, with no
+  banner; a damaged one (bad CRC) too, with the banner; both go once another sound is loaded. A SAUD and its SMPL file
+  record go together: a copy whose bytes do not hash to SMPL's SHA-256 is refused.
+- **The library** is `Documents\StrandLock\Samples\<first 16 hex digits of the SHA-256>.<extension>` (a folder of its own
+  per test run in the test runner). Off unless turned on (UserSettings, per person); on, the file playing now and every
+  file loaded after are copied on the worker (from the bytes in memory, or from the path hashed while copied, through a
+  `.part` file renamed when whole), once each. A library file is used only when its SHA-256 is the project's. The Sound
+  tab shows the library's size, measured on the worker after each copy.
+- **Locate** loads the chosen file with no patch: the Region (and its exact edges), the root, every parameter and the
+  part loaded stay. The same file (its SHA-256) keeps the project's record and analysis with the new path; another file
+  is a new record (analysed, asked about again) that keeps the project's part when it is long enough, and the toast says
+  it may sound different. It is one undo step "Locate <name>", so Undo goes back to the missing file and its banner.
+  "Locate sample..." also shows when only a Region excerpt was kept, to bring back the whole file.
+- **An excerpt on the strip**: the strip shows the excerpt's samples and draws and drags the Region where it falls on
+  them (`toSound` / `toLoaded`); the part chips, Detect and root suggestions map the Region the same way. "Load another
+  part..." and the part picker need the file at its path, so they do not show for a copy.
+- **Undo to a sound only its SAUD holds**: the processor remembers the SAUDs of the last two files it held, so an Undo
+  back to a sound whose file is gone still finds it.
+- **Decision 4 (drag sources).** M2's drop handling stays as it is. V2's list (a file from MediaBay, a clip from the Pool,
+  a trimmed audio event, a file longer than 10 minutes) is still the one only Cubase can test; for V4's checklist V3 adds:
+  a project saved with a small file reopened after the file is moved (it plays from the project, no banner); a 20-50 MB
+  file (the question once, and not again after saving and reopening); a file moved with Keep off (the Locate banner, and
+  Locate sample... brings it back with every setting); the library switch (a moved file found there).
