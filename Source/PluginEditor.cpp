@@ -266,7 +266,7 @@ void StrandLockEditor::showSoundReports()
         else if (r.ok && r.origin == sl::doc::LoadOrigin::user)
             text = "Loaded " + juce::String::fromUTF8 (r.name.c_str());
         if (text.isNotEmpty())
-            view.showToast (text, r.ok ? 2600 : 5000);
+            view.showToast (text, r.toastMs > 0 ? r.toastMs : (r.ok ? 2600 : 5000));
     }
 }
 

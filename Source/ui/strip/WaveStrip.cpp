@@ -564,7 +564,7 @@ namespace sl::ui
         const int width = juce::jmax (1, (int) W);
         if (columnsSound != sound.get() || columnsWidth != width || ! juce::exactlyEqual (columnsA, viewA) || ! juce::exactlyEqual (columnsB, viewB))
         {
-            columns = peaks->columns (sound->left, sound->right, viewA, viewB, width);
+            columns = peaks->columns (*sound, viewA, viewB, width);
             columnsSound = sound.get();
             columnsWidth = width;
             columnsA = viewA;

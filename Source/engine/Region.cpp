@@ -68,7 +68,7 @@ namespace sl::engine
             ia = ia < 0 ? 0 : ia > n1 ? n1 : ia;
             ib = ib < 0 ? 0 : ib > n1 ? n1 : ib;
             const auto a0 = static_cast<std::int64_t> (ia), b0 = static_cast<std::int64_t> (ib);
-            const double a = static_cast<double> (S.L[a0]) + S.R[a0], b = static_cast<double> (S.L[b0]) + S.R[b0];
+            const double a = S.at (0, a0) + S.at (1, a0), b = S.at (0, b0) + S.at (1, b0);   // either storage format (M7)
             ab += a * b;
             aa += a * a;
             bb += b * b;

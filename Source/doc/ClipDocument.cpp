@@ -37,7 +37,15 @@ namespace sl::doc
 
     bool sameNonParam (const NonParamState& a, const NonParamState& b)
     {
-        return state::encodeInst (a.inst) == state::encodeInst (b.inst) && state::encodeSmpl (a.sound) == state::encodeSmpl (b.sound);
+        // The SMPL analysis cache (M7) describes the file, not an edit: a cache that arrives later (a project's file
+        // analysed after its load, a Detect) is no change of state, so it never makes or splits an undo step.
+        auto withoutCache = [] (state::SampleRef r)
+        {
+            r.file.cache = {};
+            return r;
+        };
+        return state::encodeInst (a.inst) == state::encodeInst (b.inst)
+            && state::encodeSmpl (withoutCache (a.sound)) == state::encodeSmpl (withoutCache (b.sound));
     }
 
     //==============================================================================================

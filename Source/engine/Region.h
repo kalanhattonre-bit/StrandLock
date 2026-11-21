@@ -76,17 +76,22 @@ namespace sl::engine
     /** The inline fast path of runTape, runGrains and runLock: the plain stretch of any loop pass (or of a Hold,
         Stop or folded Region), frames 1 .. n-3 of the source. Set up once per run (the JS consts before each
         run's loop); read () gives readReg's value bit for bit wherever it returns true, and the caller falls
-        back to readReg wherever it returns false. */
+        back to readReg wherever it returns false. A 16-bit sound (M7) reads through the same expression on its
+        own pointers (SourceRead.h: s / 32768, the exact double a float holding it gives). */
     struct PlainStretch
     {
         const float* SL = nullptr;
         const float* SR = nullptr;
+        const std::int16_t* SL16 = nullptr;
+        const std::int16_t* SR16 = nullptr;
+        bool i16 = false;
         bool mono = true;
         bool loop = true;
         double rs = 0, L = 64, plainEnd = 0, lo = 0, xLater = 0;
 
         PlainStretch (const SampleData& s, const RegionState& g) noexcept
-            : SL (s.L), SR (s.R), mono (! s.stereo), loop (g.loop), rs (g.rs), L (g.L)
+            : SL (s.L), SR (s.R), SL16 (s.L16), SR16 (s.R16), i16 (s.format == SampleFormat::i16), mono (! s.stereo), loop (g.loop),
+              rs (g.rs), L (g.L)
         {
             // plainEnd = Math.min(G.loop ? (G.post ? G.L : G.L - G.X) : G.L - 1, S.n - 3 - rs), _lo = rs >= 1 ? 0 : 1 - rs
             const double a = g.loop ? (g.post ? g.L : g.L - g.X) : g.L - 1;
@@ -111,8 +116,16 @@ namespace sl::engine
             const double xa = rs + xv;
             const auto i = static_cast<std::int64_t> (xa);   // xa | 0: xa >= 1 here, so a floor
             const double f = xa - static_cast<double> (i);
-            a = hermite (SL, i, f);
-            b = mono ? a : hermite (SR, i, f);
+            if (i16)
+            {
+                a = hermite (SL16, i, f);
+                b = mono ? a : hermite (SR16, i, f);
+            }
+            else
+            {
+                a = hermite (SL, i, f);
+                b = mono ? a : hermite (SR, i, f);
+            }
             return true;
         }
     };

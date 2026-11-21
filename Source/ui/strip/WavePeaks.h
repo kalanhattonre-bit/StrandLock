@@ -26,6 +26,9 @@ namespace sl::ui
             block of kBlock frames (the last block may be shorter). right may equal left (mono). */
         WavePeaks (const float* left, const float* right, std::int64_t frames);
 
+        /** The same from a sound in either storage format (a long file's 16-bit samples read as s / 32768, M7). */
+        explicit WavePeaks (const doc::SoundView& view);
+
         /** The peaks of view's sound: from the cache, or made now (message thread). Null for no sound. */
         static std::shared_ptr<const WavePeaks> of (const std::shared_ptr<const doc::SoundView>& view);
 
@@ -48,7 +51,15 @@ namespace sl::ui
         /** renderWave's loop, for the samples left and right of the same sound. */
         std::vector<Column> columns (const float* left, const float* right, double a, double b, int width) const;
 
+        /** The same for the sound these peaks were made from (either storage format). */
+        std::vector<Column> columns (const doc::SoundView& view, double a, double b, int width) const;
+
     private:
+        template <class Mid>
+        void build (const Mid& mid);
+        template <class Mid>
+        std::vector<Column> columnsOf (const Mid& mid, double a, double b, int width) const;
+
         std::int64_t n = 0;
         std::vector<float> mn, mx;
     };

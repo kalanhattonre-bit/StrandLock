@@ -173,6 +173,95 @@ public:
     sl::doc::SampleManager& getSampleManager() noexcept { return *sampleManager; }
     sl::doc::SnapshotPublisher& getSnapshotPublisher() noexcept { return *publisher; }
 
+    //----------------------------------------------------------------------------------------------
+    // Long songs and what listening suggests (M7, plan 7.9 decisions 1 and 2). Message thread.
+
+    /** The part picker: the 10 minutes from startFrame (frames of the file) of a file longer than 10 minutes, loaded
+        the way loadSoundFile loads a file (one undo step; SMPL's loaded range says which part). */
+    std::uint64_t loadSoundFilePart (const juce::File& file, std::uint64_t startFrame);
+
+    /** E3, the engine suggestion after a file loads (sl-ui-sample.js suggestion). */
+    struct EngineSuggestion
+    {
+        sl::core::Engine engine = sl::core::Engine::cloud;
+        std::string text, why;                                    // "Try Cloud", and the sentence that says why
+        bool match = false;                                       // the engine that suits it is on already ("... (on)")
+        sl::core::Engine shownEngine = sl::core::Engine::voice;   // the engine when it was made (another one ends it)
+        bool done = false;                                        // used, hidden, or the engine changed since
+    };
+
+    /** What listening to the sound that plays now found, and what it suggests. None of it applies itself (decision 2):
+        a root is one click and no undo step, a key one undo step, the engine a button. */
+    struct Suggestions
+    {
+        std::uint64_t soundRequest = 0;            // the load of the sound they belong to
+        sl::doc::SoundAnalysis analysis;           // the strip's words (key, no clear pitch) and the part chips
+        std::optional<sl::doc::RootHeard> root;    // "Use A2 as the root": shown while the Region is the one it was heard in
+        std::optional<sl::analysis::Key> key;      // "Use key A minor": shown while it differs from the Key and Scale
+        std::optional<EngineSuggestion> engine;    // "Try Cloud"
+        bool listening = false;                    // Detect pitch & key is on its way
+    };
+    const Suggestions& getSuggestions() const noexcept { return suggestions; }
+
+    /** Whether each suggestion shows now (sl-ui.js updateStripText's and sl-ui-sample.js renderChips' rules). */
+    bool showsRootSuggestion() const;
+    bool showsKeySuggestion() const;
+    bool showsEngineSuggestion() const;
+
+    /** "Detect pitch & key" (sl-ui.js runDetect 'button'): the worker listens to the Region (a whole song has no single
+        pitch) and to the sound's key; when it is done the root and cents are set with no undo step (plan 2.4) and the
+        key and scale as one undo step "Key from the sound: ...", and a toast says what was found. False (and a toast)
+        for a built-in sound, which is tuned to C3 already. */
+    bool detectPitchAndKey();
+
+    /** "Use A2 as the root": rootNote and rootCents as host-visible edits, no undo step (the root belongs to the
+        sound, plan 2.4). False when no suggestion shows (it was heard in another Region). */
+    bool acceptRootSuggestion();
+
+    /** "Use key A minor": the Key and Scale as one undo step "Key from the sound: A minor". */
+    bool acceptKeySuggestion();
+
+    /** "Try Cloud": the engine as one undo step "Engine: Cloud (suggested)" (none when it is on already); the toast
+        says why. The suggestion is done either way. */
+    bool acceptEngineSuggestion();
+
+    /** Hides the engine suggestion (its "(on)" chip says why once, in a toast, when explain is true). */
+    void dismissEngineSuggestion (bool explain);
+
+    /** A part chip (D10, decision 2): the Region set to the part, as one undo step "Region: <label>". False when the
+        Region is that part already. */
+    bool usePart (const sl::analysis::Part& part);
+
+    /** "Use the whole file": the Region set to the whole file, one undo step "Region: whole file". */
+    bool useWholeFile();
+
+    /** Sets the Region (the parameters and the exact f64 edges, plan 2.2) as one undo step called label (sl-ui-sample.js
+        setRegionTo: nothing when it is already within 1e-9 of that). */
+    bool setRegionStep (double start, double end, const std::string& label);
+
+    /** The editor changed the Region (a strip drag): the root suggestion for the old one goes now, and a moment later
+        (250 ms, sl-ui.js suggestRoot) the worker listens to the new one. */
+    void regionChanged();
+
+    /** The Region StrandLock plays now: each exact f64 edge while its parameter still holds (float) of it, else the
+        parameter's value (ParamBridge::readInst's rule, plan 2.2). */
+    std::pair<double, double> currentRegion() const;
+
+    /** Message thread: applies the worker's analysis results (Detect, root suggestions) and keeps the suggestions with
+        the sound that plays (the processor's AsyncUpdater calls it; the tests, which run no message loop, too). */
+    int deliverAnalysis();
+
+    /** Asks now for a root suggestion that is due, waits for the worker's jobs (at most timeoutMs), then delivers
+        them. For the tests and the snapshots. */
+    bool waitForAnalysis (int timeoutMs = kLoadWaitMs);
+
+    /** The part picker's overview of the playing file (a part of a longer file): asked for once, then kept. */
+    std::uint64_t requestOverview();
+    std::shared_ptr<const sl::doc::FileOverview> getOverview() const;
+
+    /** How many states the undo history holds (the tests count steps with it). */
+    std::size_t historySize() const;
+
     /** Waits until the newest clip version is compiled and handed to the audio thread (at most timeoutMs). */
     bool waitForSnapshot (int timeoutMs = kLoadWaitMs);
 
@@ -263,6 +352,19 @@ private:
     void applyStep (const sl::doc::EditHistory::Step& step);
     void writeParams (const std::vector<std::pair<int, float>>& values);
 
+    // M7 (message thread).
+    void syncSound();                                       // the suggestions and the SMPL cache follow the sound that plays
+    void applyDetect (const sl::doc::JobResult& result);    // runDetect 'button' once the worker heard it
+    void setRoot (int root, int cents);                     // no undo step; the sound keeps it (SoundMeta, plan 2.4)
+    void rememberRoot (const sl::state::SampleRef& sound, int root, float cents);
+    std::optional<std::pair<int, float>> rootOf (const sl::state::SampleRef& sound) const;
+    void rememberCache (const sl::state::SampleRef& sound);
+    void keepCacheOf (sl::state::SampleRef& sound) const;   // the newest cache known for that file
+    void say (const std::string& text, int ms);             // a toast of the processor's own
+    void updateEngineSuggestion();                          // E3 ends once the engine changes by other means
+    int currentRoot() const;
+    float currentCents() const;
+
     sl::params::TextContext textContext;
     juce::AudioProcessorValueTreeState apvts;
     std::array<juce::RangedAudioParameter*, sl::params::kNumParams> paramList {};
@@ -316,6 +418,15 @@ private:
     std::array<std::atomic<bool>, sl::params::kNumParams> inGesture {};
     std::atomic<int> loadingState { 0 };
     std::atomic<std::uint64_t> awaitedSound { 0 };   // the sound request the last state load waits for
+
+    // M7 (message thread): what listening suggests for the sound that plays, each sound's own root and cents (plan
+    // 2.4's SoundMeta), the newest analysis cache of the last few files, and the processor's own toasts.
+    Suggestions suggestions;
+    std::shared_ptr<const sl::doc::SoundView> seenSound;
+    std::vector<std::pair<sl::state::SampleRef, std::pair<int, float>>> soundMeta;
+    std::vector<sl::state::SampleRef> knownCaches;
+    std::vector<sl::doc::LoadReport> ownReports;
+    double rootDueMs = -1.0;   // when the root suggestion for a new Region is asked for, or -1
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StrandLockProcessor)
 };

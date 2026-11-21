@@ -1,11 +1,15 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 
+#include "core/JsCompat.h"
+#include "core/Music.h"
 #include "host/MidiRouter.h"
 #include "model/ClipCodec.h"
 #include "model/Presets.h"
+#include "ui/SampleTabRules.h"
 
 #include <algorithm>
+#include <cmath>
 #include <optional>
 #include <set>
 
@@ -40,6 +44,33 @@ namespace
     {
         return std::make_shared<const model::Clip> (model::newClip (4.0));
     }
+
+    /** The prototype's engine names (sl-ui-sample.js ENGINE_NAME). */
+    const char* engineName (core::Engine e) noexcept
+    {
+        return e == core::Engine::tape ? "Tape" : e == core::Engine::voice ? "Voice" : "Cloud";
+    }
+
+    /** sl-ui.js fmtCents for the root: "+12 cents", "-5 cents". */
+    std::string centsText (int c)
+    {
+        return (c >= 0 ? "+" : "") + std::to_string (c) + " cents";
+    }
+
+    /** sl-ui.js rootText: "A2", or "A2 +12 cents". */
+    std::string rootText (int root, int cents)
+    {
+        return core::noteName ((double) root) + (cents != 0 ? " " + centsText (cents) : std::string());
+    }
+
+    /** Two Regions within 1e-9 of each other at both edges (sl-ui.js sugFits, sl-ui-sample.js setRegionTo). */
+    bool sameRegion (double a0, double b0, double a1, double b1) noexcept
+    {
+        return std::abs (a0 - a1) < 1e-9 && std::abs (b0 - b1) < 1e-9;
+    }
+
+    /** How many sounds keep their own root (plan 2.4's SoundMeta) and their newest analysis cache, at most. */
+    constexpr std::size_t kSoundsRemembered = 16;
 }
 
 StrandLockProcessor::StrandLockProcessor()
@@ -71,6 +102,7 @@ StrandLockProcessor::StrandLockProcessor()
     publisher = std::make_unique<doc::SnapshotPublisher> (snapshots);
     sampleManager = std::make_unique<doc::SampleManager> (samples);
     sampleManager->onPendingReady = [this] { triggerAsyncUpdate(); };
+    sampleManager->onJobDone = [this] { triggerAsyncUpdate(); };
     sampleManager->onCommitted = [this] (const doc::SoundView& v) { textContext.soundSeconds.store (v.seconds()); };
     clipDoc.onClipChanged = [this] (const model::ClipPtr& c, std::uint64_t v) { publisher->submit (c, v); };
 
@@ -301,6 +333,17 @@ void StrandLockProcessor::setPreview (bool on)
 void StrandLockProcessor::timerCallback()
 {
     collectVersions();
+
+    // M7: the suggestions follow the sound that plays; a root suggestion for a new Region is asked for once the Region
+    // has stayed put for 250 ms (sl-ui.js suggestRoot); E3 ends once the engine changes by other means.
+    syncSound();
+    if (rootDueMs >= 0.0 && juce::Time::getMillisecondCounterHiRes() >= rootDueMs)
+    {
+        rootDueMs = -1.0;
+        const auto r = currentRegion();
+        sampleManager->suggestRoot (r.first, r.second);
+    }
+    updateEngineSuggestion();
 }
 
 juce::AudioProcessorEditor* StrandLockProcessor::createEditor()
@@ -394,12 +437,37 @@ void StrandLockProcessor::writeParams (const std::vector<std::pair<int, float>>&
 
 void StrandLockProcessor::applyStep (const doc::EditHistory::Step& step)
 {
-    writeParams (step.params);
     const auto soundBefore = clipDoc.soundRef();
-    clipDoc.setNonParam (step.state.np);
+    const bool soundChanges = ! state::sameSound (soundBefore, step.state.np.sound);
+    const auto regionBefore = currentRegion();
+    auto values = step.params;
+    if (soundChanges)
+    {
+        // Plan 2.4 (sl-ui.js applyState): the root belongs to the sound. The sound leaving keeps the root and cents it
+        // has now, and the sound coming back brings its own, whatever the steps' parameter values say.
+        rememberRoot (soundBefore, currentRoot(), currentCents());
+        if (const auto own = rootOf (step.state.np.sound))
+        {
+            const int rootIndex = params::index (params::P::rootNote), centsIndex = params::index (params::P::rootCents);
+            values.erase (std::remove_if (values.begin(), values.end(),
+                                          [rootIndex, centsIndex] (const std::pair<int, float>& v) { return v.first == rootIndex || v.first == centsIndex; }),
+                          values.end());
+            values.emplace_back (rootIndex, (float) own->first);
+            values.emplace_back (centsIndex, own->second);
+        }
+    }
+    writeParams (values);
+    auto np = step.state.np;
+    keepCacheOf (np.sound);   // the analysis cache is the file's (M7): the newest one known stays
+    clipDoc.setNonParam (np);
     clipDoc.replace (step.state.clip);
-    if (! state::sameSound (soundBefore, step.state.np.sound))
-        sampleManager->loadRef (step.state.np.sound, doc::LoadOrigin::undo);
+    if (soundChanges)
+        sampleManager->loadRef (np.sound, doc::LoadOrigin::undo);
+
+    // A root suggestion belongs to the Region it was heard in (sl-ui.js applyState: if (regionMoved) suggestRoot ()).
+    const auto regionAfter = currentRegion();
+    if (! sameRegion (regionBefore.first, regionBefore.second, regionAfter.first, regionAfter.second))
+        regionChanged();
 }
 
 bool StrandLockProcessor::undo()
@@ -477,6 +545,7 @@ std::uint64_t StrandLockProcessor::loadSoundFile (const juce::File& file)
 void StrandLockProcessor::handleAsyncUpdate()
 {
     deliverSoundLoads();
+    deliverAnalysis();
 }
 
 int StrandLockProcessor::deliverSoundLoads()
@@ -489,17 +558,66 @@ int StrandLockProcessor::deliverSoundLoads()
         // (fix pass RT2-1).
         if (p.view == nullptr || ! sampleManager->isNewest (p.request))
             continue;
+        // The sound leaving keeps its own root and cents (plan 2.4's SoundMeta), so Undo brings it back with them.
+        rememberRoot (clipDoc.soundRef(), currentRoot(), currentCents());
+
         // The sound's own root and cents and its Region, as host-visible edits (plan 2.4), then the sound.
         const auto changed = params::applyPatch (apvts, p.patch);
         auto np = clipDoc.nonParam();
         np.inst.regionStartExact = p.regionStartExact;
         np.inst.regionEndExact = p.regionEndExact;
         np.sound = p.view->ref;
-        const std::string label = (p.view->builtIn ? "Sound: " : "Load ") + p.view->name;
+        std::string label = (p.view->builtIn ? "Sound: " : "Load ") + p.view->name;
+        if (p.view->cut && p.view->ref.file.loadedStartFrame > 0 && p.view->ref.file.fileSampleRate > 0.0)
+        {
+            const auto from = (long long) std::floor ((double) p.view->ref.file.loadedStartFrame / p.view->ref.file.fileSampleRate);
+            label += " (from " + std::to_string (from / 60) + ":" + (from % 60 < 10 ? "0" : "") + std::to_string (from % 60) + ")";
+        }
         clipDoc.setNonParam (np);
+
+        // What listening found (M7, decision 2): suggestions only, nothing applies itself.
+        Suggestions next;
+        next.soundRequest = p.request;
+        next.analysis = p.view->analysis;
+        if (! p.view->builtIn)
+        {
+            const auto heard = p.rootHeard;
+            if (heard.has_value() && std::abs ((double) (heard->root * 100 + heard->cents) - (double) (60 * 100)) >= 20.0)
+                next.root = heard;   // the load set the root to C3 (60, 0); a root within 20 cents of it is no news
+            const auto& k = p.view->analysis.key;
+            if (k.has_value() && (k->key != (int) np.inst.key || np.inst.scale != sl::analysis::scaleName (k->scale)))
+                next.key = k;
+            // E3 (sl-ui-sample.js onParts): suggestEngine ({ pitch, seconds, parts }) against the engine playing now.
+            ui::rules::SoundInfo info;
+            info.pitch = p.view->analysis.pitch.has_value();
+            info.seconds = p.view->seconds();
+            for (const auto& part : p.view->analysis.parts)
+            {
+                ui::rules::Part q;
+                q.kind = sl::analysis::partKindName (part.kind);
+                q.label = part.label;
+                q.start = part.start;
+                q.end = part.end;
+                q.tempoFound = part.tempoFound;
+                q.bpm = part.bpm;
+                info.parts.emplace_back (std::move (q));
+            }
+            const auto s = ui::rules::suggestEngine (&info);
+            EngineSuggestion e;
+            e.engine = s.engine;
+            e.text = s.text;
+            e.why = s.why;
+            e.shownEngine = readInst().engine;
+            e.match = e.engine == e.shownEngine;
+            next.engine = e;
+        }
+
         if (sampleManager->commit (std::move (p)))
         {
             ++published;
+            suggestions = std::move (next);
+            seenSound = sampleManager->current();
+            rememberCache (np.sound);
             const std::lock_guard<std::mutex> hold (historyLock);
             // The step keeps the clip of the last finished edit, not the document's: a load can finish while a roll
             // drag is held, and the document then shows the drag's unfinished clip, which no undo step may keep. The
@@ -508,6 +626,7 @@ int StrandLockProcessor::deliverSoundLoads()
             history.push (label, last.has_value() ? last->clip : clipDoc.current(), np, changed);
         }
     }
+    syncSound();   // a project's or Undo's sound that the worker published itself
     return published;
 }
 
@@ -520,7 +639,421 @@ bool StrandLockProcessor::waitForSounds (int timeoutMs)
 
 std::vector<doc::LoadReport> StrandLockProcessor::takeSoundReports()
 {
-    return sampleManager->takeReports();
+    auto out = sampleManager->takeReports();
+    for (auto& r : ownReports)
+        out.push_back (std::move (r));
+    ownReports.clear();
+    return out;
+}
+
+//==================================================================================================
+// Long songs and what listening suggests (M7, plan 7.9 decisions 1 and 2). Message thread.
+
+std::uint64_t StrandLockProcessor::loadSoundFilePart (const juce::File& file, std::uint64_t startFrame)
+{
+    return sampleManager->loadFile (file, doc::LoadOrigin::user, startFrame);
+}
+
+int StrandLockProcessor::currentRoot() const
+{
+    return juce::roundToInt (params::plainValueOf (getParam (params::P::rootNote)));
+}
+
+float StrandLockProcessor::currentCents() const
+{
+    return params::plainValueOf (getParam (params::P::rootCents));
+}
+
+std::pair<double, double> StrandLockProcessor::currentRegion() const
+{
+    const auto s = clipDoc.instState();
+    const float ps = params::plainValueOf (getParam (params::P::regionStart));
+    const float pe = params::plainValueOf (getParam (params::P::regionEnd));
+    const auto edge = [] (float param, double exact)
+    {
+        return std::isfinite (exact) && juce::exactlyEqual ((float) exact, param) ? exact : (double) param;
+    };
+    auto r = std::make_pair (edge (ps, s.regionStartExact), edge (pe, s.regionEndExact));
+    if (r.second < r.first)
+        std::swap (r.first, r.second);
+    return r;
+}
+
+void StrandLockProcessor::say (const std::string& text, int ms)
+{
+    doc::LoadReport r;
+    r.origin = doc::LoadOrigin::user;
+    r.ok = true;
+    r.message = text;
+    r.toastMs = ms;
+    ownReports.push_back (std::move (r));
+    while (ownReports.size() > doc::SampleManager::kMaxReports)
+        ownReports.erase (ownReports.begin());
+}
+
+void StrandLockProcessor::rememberRoot (const state::SampleRef& sound, int root, float cents)
+{
+    for (auto it = soundMeta.begin(); it != soundMeta.end(); ++it)
+        if (state::sameSound (it->first, sound))
+        {
+            soundMeta.erase (it);
+            break;
+        }
+    soundMeta.emplace_back (sound, std::make_pair (root, cents));
+    while (soundMeta.size() > kSoundsRemembered)
+        soundMeta.erase (soundMeta.begin());
+}
+
+std::optional<std::pair<int, float>> StrandLockProcessor::rootOf (const state::SampleRef& sound) const
+{
+    for (const auto& m : soundMeta)
+        if (state::sameSound (m.first, sound))
+            return m.second;
+    return std::nullopt;
+}
+
+void StrandLockProcessor::rememberCache (const state::SampleRef& sound)
+{
+    if (sound.kind != state::kSampleFile || sound.file.cache.analysed != 1)
+        return;
+    for (auto it = knownCaches.begin(); it != knownCaches.end(); ++it)
+        if (state::sameSound (*it, sound))
+        {
+            knownCaches.erase (it);
+            break;
+        }
+    knownCaches.push_back (sound);
+    while (knownCaches.size() > kSoundsRemembered)
+        knownCaches.erase (knownCaches.begin());
+}
+
+void StrandLockProcessor::keepCacheOf (state::SampleRef& sound) const
+{
+    if (sound.kind != state::kSampleFile)
+        return;
+    for (const auto& k : knownCaches)
+        if (state::sameSound (k, sound))
+            sound.file.cache = k.file.cache;
+}
+
+void StrandLockProcessor::setRoot (int root, int cents)
+{
+    core::InstPatch p;
+    p.root = (double) root;
+    p.cents = (double) cents;
+    params::applyPatch (apvts, p);
+    rememberRoot (clipDoc.soundRef(), currentRoot(), currentCents());
+}
+
+void StrandLockProcessor::syncSound()
+{
+    const auto now = sampleManager->current();
+    if (now == nullptr || now == seenSound)
+        return;
+    seenSound = now;
+    if (suggestions.soundRequest != now->request)
+    {
+        // A sound the processor did not hand over itself (a project, Undo, a new instance's default): what was found
+        // for it, and no suggestion (they belong to a load the user made).
+        suggestions = {};
+        suggestions.soundRequest = now->request;
+        suggestions.analysis = now->analysis;
+    }
+    // A project's file analysed after its load (its cache was empty or could not be read): the document's SMPL record
+    // takes the cache, so the next save keeps it and a reload does not analyse again (decision 1).
+    if (now->ref.kind == state::kSampleFile && ! now->missing && now->ref.file.cache.analysed == 1)
+    {
+        rememberCache (now->ref);
+        auto np = clipDoc.nonParam();
+        if (state::sameSound (np.sound, now->ref))
+        {
+            auto withCache = np.sound;
+            withCache.file.cache = now->ref.file.cache;
+            if (state::encodeSmpl (withCache) != state::encodeSmpl (np.sound))
+            {
+                np.sound = std::move (withCache);
+                clipDoc.setNonParam (np);
+            }
+        }
+    }
+}
+
+bool StrandLockProcessor::showsRootSuggestion() const
+{
+    const auto& g = suggestions.root;
+    if (! g.has_value())
+        return false;
+    const auto r = currentRegion();
+    return sameRegion (g->regionStart, g->regionEnd, r.first, r.second);
+}
+
+bool StrandLockProcessor::showsKeySuggestion() const
+{
+    const auto& k = suggestions.key;
+    if (! k.has_value())
+        return false;
+    const auto s = clipDoc.instState();
+    return k->key != (int) s.key || s.scale != analysis::scaleName (k->scale);
+}
+
+bool StrandLockProcessor::showsEngineSuggestion() const
+{
+    // renderChips: sugOn = !done && (engine !== I.engine || match)
+    const auto& e = suggestions.engine;
+    return e.has_value() && ! e->done && (e->engine != readInst().engine || e->match);
+}
+
+void StrandLockProcessor::updateEngineSuggestion()
+{
+    // syncAll: the suggestion goes once the engine is changed by any other means
+    auto& e = suggestions.engine;
+    if (e.has_value() && ! e->done && e->shownEngine != readInst().engine)
+        e->done = true;
+}
+
+bool StrandLockProcessor::detectPitchAndKey()
+{
+    const auto sound = sampleManager->current();
+    if (sound == nullptr)
+        return false;
+    if (sound->builtIn)
+    {
+        say ("Built-in sounds are tuned to C3 already", 2600);
+        return false;
+    }
+    const auto r = currentRegion();
+    if (sampleManager->detect (r.first, r.second) == 0)
+        return false;
+    suggestions.listening = true;
+    say ("Listening...", 2600);
+    return true;
+}
+
+void StrandLockProcessor::applyDetect (const doc::JobResult& res)
+{
+    // sl-ui.js runDetect 'button': the root at once (no undo step), the key as one undo step, and a toast.
+    suggestions.listening = false;
+    const auto now = sampleManager->current();
+    if (now == nullptr || now->request != res.soundRequest)
+        return;
+    std::vector<std::string> said;
+    const std::string from = res.whole ? "" : " (from the Region)";
+    suggestions.root.reset();
+    suggestions.key.reset();
+    const int rootBefore = currentRoot();
+    if (res.pitch.has_value())
+    {
+        const auto rc = doc::pitchToRoot (*res.pitch);
+        setRoot (rc.root, rc.cents);
+        said.push_back ("Root set to " + rootText (rc.root, rc.cents) + from + ".");
+    }
+    else if (res.longFile && res.whole)
+        said.push_back ("This song has no single pitch, so pick a part and StrandLock suggests its root.");
+    else if (res.noisy)
+        said.push_back ("No clear pitch or key (it sounds like noise), so the root stays " + core::noteName ((double) rootBefore) + ".");
+    else
+        said.push_back ("No clear pitch (a texture or a chord), so the root stays " + core::noteName ((double) rootBefore) + ".");
+
+    // What was heard is kept with the sound (S.pitch, S.key), in SMPL's cache too (decision 1).
+    suggestions.analysis.analysed = true;
+    suggestions.analysis.pitch = res.pitch;
+    suggestions.analysis.key = res.key;
+    auto np = clipDoc.nonParam();
+    if (np.sound.kind == state::kSampleFile && state::sameSound (np.sound, now->ref))
+    {
+        np.sound.file.cache = doc::toCache (suggestions.analysis);
+        clipDoc.setNonParam (np);
+        rememberCache (np.sound);
+    }
+
+    if (res.key.has_value())
+    {
+        const auto name = doc::keyName (res.key->key, res.key->scale);
+        auto s = clipDoc.instState();
+        if (res.key->key != (int) s.key || s.scale != analysis::scaleName (res.key->scale))
+        {
+            s.key = (std::uint8_t) res.key->key;
+            s.scale = analysis::scaleName (res.key->scale);
+            clipDoc.setInstState (s);
+            pushUndoStep ("Key from the sound: " + name, {});
+            said.push_back ("Key set to " + name + ".");
+        }
+        else
+        {
+            said.push_back ("Key: " + name + ".");
+        }
+    }
+    std::string text;
+    for (const auto& s : said)
+        text += (text.empty() ? "" : " ") + s;
+    say (text, 5000);
+}
+
+bool StrandLockProcessor::acceptRootSuggestion()
+{
+    // sl-ui.js useRootSug: a tip heard in another Region is dropped; else the root and cents, no undo step.
+    if (! showsRootSuggestion())
+    {
+        suggestions.root.reset();
+        return false;
+    }
+    const auto g = *suggestions.root;
+    suggestions.root.reset();
+    setRoot (g.root, g.cents);
+    say ("Root " + rootText (g.root, g.cents) + ": the notes now play this part in tune", 2600);
+    return true;
+}
+
+bool StrandLockProcessor::acceptKeySuggestion()
+{
+    // sl-ui.js useKeySug: patchInst ({ key, scale }, 'Key from the sound: ' + keyName): one undo step.
+    if (! suggestions.key.has_value())
+        return false;
+    const auto k = *suggestions.key;
+    suggestions.key.reset();
+    auto s = clipDoc.instState();
+    s.key = (std::uint8_t) k.key;
+    s.scale = analysis::scaleName (k.scale);
+    clipDoc.setInstState (s);
+    return pushUndoStep ("Key from the sound: " + doc::keyName (k.key, k.scale), {});
+}
+
+bool StrandLockProcessor::acceptEngineSuggestion()
+{
+    // sl-ui-sample.js acceptSuggestion: the engine as one undo step (when it is not on already), and why.
+    if (! suggestions.engine.has_value())
+        return false;
+    auto& e = *suggestions.engine;
+    e.done = true;
+    bool pushed = false;
+    if (readInst().engine != e.engine)
+    {
+        core::InstPatch p;
+        p.engine = e.engine;
+        params::applyPatch (apvts, p);
+        pushed = pushUndoStep ("Engine: " + std::string (engineName (e.engine)) + " (suggested)", { params::P::engine });
+    }
+    say (std::string (engineName (e.engine)) + ": " + e.why, 4000);
+    return pushed;
+}
+
+void StrandLockProcessor::dismissEngineSuggestion (bool explain)
+{
+    if (! suggestions.engine.has_value())
+        return;
+    suggestions.engine->done = true;
+    if (explain)
+        say (std::string (engineName (suggestions.engine->engine)) + ": " + suggestions.engine->why, 4000);
+}
+
+bool StrandLockProcessor::setRegionStep (double start, double end, const std::string& label)
+{
+    const auto r = currentRegion();
+    if (sameRegion (r.first, r.second, start, end))
+        return false;
+    // The parameters as host-visible edits and the exact f64 edges StrandLock plays (plan 2.2), then one undo step.
+    core::InstPatch p;
+    p.region.start = start;
+    p.region.end = end;
+    params::applyPatch (apvts, p);
+    auto s = clipDoc.instState();
+    s.regionStartExact = start;
+    s.regionEndExact = end;
+    clipDoc.setInstState (s);
+    const bool pushed = pushUndoStep (label, { params::P::regionStart, params::P::regionEnd });
+    regionChanged();
+    return pushed;
+}
+
+bool StrandLockProcessor::usePart (const analysis::Part& part)
+{
+    return setRegionStep (part.start, part.end, "Region: " + part.label);
+}
+
+bool StrandLockProcessor::useWholeFile()
+{
+    return setRegionStep (0.0, 1.0, "Region: whole file");
+}
+
+void StrandLockProcessor::regionChanged()
+{
+    // sl-ui.js suggestRoot: the old tip goes at once (it was heard in another Region); the new one follows a moment later.
+    suggestions.root.reset();
+    rootDueMs = juce::Time::getMillisecondCounterHiRes() + 250.0;
+}
+
+int StrandLockProcessor::deliverAnalysis()
+{
+    syncSound();
+    int delivered = 0;
+    for (const auto& res : sampleManager->takeResults())
+    {
+        if (res.soundRequest != suggestions.soundRequest)
+            continue;   // heard in a sound that is no longer the one playing
+        if (res.kind == doc::JobKind::detect)
+        {
+            applyDetect (res);
+            ++delivered;
+            continue;
+        }
+        if (res.kind == doc::JobKind::parts)
+        {
+            suggestions.analysis.analysed = true;   // a starter's parts, made right after it was handed on
+            suggestions.analysis.parts = res.parts;
+            ++delivered;
+            continue;
+        }
+        // A root suggestion: only for the Region it was asked for (a newer Region asks again), and only when it says
+        // something new (sl-ui.js suggestRoot: within 20 cents of the root is the same).
+        const auto r = currentRegion();
+        if (! sameRegion (res.regionStart, res.regionEnd, r.first, r.second))
+            continue;
+        suggestions.root.reset();
+        if (res.pitch.has_value())
+        {
+            auto rc = doc::pitchToRoot (*res.pitch);
+            rc.regionStart = res.regionStart;
+            rc.regionEnd = res.regionEnd;
+            const bool same = std::abs ((double) (rc.root * 100 + rc.cents) - ((double) currentRoot() * 100.0 + (double) currentCents())) < 20.0;
+            if (! same)
+                suggestions.root = rc;
+        }
+        ++delivered;
+    }
+    return delivered;
+}
+
+bool StrandLockProcessor::waitForAnalysis (int timeoutMs)
+{
+    if (rootDueMs >= 0.0)
+    {
+        rootDueMs = -1.0;
+        const auto r = currentRegion();
+        sampleManager->suggestRoot (r.first, r.second);
+    }
+    const bool done = sampleManager->waitJobs (timeoutMs);
+    deliverAnalysis();
+    return done;
+}
+
+std::uint64_t StrandLockProcessor::requestOverview()
+{
+    const auto have = sampleManager->overview();
+    const auto now = sampleManager->current();
+    if (have != nullptr && now != nullptr && have->path == now->ref.file.path && have->ok)
+        return 0;
+    return sampleManager->requestOverview();
+}
+
+std::shared_ptr<const doc::FileOverview> StrandLockProcessor::getOverview() const
+{
+    return sampleManager->overview();
+}
+
+std::size_t StrandLockProcessor::historySize() const
+{
+    const std::lock_guard<std::mutex> hold (historyLock);
+    return history.size();
 }
 
 //==================================================================================================

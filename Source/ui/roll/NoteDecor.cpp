@@ -186,36 +186,53 @@ namespace sl::ui::roll
         return out;
     }
 
+    namespace
+    {
+        /** peakBins over any sample reader: mid (i) is ((L + R) x 0.5) of frame i, in double. */
+        template <class Mid>
+        std::vector<float> peakBinsOf (const Mid& mid, std::int64_t frames)
+        {
+            const auto n = (double) frames;
+            const std::int64_t NB = std::max<std::int64_t> (1, std::min<std::int64_t> (65536, (std::int64_t) std::ceil (n / 128.0)));
+            const double step = n / (double) NB;
+            std::vector<float> bins ((std::size_t) NB, 0.0f);
+            double mx = 0.0;
+            for (std::int64_t b = 0; b < NB; ++b)
+            {
+                const auto i1 = std::min (frames, (std::int64_t) std::floor ((double) (b + 1) * step));
+                double pk = 0.0;
+                for (auto i = (std::int64_t) std::floor ((double) b * step); i < i1; ++i)
+                {
+                    double v = mid (i);
+                    if (v < 0.0)
+                        v = -v;
+                    if (v > pk)
+                        pk = v;
+                }
+                bins[(std::size_t) b] = (float) pk;   // a Float32Array keeps the float; the maximum stays a double
+                if (pk > mx)
+                    mx = pk;
+            }
+            if (mx > 0.0)
+                for (auto& v : bins)
+                    v = (float) ((double) v / mx);
+            return bins;
+        }
+    }
+
+    std::vector<float> peakBins (const doc::SoundView& view)
+    {
+        if (! view.hasSamples() || view.frames <= 0)
+            return std::vector<float> (1, 0.0f);
+        return peakBinsOf ([&view] (std::int64_t i) { return view.mid (i); }, view.frames);
+    }
+
     std::vector<float> peakBins (const float* left, const float* right, std::int64_t frames)
     {
         if (left == nullptr || frames <= 0)
             return std::vector<float> (1, 0.0f);   // Math.ceil (0 / 128) = 0: one bin, empty
         const float* R = right != nullptr ? right : left;
-        const auto n = (double) frames;
-        const std::int64_t NB = std::max<std::int64_t> (1, std::min<std::int64_t> (65536, (std::int64_t) std::ceil (n / 128.0)));
-        const double step = n / (double) NB;
-        std::vector<float> bins ((std::size_t) NB, 0.0f);
-        double mx = 0.0;
-        for (std::int64_t b = 0; b < NB; ++b)
-        {
-            const auto i1 = std::min (frames, (std::int64_t) std::floor ((double) (b + 1) * step));
-            double pk = 0.0;
-            for (auto i = (std::int64_t) std::floor ((double) b * step); i < i1; ++i)
-            {
-                double v = ((double) left[i] + (double) R[i]) * 0.5;
-                if (v < 0.0)
-                    v = -v;
-                if (v > pk)
-                    pk = v;
-            }
-            bins[(std::size_t) b] = (float) pk;   // a Float32Array keeps the float; the maximum stays a double
-            if (pk > mx)
-                mx = pk;
-        }
-        if (mx > 0.0)
-            for (auto& v : bins)
-                v = (float) ((double) v / mx);
-        return bins;
+        return peakBinsOf ([left, R] (std::int64_t i) { return ((double) left[i] + (double) R[i]) * 0.5; }, frames);
     }
 
     std::vector<float> thumbAmps (const NoteSim& sim, const std::vector<float>& bins, double secs, double regLen)
@@ -303,9 +320,9 @@ namespace sl::ui::roll
         {
             if (sound->seconds() > 0.0)
                 secs = sound->seconds();
-            if (sound->left != nullptr && sound->frames > 0)
+            if (sound->hasSamples() && sound->frames > 0)
             {
-                peaks = peakBins (sound->left, sound->right, sound->frames);
+                peaks = peakBins (*sound);
                 haveBins = true;
             }
         }

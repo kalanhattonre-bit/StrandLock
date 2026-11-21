@@ -43,7 +43,8 @@ namespace sl::doc
         state::SampleRef sound;
     };
 
-    /** The same INST fields and the same SMPL record (compared through their encodings). */
+    /** The same INST fields and the same SMPL record (compared through their encodings), the SMPL analysis cache aside
+        (M7: it describes the file and can arrive after the load, so it is no edit). */
     bool sameNonParam (const NonParamState& a, const NonParamState& b);
 
     /** What an edit did. */

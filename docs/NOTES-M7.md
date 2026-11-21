@@ -157,3 +157,20 @@ The analysis port: `prototype-v4/src/sl-analysis.js` (SLAnalysis) in `Source/ana
   one for the three guards (suggestParts below 1 kHz, a 1-frame lag below 3 kHz, estimateTempo's refinement).
 - Plan 1.1's analysis folder has a sixth file, `Detail.h` (internal: the block readers).
 - Plan 1.11's sanitizer run now takes the `analysis` group as well as `contract`, `model` and `engine`.
+
+## V2
+
+Long songs and the suggestions (plan 7.9 V2, decisions 1 and 2): 16-bit storage for long files, the 10-minute limit
+with "load a part", the exact Region edges, the analysis on the SampleManager worker with its SMPL cache, the part
+chips and the suggestion line. Branch `m7-songs`, from main 1e9f61c.
+
+### Progress
+
+- Done: 16-bit samples in `engine::SampleData` and every read path (readAbs, hermite, PlainStretch, readReg's seam,
+  seamRho); the SampleManager decodes a part longer than 3 minutes straight to 16-bit, loads a part of at most 10
+  minutes (the user's pick or SMPL's range), analyses each decoded file before handing it on (a starter's parts right
+  after), runs Detect, root suggestions and the part picker's overview as jobs a newer request stops.
+- Done: the processor's suggestions (root, key, engine), SoundMeta (each sound's own root), part chips and "Use the
+  whole file" as one undo step each, Detect pitch & key.
+- In progress: the strip's chips, suggestion line and part picker; the Sound tab's Detect, Key and Scale.
+- Next: the M7 tests (long file, part load, Region precision, root), the updated M2 tests, snapshots, CI, main.

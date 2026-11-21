@@ -231,7 +231,7 @@ namespace sl::engine
         for (int i = 0; i < numVoices; ++i)
             voiceAt (order[static_cast<std::size_t> (i)]).steal();
         dropReleasedChases();
-        if (sample == nullptr || sample->L == nullptr || sample->n < 8)
+        if (sample == nullptr || ! sample->hasSamples() || sample->n < 8)
         {
             src = nullptr;
             srcEpoch = 0;

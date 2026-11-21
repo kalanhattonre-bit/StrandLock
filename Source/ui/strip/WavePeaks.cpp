@@ -13,7 +13,7 @@ namespace sl::ui
         struct Entry
         {
             std::weak_ptr<const void> storage;
-            const float* left = nullptr;
+            const void* samples = nullptr;   // the left channel (float or 16-bit)
             std::int64_t frames = 0;
             std::shared_ptr<const WavePeaks> peaks;
         };
@@ -32,14 +32,16 @@ namespace sl::ui
             static Cache c;
             return c;
         }
+
+        const void* samplesOf (const doc::SoundView& v) noexcept
+        {
+            return v.format == engine::SampleFormat::i16 ? static_cast<const void*> (v.left16) : static_cast<const void*> (v.left);
+        }
     }
 
-    WavePeaks::WavePeaks (const float* left, const float* right, std::int64_t frames)
-        : n (left != nullptr && frames > 0 ? frames : 0)
+    template <class Mid>
+    void WavePeaks::build (const Mid& mid)
     {
-        if (n == 0)
-            return;
-        const float* R = right != nullptr ? right : left;
         const auto nb = static_cast<std::size_t> ((n + kBlock - 1) / kBlock);   // Math.ceil (n / B)
         mn.assign (nb, 0.0f);
         mx.assign (nb, 0.0f);
@@ -49,7 +51,7 @@ namespace sl::ui
             const std::int64_t e = std::min<std::int64_t> (n, static_cast<std::int64_t> (b + 1) * kBlock);
             for (std::int64_t i = static_cast<std::int64_t> (b) * kBlock; i < e; ++i)
             {
-                const double v = ((double) left[i] + (double) R[i]) * 0.5;
+                const double v = mid (i);
                 if (v < lo) lo = v;
                 if (v > hi) hi = v;
             }
@@ -58,11 +60,29 @@ namespace sl::ui
         }
     }
 
+    WavePeaks::WavePeaks (const float* left, const float* right, std::int64_t frames)
+        : n (left != nullptr && frames > 0 ? frames : 0)
+    {
+        if (n == 0)
+            return;
+        const float* R = right != nullptr ? right : left;
+        build ([left, R] (std::int64_t i) { return ((double) left[i] + (double) R[i]) * 0.5; });
+    }
+
+    WavePeaks::WavePeaks (const doc::SoundView& view)
+        : n (view.hasSamples() && view.frames > 0 ? view.frames : 0)
+    {
+        if (n == 0)
+            return;
+        build ([&view] (std::int64_t i) { return view.mid (i); });
+    }
+
     std::shared_ptr<const WavePeaks> WavePeaks::of (const std::shared_ptr<const doc::SoundView>& view)
     {
-        if (view == nullptr || view->left == nullptr || view->frames <= 0)
+        if (view == nullptr || ! view->hasSamples() || view->frames <= 0)
             return nullptr;
 
+        const void* samples = samplesOf (*view);
         auto& c = cache();
         {
             const std::lock_guard<std::mutex> hold (c.lock);
@@ -71,7 +91,7 @@ namespace sl::ui
                              c.entries.end());
             for (auto it = c.entries.begin(); it != c.entries.end(); ++it)
             {
-                if (it->left == view->left && it->frames == view->frames && it->storage.lock() == view->storage)
+                if (it->samples == samples && it->frames == view->frames && it->storage.lock() == view->storage)
                 {
                     auto peaks = it->peaks;
                     std::rotate (it, it + 1, c.entries.end());   // the newest use last
@@ -80,12 +100,12 @@ namespace sl::ui
             }
         }
 
-        auto peaks = std::make_shared<const WavePeaks> (view->left, view->right, view->frames);
+        auto peaks = std::make_shared<const WavePeaks> (*view);
         const std::lock_guard<std::mutex> hold (c.lock);
         ++c.made;
         if (view->storage != nullptr)
         {
-            c.entries.push_back ({ view->storage, view->left, view->frames, peaks });
+            c.entries.push_back ({ view->storage, samples, view->frames, peaks });
             while (c.entries.size() > kCacheSize)
                 c.entries.erase (c.entries.begin());
         }
@@ -109,12 +129,12 @@ namespace sl::ui
         return c.made;
     }
 
-    std::vector<WavePeaks::Column> WavePeaks::columns (const float* left, const float* right, double a, double b, int width) const
+    template <class Mid>
+    std::vector<WavePeaks::Column> WavePeaks::columnsOf (const Mid& mid, double a, double b, int width) const
     {
         std::vector<Column> out (static_cast<std::size_t> (std::max (0, width)));
-        if (n == 0 || left == nullptr || width <= 0)
+        if (n == 0 || width <= 0)
             return out;
-        const float* R = right != nullptr ? right : left;
         const double W = (double) width, len = (double) n;
         const auto nb = static_cast<std::int64_t> (mn.size());
         for (int x = 0; x < width; ++x)
@@ -136,7 +156,7 @@ namespace sl::ui
             {
                 for (std::int64_t i = std::max<std::int64_t> (0, i0); i < std::min (n, i1); ++i)
                 {
-                    const double v = ((double) left[i] + (double) R[i]) * 0.5;
+                    const double v = mid (i);
                     if (v < lo) lo = v;
                     if (v > hi) hi = v;
                 }
@@ -149,5 +169,20 @@ namespace sl::ui
             col.drawn = true;
         }
         return out;
+    }
+
+    std::vector<WavePeaks::Column> WavePeaks::columns (const float* left, const float* right, double a, double b, int width) const
+    {
+        if (left == nullptr)
+            return std::vector<Column> (static_cast<std::size_t> (std::max (0, width)));
+        const float* R = right != nullptr ? right : left;
+        return columnsOf ([left, R] (std::int64_t i) { return ((double) left[i] + (double) R[i]) * 0.5; }, a, b, width);
+    }
+
+    std::vector<WavePeaks::Column> WavePeaks::columns (const doc::SoundView& view, double a, double b, int width) const
+    {
+        if (! view.hasSamples() || view.frames != n)
+            return std::vector<Column> (static_cast<std::size_t> (std::max (0, width)));
+        return columnsOf ([&view] (std::int64_t i) { return view.mid (i); }, a, b, width);
     }
 }

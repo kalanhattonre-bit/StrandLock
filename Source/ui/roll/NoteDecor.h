@@ -48,6 +48,9 @@ namespace sl::ui::roll
         frames (at most 65536 bins), normalised to 1. right may equal left (mono). */
     std::vector<float> peakBins (const float* left, const float* right, std::int64_t frames);
 
+    /** The same over a sound in either storage format (a 16-bit long file reads as s / 32768, M7). */
+    std::vector<float> peakBins (const doc::SoundView& view);
+
     /** sl-ui-panels.js thumbAmps: the thumbnail's N column heights (0..1; NaN = silent) from a simulation and the
         peak bins. regLen is the Region's length (a fraction of the sound). */
     std::vector<float> thumbAmps (const NoteSim& sim, const std::vector<float>& bins, double secs, double regLen);
