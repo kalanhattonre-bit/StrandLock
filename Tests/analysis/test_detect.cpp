@@ -151,12 +151,15 @@ namespace
         const auto N = static_cast<std::int64_t> (core::jsRound (totalSec * SR));
         std::vector<float> L (static_cast<std::size_t> (N)), R (static_cast<std::size_t> (N));
         const double fade = core::jsRound (0.02 * SR);
+        // the starters are held for the whole song (the shared cache makes one again once nothing holds it)
+        std::vector<std::shared_ptr<const sounds::StarterSound>> held;
         for (const Section& sec : sections)
         {
             const auto id = sounds::parseStarter (sec.id);
             if (! id)
                 return false;
             const auto snd = sounds::sharedStarterSound (*id, 1);
+            held.push_back (snd);
             const auto len = static_cast<std::int64_t> (snd->left.size());
             const auto a = static_cast<std::int64_t> (core::jsRound (sec.t0 * SR));
             const auto b = std::min (N, static_cast<std::int64_t> (core::jsRound (sec.t1 * SR)));
@@ -354,8 +357,23 @@ namespace
         return s.empty() ? std::string ("no parts") : s;
     }
 
-    /** got against a fixture detectPitch ({midi, cents, hz} | null). exact is cleared when a number differs. */
-    bool pitchMatches (const std::optional<analysis::Pitch>& got, const JsonValue& want, bool& exact, std::string& why)
+    /** What a case within tolerance holds that is not bit for bit: exact is cleared, and diffs names each number. */
+    struct Exactness
+    {
+        bool exact = true;
+        std::string diffs;
+
+        void compare (const char* what, double got, double want)
+        {
+            if (fixture::same (got, want))
+                return;
+            exact = false;
+            diffs += fmt ("%s%s %.17g against %.17g", diffs.empty() ? "" : "; ", what, got, want);
+        }
+    };
+
+    /** got against a fixture detectPitch ({midi, cents, hz} | null). */
+    bool pitchMatches (const std::optional<analysis::Pitch>& got, const JsonValue& want, Exactness& exact, std::string& why)
     {
         if (want.isNull() || ! got)
         {
@@ -371,7 +389,8 @@ namespace
             why = "detectPitch " + pitchText (got) + ", the prototype " + core::toJson (want);
             return false;
         }
-        exact = exact && fixture::same (got->cents, cents) && fixture::same (got->hz, hz);
+        exact.compare ("cents", got->cents, cents);
+        exact.compare ("Hz", got->hz, hz);
         return true;
     }
 
@@ -385,7 +404,7 @@ namespace
         return ok;
     }
 
-    bool partsMatch (const std::vector<analysis::Part>& got, const JsonValue& want, bool& exact, std::string& why)
+    bool partsMatch (const std::vector<analysis::Part>& got, const JsonValue& want, Exactness& exact, std::string& why)
     {
         if (got.size() != want.size())
         {
@@ -406,7 +425,8 @@ namespace
                            p.end, p.bpm, p.tempoFound ? "found" : "not found", core::toJson (w).c_str());
                 return false;
             }
-            exact = exact && fixture::same (p.start, w["start"].asNumber()) && fixture::same (p.end, w["end"].asNumber());
+            exact.compare (fmt ("%s start", analysis::partKindName (p.kind)).c_str(), p.start, w["start"].asNumber());
+            exact.compare (fmt ("%s end", analysis::partKindName (p.kind)).c_str(), p.end, w["end"].asNumber());
         }
         return true;
     }
@@ -530,7 +550,8 @@ SL_TEST ("analysis", detectFixture)
         reads += source.reads;
         outside += source.outside;
 
-        bool ok = true, exact = true;
+        bool ok = true;
+        Exactness exact;
         const bool isDc = input["signal"].asString() == "dc";
         if (isDc)
         {
@@ -560,8 +581,10 @@ SL_TEST ("analysis", detectFixture)
         if (ok)
             ok = partsMatch (parts, c["suggestParts"], exact, why);
         note (fmt ("%2zu %s: %s | %s | %s", ci, name.c_str(), pitchText (pitch).c_str(), keyText (key).c_str(), partsText (parts).c_str()));
+        if (ok && ! exact.exact)
+            note ("   within tolerance, not bit for bit: " + exact.diffs);
         if (ok)
-            tally.pass (exact);
+            tally.pass (exact.exact);
         else
             tally.fail (name + ": " + why);
     }
