@@ -183,7 +183,11 @@ namespace sl::state
     inline PayloadPtr payload (Bytes b) { return std::make_shared<const Bytes> (std::move (b)); }
 
     /** The tags this version writes, in the order it writes them into a new container (plan 3's table order). */
-    inline constexpr std::uint32_t kWrittenTags[] = { kTagParm, kTagInst, kTagClip, kTagSmpl, kTagUist };
+    inline constexpr std::uint32_t kWrittenTags[] = { kTagParm, kTagInst, kTagClip, kTagSmpl, kTagSaud, kTagUist };
+
+    /** A tag this version writes only while it has a payload for it (M7: SAUD, the sound kept in the project). A
+        missing or null payload for it means "none": no chunk is written. */
+    constexpr bool isOptionalTag (std::uint32_t tag) noexcept { return tag == kTagSaud; }
 
     /** The chunk version this version writes for a tag. */
     std::uint16_t writtenVersion (std::uint32_t tag) noexcept;
@@ -216,13 +220,15 @@ namespace sl::state
         struct Slot
         {
             std::uint32_t tag = 0;
-            Bytes raw;                 // the chunk exactly as it was loaded
+            Bytes raw;                 // the chunk exactly as it was loaded (empty when reframe)
             bool written = false;      // a tag this version writes, and the first chunk with it
             bool decoded = false;      // read into the state
             PayloadPtr atLoad;         // written: this version's payload for that part right after the load
             std::uint16_t version = 0, flags = 0;
             bool unreadable = false;   // kept because it could not be read (bad CRC, past a limit, damaged, undecodable)
             bool truncated = false;    // the cut end of the container: always written last, so it frames nothing after it
+            bool reframe = false;      // M7: a SAUD whose bytes are atLoad's, framed with zero padding: written again from
+                                       // atLoad (the same bytes), so a 50 MB sound is not held twice
         };
 
         std::vector<Slot> slots;

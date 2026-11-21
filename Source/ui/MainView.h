@@ -25,6 +25,7 @@
 #include "ui/DiagnosticsPage.h"
 #include "ui/HintBar.h"
 #include "ui/KeyRouter.h"
+#include "ui/SoundBanner.h"
 #include "ui/Toast.h"
 #include "ui/roll/Inspector.h"
 #include "ui/roll/RollView.h"
@@ -160,6 +161,7 @@ namespace sl::ui
         SoundTab& getSoundTab() noexcept { return *soundPanel; }
         DiagnosticsPage& getDiagnosticsPage() noexcept { return *diagPage; }
         WaveStrip& getStrip() noexcept { return strip; }
+        SoundBanner& getSoundBanner() noexcept { return *soundBanner; }   // M7 V3: the question, Locate, a part kept
         roll::RollView& getRoll() noexcept { return roll; }
         roll::SelectionBar& getSelectionBar() noexcept { return selectionBar; }
         FlatButton& getNodesButton() noexcept { return nodesButton; }
@@ -252,6 +254,7 @@ namespace sl::ui
         WaveStrip strip;
         HintBar hintBar;
         std::vector<ParamSynced*> synced;   // every control bound to a parameter (the panels and the strip)
+        std::unique_ptr<SoundBanner> soundBanner;   // M7 V3
         std::unique_ptr<Toast> toast;
         KeyRouter keyRouter;
 

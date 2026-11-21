@@ -16,6 +16,7 @@ namespace sl::state
         const char* const kUiScaleKey = "uiScalePercent";
         const char* const kKeysKey = "keysDefault";
         const char* const kPinsKey = "dicePins";   // the Dice fields pinned, comma separated (M6)
+        const char* const kLibraryKey = "libraryOn";   // the sound library (M7): off unless turned on
 
         /** The names that are Dice fields, each once, in their order. */
         std::vector<std::string> onlyDiceFields (const std::vector<std::string>& names)
@@ -142,6 +143,17 @@ namespace sl::state
         for (const auto& p : onlyDiceFields (pins))
             parts.add (juce::String (p));
         properties->setValue (kPinsKey, parts.joinIntoString (","));
+        changed();
+    }
+
+    bool UserSettings::libraryOn() const
+    {
+        return properties->getBoolValue (kLibraryKey, false);
+    }
+
+    void UserSettings::setLibraryOn (bool on)
+    {
+        properties->setValue (kLibraryKey, on);
         changed();
     }
 

@@ -637,7 +637,11 @@ SL_TEST ("state", sampleFileRecord)
            "the load set root C3, cents 0 and the whole file as the Region (the exact edges too)");
     check (p.undoLabel().value_or ("") == "Load two tones.wav", fmt ("one undo step: \"%s\"", p.undoLabel().value_or ("").c_str()));
 
+    // M7 V3: a project keeps its sound by default (the file here, 768 KB, would be kept whole), and a missing file then
+    // plays from that copy (test_locate). The checks below are of a project that keeps nothing: the switch is off.
+    p.setKeepInProject (false);
     const Bytes saved = saveOf (p);
+    check (state::parseContainer (saved.data(), saved.size()).chunks.size() == 5, "with Keep the sound in the project off, no SAUD chunk is saved");
     StrandLockProcessor q;
     loadInto (q, saved);
     const auto qs = q.getCurrentSound();

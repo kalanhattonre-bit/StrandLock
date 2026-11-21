@@ -416,6 +416,10 @@ namespace sl::ui
         };
         strip.onHint = [this] (const juce::String& text) { hintBar.setHelp (text); };
         addAndMakeVisible (hintBar);
+        // M7 V3: the sound line (the 20-50 MB question, Locate, a part kept) under the top bar while it has something to say.
+        soundBanner = std::make_unique<SoundBanner> (t, p);
+        soundBanner->onToast = [this] (const juce::String& text, int ms) { showToast (text, ms); };
+        addChildComponent (*soundBanner);
         toast = std::make_unique<Toast> (t);
         addChildComponent (*toast);
         addChildComponent (hintBar.getHover());
@@ -830,6 +834,13 @@ namespace sl::ui
             layoutPane();
         }
 
+        // M7 V3: the sound line (the question, Locate, a part kept) comes and goes with what the processor says.
+        if (soundBanner != nullptr && soundBanner->refresh())
+        {
+            resized();
+            repaint();
+        }
+
         // The banner needs the state encoded, so it is checked twice a second, not on every tick. It also says when
         // the clip is too detailed to play (only a hand-made project can hold one: the document refuses such edits).
         if (ticks++ % 8 == 0)
@@ -1064,6 +1075,15 @@ namespace sl::ui
         bannerArea = {};
         if (bannerText.isNotEmpty())
             bannerArea = area.removeFromTop (kBannerHeight);
+        // M7 V3: the sound line under it, while it has something to say.
+        if (soundBanner != nullptr)
+        {
+            soundBanner->setVisible (soundBanner->hasNotice());
+            if (soundBanner->hasNotice())
+                soundBanner->setBounds (area.removeFromTop (SoundBanner::height));
+            else
+                soundBanner->setBounds ({});
+        }
 
         // Mode bar: wraps onto a second row when the window is narrow (as shell.html's flex-wrap does).
         {

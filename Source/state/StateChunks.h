@@ -127,6 +127,54 @@ namespace sl::state
     /** The same sound: the same starter and seed, or the same file (path, size, SHA-256 and loaded part). */
     bool sameSound (const SampleRef& a, const SampleRef& b) noexcept;
 
+    /** The same file's bytes (M7 V3): both file records, the same size and SHA-256, wherever each one is. */
+    bool sameBytes (const SampleRef& a, const SampleRef& b) noexcept;
+
+    //==============================================================================================
+    // SAUD (M7, optional): the sound kept in the project. u8 encoding (0 the original file's bytes, 1 a FLAC 24-bit
+    // excerpt, 2 int16 PCM interleaved), u32 channels, f64 sampleRate, u64 excerptStartFrame, u64 excerptFrames (in the
+    // original file's frames; the loaded range for encodings 0 and 2), u64 byteLength, bytes; (append-only). The
+    // payload is kept whole as it was read (a newer version's trailing fields with it), so a chunk is written back
+    // exactly while its sound is unchanged. An encoding this version does not know reads too (known () is false): it is
+    // kept, never played.
+
+    inline constexpr std::uint8_t kSaudOriginal = 0;
+    inline constexpr std::uint8_t kSaudFlac24 = 1;
+    inline constexpr std::uint8_t kSaudPcm16 = 2;
+    inline constexpr std::size_t kSaudHeaderBytes = 1 + 4 + 8 + 8 + 8 + 8;   // 37: every field before the bytes
+
+    struct SaudHeader
+    {
+        std::uint8_t encoding = kSaudOriginal;
+        std::uint32_t channels = 0;
+        double sampleRate = 0.0;
+        std::uint64_t excerptStartFrame = 0;   // frames of the original file
+        std::uint64_t excerptFrames = 0;
+        std::uint64_t byteLength = 0;
+    };
+
+    /** A SAUD payload read in place: its header, and where its bytes are (inside the payload). */
+    struct SaudView
+    {
+        SaudHeader header;
+        const std::uint8_t* bytes = nullptr;
+        std::size_t trailingBytes = 0;   // after the bytes: a newer version's fields (kept with the payload)
+
+        bool known() const noexcept { return header.encoding <= kSaudPcm16; }
+    };
+
+    /** False (out untouched) for a payload cut short: shorter than its header, or than its byteLength says. */
+    bool decodeSaud (const std::uint8_t* payload, std::size_t size, SaudView& out) noexcept;
+
+    /** The 37 header bytes, appended to out (a payload made in place: the header, then the bytes). */
+    void writeSaudHeader (Bytes& out, const SaudHeader& h);
+
+    /** Writes the header over the first 37 bytes of payload (which must have them), with byteLength as given. */
+    void patchSaudHeader (Bytes& payload, const SaudHeader& h);
+
+    /** A whole payload: the header (byteLength = size), then the bytes. */
+    Bytes encodeSaud (SaudHeader h, const void* bytes, std::size_t size);
+
     //==============================================================================================
     // UIST: u8 theme (0 dark, 1 light), u16 uiScalePercent, u16 logicalWidth, u16 logicalHeight, u8 mode (1..8),
     // str8 subLane, str8 tab, u8 folded, f32 zoomH, f32 zoomV, f64 scrollBeat, f32 scrollRow, f32 gridBeats

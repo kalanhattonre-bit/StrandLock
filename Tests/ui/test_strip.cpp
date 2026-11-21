@@ -434,7 +434,8 @@ SL_TEST ("ui", stripLoadToasts)
         longFile.deleteFile();
     }
 
-    // A project whose file is gone: the default starter plays, the toast names the file, the file line says so.
+    // A project whose file is gone (and that keeps nothing of it, M7 V3: the switch off): the default starter plays, the
+    // toast names the file, the file line says so.
     {
         const auto gone = dir.getChildFile ("strip gone.wav");
         writeWav (gone, { signals::tone (330.0, 0.5, 44100.0) }, 44100.0, 16);
@@ -443,6 +444,7 @@ SL_TEST ("ui", stripLoadToasts)
             StrandLockProcessor first;
             first.loadSoundFile (gone);
             first.waitForSounds();
+            first.setKeepInProject (false);
             first.getStateInformation (saved);
         }
         gone.deleteFile();

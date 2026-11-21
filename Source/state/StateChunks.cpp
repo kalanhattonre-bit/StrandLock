@@ -292,6 +292,65 @@ namespace sl::state
         return a.starterId == b.starterId && a.seed == b.seed;
     }
 
+    bool sameBytes (const SampleRef& a, const SampleRef& b) noexcept
+    {
+        return a.kind == kSampleFile && b.kind == kSampleFile && a.file.fileSize == b.file.fileSize && a.file.sha256 == b.file.sha256;
+    }
+
+    //==============================================================================================
+    bool decodeSaud (const std::uint8_t* payload, std::size_t size, SaudView& out) noexcept
+    {
+        ByteReader r (payload, size);
+        SaudView v;
+        v.header.encoding = static_cast<std::uint8_t> (r.u8());
+        v.header.channels = r.u32();
+        v.header.sampleRate = r.f64();
+        v.header.excerptStartFrame = r.u64();
+        v.header.excerptFrames = r.u64();
+        v.header.byteLength = r.u64();
+        // The length is checked against the bytes really left before anything points at them.
+        if (! r.ok() || v.header.byteLength > static_cast<std::uint64_t> (r.remaining()))
+            return false;
+        v.bytes = r.take (static_cast<std::size_t> (v.header.byteLength));
+        if (! r.ok())
+            return false;
+        v.trailingBytes = r.remaining();
+        out = v;
+        return true;
+    }
+
+    void writeSaudHeader (Bytes& out, const SaudHeader& h)
+    {
+        ByteWriter w (out);
+        w.u8 (h.encoding);
+        w.u32 (h.channels);
+        w.f64 (h.sampleRate);
+        w.u64 (h.excerptStartFrame);
+        w.u64 (h.excerptFrames);
+        w.u64 (h.byteLength);
+    }
+
+    void patchSaudHeader (Bytes& payload, const SaudHeader& h)
+    {
+        Bytes head;
+        head.reserve (kSaudHeaderBytes);
+        writeSaudHeader (head, h);
+        if (payload.size() >= head.size())
+            std::memcpy (payload.data(), head.data(), head.size());
+    }
+
+    Bytes encodeSaud (SaudHeader h, const void* bytes, std::size_t size)
+    {
+        h.byteLength = static_cast<std::uint64_t> (size);
+        Bytes out;
+        out.reserve (kSaudHeaderBytes + size);
+        writeSaudHeader (out, h);
+        ByteWriter w (out);
+        if (size > 0)
+            w.bytes (bytes, size);
+        return out;
+    }
+
     //==============================================================================================
     bool decodeUist (const std::uint8_t* payload, std::size_t size, UiState& out)
     {

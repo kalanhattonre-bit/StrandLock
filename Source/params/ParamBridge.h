@@ -8,6 +8,7 @@
 
 #include "ParamIds.h"
 #include "core/Inst.h"
+#include "engine/SampleData.h"
 #include "state/StateChunks.h"
 
 #include <array>
@@ -55,6 +56,12 @@ namespace sl::params
         A Region edge plays its exact f64 value while the parameter still holds (float) of it, and the
         parameter's own value once something (host automation) moved it (PLUGIN-PLAN 1.6 #12, 2.2). */
     core::Inst readInst (const ParameterRefs& refs, const NonParamAtomics& state) noexcept;
+
+    /** The same for the sample the audio thread plays now (M7 V3, PLUGIN-PLAN 3): when that sample is a Region excerpt
+        kept in the project (its ExcerptMap is active), the Region, a fraction of the loaded range, is mapped onto the
+        excerpt and kept inside it, so a Region that reaches outside (automation, a part chip) plays the nearest edge of
+        the saved audio. Region automation is never blocked. Any other sample (or none) plays readInst's Region. */
+    core::Inst readInst (const ParameterRefs& refs, const NonParamAtomics& state, const engine::SampleData* playing) noexcept;
 
     /** The host bypass switch (parameter 49), which is not part of the instrument. */
     bool readBypass (const ParameterRefs& refs) noexcept;

@@ -196,8 +196,9 @@ namespace sl::ui
                 add (std::move (b), utf8 (e.why) + " Click to switch the engine (one undo step).", [this, changed] { processor.acceptEngineSuggestion(); changed(); });
         }
 
-        // A part of a file longer than 10 minutes: another 10 minutes of it.
-        if (! sound->builtIn && sound->cut && ! sound->missing)
+        // A part of a file longer than 10 minutes: another 10 minutes of it (M7 V3: only a file read from its own path; a
+        // copy found in the library or kept in the project has no other part to load).
+        if (! sound->builtIn && sound->cut && ! sound->missing && sound->source == doc::SoundSource::file)
             add (std::make_unique<FlatButton> (theme, "Load another part..."),
                  "This song is longer than 10 minutes, so StrandLock loaded 10 minutes of it. Click to pick the 10 minutes to load",
                  [this] { if (onPickPart) onPickPart(); });

@@ -24,9 +24,16 @@ namespace sl::ui
         juce::ComboBox& getKeyBox() noexcept { return *keyBox; }
         juce::ComboBox& getScaleBox() noexcept { return *scaleBox; }
         FlatButton& getScaleLock() noexcept { return *lock; }
+        FlatButton& getKeepToggle() noexcept { return *keepToggle; }        // M7 V3: Keep the sound in the project
+        FlatButton& getLibraryToggle() noexcept { return *libraryToggle; }  // M7 V3: the library
+        const juce::String& getKeepStatus() const noexcept { return keepStatus->getText(); }
+        const juce::String& getLibraryStatus() const noexcept { return libraryStatus->getText(); }
 
         /** The scale names as the menu shows them (sl-ui.js scaleLabel: "Harm. minor" reads "Harmonic minor"). */
         static juce::String scaleLabel (const char* name);
+
+        /** The library's line: on or off, and how much it holds (bytes, -1 when not measured yet). */
+        static juce::String libraryText (bool on, std::int64_t bytes);
 
     private:
         StrandLockProcessor& processor;
@@ -34,6 +41,10 @@ namespace sl::ui
         juce::ComboBox* keyBox = nullptr;
         juce::ComboBox* scaleBox = nullptr;
         FlatButton* lock = nullptr;
+        FlatButton* keepToggle = nullptr;
+        Caption* keepStatus = nullptr;
+        FlatButton* libraryToggle = nullptr;
+        Caption* libraryStatus = nullptr;
         bool syncing = false;
     };
 }

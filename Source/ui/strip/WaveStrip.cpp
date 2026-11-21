@@ -139,9 +139,12 @@ namespace sl::ui
         return heightFor (windowHeight) + (chipRow ? chipRowHeight : 0);
     }
 
-    void WaveStrip::showPart (double start, double end)
+    void WaveStrip::showPart (double partStart, double partEnd)
     {
-        // sl-ui-sample.js showPart: zoom so a small part fills about half of the strip
+        // sl-ui-sample.js showPart: zoom so a small part fills about half of the strip (a part is a fraction of the loaded
+        // range; on a Region excerpt kept in the project, M7 V3, it is shown where it falls on the excerpt)
+        const double start = sound != nullptr ? sound->toSound (partStart) : partStart;
+        const double end = sound != nullptr ? sound->toSound (partEnd) : partEnd;
         const double w = end - start, vw = viewB - viewA;
         const bool outside = start < viewA - 1e-9 || end > viewB + 1e-9;
         if (! outside && w >= vw * 0.3)
@@ -189,17 +192,27 @@ namespace sl::ui
         Region r { edge (ps, s.regionStartExact), edge (pe, s.regionEndExact) };
         if (r.end < r.start)
             std::swap (r.start, r.end);
+        // M7 V3: on a Region excerpt kept in the project, the Region (a fraction of the loaded range) where it falls on
+        // these samples, kept inside them as it plays (ParamBridge::readInst). Any other sound: as it is.
+        if (sound != nullptr && sound->excerpt.active)
+        {
+            r.start = sound->toSound (r.start);
+            r.end = sound->toSound (r.end);
+        }
         return r;
     }
 
     void WaveStrip::setRegion (double start, double end)
     {
-        // The parameters (inside the drag's gestures) and the exact f64 edges (plan 2.2), as one change.
-        startBinding->setPlain ((float) start);
-        endBinding->setPlain ((float) end);
+        // The parameters (inside the drag's gestures) and the exact f64 edges (plan 2.2), as one change. start and end are
+        // fractions of the samples shown; on a Region excerpt (M7 V3) they go back to fractions of the loaded range.
+        const double a = sound != nullptr ? sound->toLoaded (start) : start;
+        const double b = sound != nullptr ? sound->toLoaded (end) : end;
+        startBinding->setPlain ((float) a);
+        endBinding->setPlain ((float) b);
         auto s = processor.getInstState();
-        s.regionStartExact = start;
-        s.regionEndExact = end;
+        s.regionStartExact = a;
+        s.regionEndExact = b;
         processor.setInstState (s);
         exactStart = start;
         exactEnd = end;
@@ -656,7 +669,8 @@ namespace sl::ui
         // M7: the part chip under the mouse, as a dashed box over its stretch (sl-ui-sample.js drawHoverPart).
         if (const auto hp = chips.hoveredPart(); hp.has_value())
         {
-            const float x0 = xOf (hp->start), x1 = xOf (hp->end);
+            const float x0 = xOf (sound != nullptr ? sound->toSound (hp->start) : hp->start);
+            const float x1 = xOf (sound != nullptr ? sound->toSound (hp->end) : hp->end);
             g.setColour (theme (Tok::regionBand).withMultipliedAlpha (0.35f));
             g.fillRect (juce::Rectangle<float> (x0, area.getY(), juce::jmax (1.0f, x1 - x0), area.getHeight()));
             juce::Path box, dashed;

@@ -44,6 +44,25 @@ namespace sl::engine
         return static_cast<std::int16_t> (std::lround (y));
     }
 
+    /** M7 V3: a sound that holds only part of the project's loaded range, a Region excerpt kept in the project (PLUGIN-PLAN
+        3, "When only a Region excerpt is available, the excerpt is the sample"). A fraction x of the loaded range is the
+        frame base + x * span of this sound; ParamBridge::readInst maps the Region onto it and keeps it inside. */
+    struct ExcerptMap
+    {
+        bool active = false;
+        double base = 0.0;   // the loaded range's first frame minus the excerpt's first frame (0 or less)
+        double span = 0.0;   // the loaded range's frames
+
+        /** The fraction of this sound (n frames) that fraction x of the loaded range is, kept inside 0 .. 1. */
+        double toSound (double x, std::int64_t n) const noexcept
+        {
+            if (! active || n <= 0)
+                return x;
+            const double v = (base + x * span) / static_cast<double> (n);
+            return v < 0.0 ? 0.0 : v > 1.0 ? 1.0 : v;
+        }
+    };
+
     struct SampleData
     {
         std::uint64_t epoch = 0;                  // stamped by VersionExchange::publish (first: a live one is never 0xDD.. there)
@@ -58,6 +77,7 @@ namespace sl::engine
         SampleFormat format = SampleFormat::f32;
         std::string name;                         // display name (message side only)
         std::shared_ptr<const void> storage;      // keeps the samples alive
+        ExcerptMap excerpt;                       // M7 V3: a Region excerpt (the Region maps onto it), else inactive
 
         /** True when the left channel is there in the stored format. */
         bool hasSamples() const noexcept { return format == SampleFormat::i16 ? L16 != nullptr : L != nullptr; }

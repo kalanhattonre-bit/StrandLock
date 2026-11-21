@@ -28,6 +28,14 @@
 //   the worker never needs the message thread).
 // - Newest wins. Each request has a number; the worker takes only the newest one waiting, and a sound whose
 //   request is older than the newest request made is never committed.
+// - Keeping the sound with the project (M7 V3, plan 3 "Embedding" and "Finding the sound on load", 7.9 decision 5).
+//   A file of at most 20 MB that the project keeps is read into memory once: it is hashed and decoded from there,
+//   and its bytes stay with the sound as a ready SAUD payload (SoundView::original), so a save copies nothing on the
+//   message thread. A Region excerpt (FLAC 24-bit of the Region and up to 1 s either side, never over 50 MB) is an
+//   embed job. A project's file is looked for at its path (when its size and SHA-256 match), then in the opt-in
+//   library (Documents\StrandLock\Samples\<sha256 prefix>.<ext>, by its SHA-256), then in the SAUD bytes the project
+//   kept; else it is missing, and Locate (a file the person picks) loads it with every setting kept. Copies into the
+//   library are jobs too. Every read, hash, encode and copy happens on the worker.
 
 #include "analysis/Analysis.h"
 #include "engine/SampleData.h"
@@ -39,6 +47,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <atomic>
 #include <condition_variable>
 #include <cstdint>
@@ -54,6 +63,11 @@ namespace sl::doc
 {
     /** Who asked for a sound (see above). */
     enum class LoadOrigin : std::uint8_t { user, project, undo, startup };
+
+    /** Where a sound's samples came from (M7 V3, plan 3's order for finding a project's sound): a built-in sound; the
+        file itself (at its path, or one Locate picked); the copy in the library; the copy kept in the project, whole
+        (SAUD encoding 0 or 2) or only a part of the loaded range (a Region excerpt, SAUD encoding 1). */
+    enum class SoundSource : std::uint8_t { starter, file, library, embedded, excerpt };
 
     /** What listening to a sound found (M7): the load's analysis, or the SMPL cache it came back from. */
     struct SoundAnalysis
@@ -101,6 +115,32 @@ namespace sl::doc
         std::uint64_t request = 0;              // the load that made it
         LoadOrigin origin = LoadOrigin::startup;   // who asked for it
         SoundAnalysis analysis;                 // what the worker found (or the SMPL cache said) before it was handed on
+
+        // M7 V3: keeping the sound with the project.
+        SoundSource source = SoundSource::starter;
+        state::PayloadPtr original;             // a SAUD payload (encoding 0) of the file's bytes, ready to keep in the project:
+                                                // the file read into memory at the load (at most 20 MB), or the project's own copy
+        engine::ExcerptMap excerpt;             // source excerpt: the loaded range's fractions onto these frames
+        std::uint64_t excerptStartFrame = 0;    // source excerpt: the frames of the file it holds
+        std::uint64_t excerptFrames = 0;
+
+        /** The fraction of these samples that fraction x of the loaded range is (x itself unless an excerpt plays). */
+        double toSound (double x) const noexcept { return excerpt.toSound (x, frames); }
+
+        /** The fraction of the loaded range that fraction p of these samples is (p itself unless an excerpt plays). */
+        double toLoaded (double p) const noexcept
+        {
+            if (! excerpt.active || excerpt.span <= 0.0)
+                return p;
+            return (p * static_cast<double> (frames) - excerpt.base) / excerpt.span;
+        }
+
+        /** The original file's frame that frame i of these samples is. */
+        std::uint64_t fileFrameOf (std::int64_t i) const noexcept
+        {
+            const auto first = excerpt.active ? excerptStartFrame : ref.file.loadedStartFrame;
+            return first + static_cast<std::uint64_t> (std::max<std::int64_t> (0, i));
+        }
 
         double seconds() const noexcept { return sampleRate > 0.0 ? static_cast<double> (frames) / sampleRate : 0.0; }
 
@@ -167,6 +207,7 @@ namespace sl::doc
         LoadReport report;
         std::optional<RootHeard> rootHeard;    // the root heard in the sound (a short file) or in its first Region (U2)
         std::optional<analysis::Part> part;    // the suggested part the Region starts on (U2), if any
+        bool locate = false;                   // M7 V3: Locate found the project's file: no patch, every setting stays
     };
 
     /** The whole of a file longer than 10 minutes, coarsely (the part picker draws it): the lowest and highest mid
@@ -181,8 +222,23 @@ namespace sl::doc
     };
 
     /** The jobs the worker runs between sounds (M7). parts is a starter's part suggestions, made right after the
-        starter is handed on (so a project waiting for its starter never waits for them, decision 3). */
-    enum class JobKind : std::uint8_t { detect = 0, rootSuggestion = 1, overview = 2, parts = 3 };
+        starter is handed on (so a project waiting for its starter never waits for them, decision 3). embed makes the
+        SAUD payload that keeps the sound in the project, library copies it into the library (V3). */
+    enum class JobKind : std::uint8_t { detect = 0, rootSuggestion = 1, overview = 2, parts = 3, embed = 4, library = 5 };
+    inline constexpr int kNumJobKinds = 6;
+
+    /** What an embed job made (M7 V3): the SAUD payload that keeps the sound in the project, or why there is none. */
+    struct EmbedResult
+    {
+        std::uint64_t job = 0;
+        std::uint64_t soundRequest = 0;        // the sound it keeps (its load's request)
+        state::SampleRef sound;                // that sound's SMPL record
+        state::PayloadPtr saud;                // null: nothing could be kept
+        state::SaudHeader header;              // what saud holds
+        bool tooLong = false;                  // the Region excerpt would be over 50 MB: not kept (plan 3)
+        bool fromMemory = false;               // the file could not be read again: its sound as it plays, FLAC 24-bit
+        bool stopped = false;                  // a newer job or sound stopped it: it made nothing
+    };
 
     /** What a job found, for the owner (message thread). */
     struct JobResult
@@ -213,6 +269,11 @@ namespace sl::doc
         static constexpr std::size_t kMaxReports = 32;         // reports kept until someone takes them
         static constexpr int kOverviewBins = 2048;            // the part picker's overview
 
+        // Keeping the sound with the project (M7 V3, plan 3). MB here are 1,000,000 bytes, as the SAUD limit is.
+        static constexpr std::uint64_t kEmbedWithoutAsking = 20'000'000;   // the file's bytes are kept without asking up to 20 MB
+        static constexpr std::uint64_t kEmbedMost = state::kMaxSaudBytes - state::kSaudHeaderBytes;   // the largest file kept whole
+        static constexpr double kExcerptMarginSeconds = 1.0;  // a Region excerpt takes up to 1 s either side of the Region
+
         /** Starts the worker. */
         explicit SampleManager (rt::VersionExchange<engine::SampleData>& exchange);
 
@@ -225,11 +286,22 @@ namespace sl::doc
         std::uint64_t loadStarter (sounds::StarterId id, std::int32_t seed, LoadOrigin origin);
 
         /** A file. partStart (frames of the file) loads the 10 minutes from there when the file is longer than
-            10 minutes (the part picker); without it such a file loads its first 10 minutes. */
-        std::uint64_t loadFile (const juce::File& file, LoadOrigin origin, std::optional<std::uint64_t> partStart = std::nullopt);
+            10 minutes (the part picker); without it such a file loads its first 10 minutes. keepOriginal (M7 V3: the
+            project keeps its sound): a file of at most 20 MB is read into memory once, and its bytes stay with the sound
+            (SoundView::original) for the project to keep. */
+        std::uint64_t loadFile (const juce::File& file, LoadOrigin origin, std::optional<std::uint64_t> partStart = std::nullopt,
+                                bool keepOriginal = false);
 
-        /** The sound a project (or an undo state) names: a starter, or a file found by its path. */
-        std::uint64_t loadRef (const state::SampleRef& ref, LoadOrigin origin);
+        /** The sound a project (or an undo state) names: a starter, or a file found (M7 V3, plan 3) at its path when its
+            size and SHA-256 match, else in the library (when it is on) by its SHA-256, else in saud, the SAUD payload the
+            project kept. keepOriginal as loadFile's. */
+        std::uint64_t loadRef (const state::SampleRef& ref, LoadOrigin origin, state::PayloadPtr saud = nullptr, bool keepOriginal = false);
+
+        /** Locate (M7 V3): file, picked by the person, as the project's missing sound. The same file (its SHA-256) keeps
+            the project's record, its loaded part and its analysis; another file keeps the project's part when it is long
+            enough and is analysed again. Either way it is handed over like a user load (takePending) with locate set: no
+            patch, so every setting stays as it was. */
+        std::uint64_t locate (const juce::File& file, const state::SampleRef& project, bool keepOriginal);
 
         /** Blocks until that request is finished (committed, waiting in takePending, failed, or replaced by a
             newer one), at most timeoutMs. True when it is. */
@@ -279,8 +351,50 @@ namespace sl::doc
         /** The newest overview made (null before the first). */
         std::shared_ptr<const FileOverview> overview() const;
 
-        /** Called on the worker thread when takeResults () or overview () has something new. */
+        /** Called on the worker thread when takeResults (), overview () or takeEmbedResults () has something new. */
         std::function<void()> onJobDone;
+
+        //==========================================================================================
+        // Keeping the sound with the project (M7 V3): jobs, any thread but the audio thread.
+
+        /** The SAUD payload (encoding 0) of the original bytes of the file playing now, read again from its path or the
+            library copy with its size and SHA-256 checked. When neither can be read, the sound as it plays, the whole
+            loaded range as FLAC 24-bit (fromMemory). 0 when no file plays. */
+        std::uint64_t embedOriginal();
+
+        /** A Region excerpt of the sound playing now: frames [fromFrame, fromFrame + frames) of its samples as FLAC 24-bit
+            (SAUD encoding 1), each sample rounded to the nearest 24-bit step. Never more than 50 MB: a longer one gives no
+            payload and tooLong. 0 when no file plays. */
+        std::uint64_t embedExcerpt (std::int64_t fromFrame, std::int64_t frames);
+
+        /** The embed results since the last call, oldest first (any thread). */
+        std::vector<EmbedResult> takeEmbedResults();
+
+        //==========================================================================================
+        // The library (M7 V3, plan 3): off unless the person turns it on.
+
+        /** Documents\StrandLock\Samples (in the test runner, a fresh folder of its own per run). */
+        static juce::File defaultLibraryFolder();
+
+        void setLibraryOn (bool on) noexcept { libraryEnabled.store (on, std::memory_order_release); }
+        bool isLibraryOn() const noexcept { return libraryEnabled.load (std::memory_order_acquire); }
+
+        /** For the tests: another folder (set it while the worker is idle). */
+        void setLibraryFolder (const juce::File& folder);
+        juce::File libraryFolder() const;
+
+        /** Where the library keeps a file with this record's SHA-256: <first 16 hex digits>.<the file's extension>. */
+        juce::File libraryFileFor (const state::SampleFile& f) const;
+
+        /** A job: copies the file playing now into the library when it is on and the copy is not there yet (from the
+            bytes in memory, else from its path, its SHA-256 checked), then measures the library. */
+        std::uint64_t copyToLibrary();
+
+        /** The bytes the library's files take, measured by the last library job (-1 before the first). */
+        std::int64_t libraryBytes() const noexcept { return librarySize.load (std::memory_order_acquire); }
+
+        /** Files the library jobs copied (for the tests). */
+        std::uint64_t libraryCopies() const noexcept { return libraryCopied.load (std::memory_order_acquire); }
 
         //==========================================================================================
         // The owner (message thread).
@@ -328,7 +442,7 @@ namespace sl::doc
         std::function<void (bool starting)> workerProbe;
 
     private:
-        enum class Kind : std::uint8_t { starter, file, ref };
+        enum class Kind : std::uint8_t { starter, file, ref, locate };
 
         struct Request
         {
@@ -338,8 +452,10 @@ namespace sl::doc
             std::int32_t seed = 1;
             juce::File file;
             std::optional<std::uint64_t> partStart;
-            state::SampleRef ref;
+            state::SampleRef ref;                // ref: the project's sound; locate: the project's missing one
             LoadOrigin origin = LoadOrigin::user;
+            bool keepOriginal = false;           // M7 V3: keep the file's bytes (at most 20 MB) with the sound
+            state::PayloadPtr saud;              // M7 V3, ref: the SAUD payload the project kept
         };
 
         struct Job
@@ -349,6 +465,8 @@ namespace sl::doc
             std::uint64_t afterRequest = 0;    // the newest sound request when it was asked for
             std::shared_ptr<const SoundView> view;
             double regionStart = 0.0, regionEnd = 1.0;
+            bool original = false;             // embed: the original bytes (else the excerpt below)
+            std::int64_t fromFrame = 0, frameCount = 0;   // embed: the excerpt, frames of the view's samples
         };
 
         struct Made
@@ -368,6 +486,11 @@ namespace sl::doc
             bool cut = false;
             std::string error;   // empty when it worked
             bool missing = false, changed = false;
+            // M7 V3
+            SoundSource source = SoundSource::file;
+            state::PayloadPtr original;                  // the file's bytes as a SAUD payload (read into memory, or the project's)
+            bool excerpt = false;                        // only a part of the loaded range (a Region excerpt)
+            std::uint64_t excerptStartFrame = 0, excerptFrames = 0;
             std::int64_t frames() const noexcept { return static_cast<std::int64_t> (i16 ? left16.size() : left.size()); }
         };
 
@@ -376,9 +499,25 @@ namespace sl::doc
         void run() override;
         void process (const Request& r);
         void runJob (const Job& j);
+        void runEmbed (const Job& j);
+        void runLibrary (const Job& j);
         Made starterSound (sounds::StarterId id, std::int32_t seed);
+
+        /** Hashes the file (reading it into memory when keepOriginal and it is at most 20 MB) and decodes its part. */
         DecodedFile decodeFile (const juce::File& file, const state::SampleFile* expected, std::optional<std::uint64_t> partStart,
-                                std::uint64_t requestId);
+                                std::uint64_t requestId, bool keepOriginal);
+
+        /** The part rule and the chunked decode (16-bit above 3 minutes) of an opened reader, into out. */
+        DecodedFile decodeReader (juce::AudioFormatReader& reader, DecodedFile out, const state::SampleFile* expected,
+                                  std::optional<std::uint64_t> partStart, std::uint64_t requestId);
+
+        /** The sound a project's SAUD payload holds for its file record (M7 V3), or an error. */
+        DecodedFile decodeEmbedded (const state::PayloadPtr& saud, const state::SampleFile& expected, std::uint64_t requestId);
+
+        /** A reader over bytes in memory, by the formats createReaderFor (File) would try for this file name, in its order,
+            so bytes read into memory, or kept in a project, decode exactly as the file does from disk. */
+        std::unique_ptr<juce::AudioFormatReader> readerForBytes (const std::uint8_t* data, std::size_t size, const juce::String& fileName) const;
+
         static Made fileSound (DecodedFile decoded);
 
         /** The load's analysis (parts; for a file the key and, at 20 s or less, the pitch). Not analysed when stopped. */
@@ -406,13 +545,18 @@ namespace sl::doc
         std::uint64_t newestSelfPublished = 0;   // the newest request that is not a user load
         std::uint64_t finished = 0;    // every request up to this one is finished
         std::uint64_t jobsAsked = 0, jobsDone = 0;
-        std::atomic<std::uint64_t> newestJob[4] {};   // per JobKind: the newest job asked for
+        std::atomic<std::uint64_t> newestJob[kNumJobKinds] {};   // per JobKind: the newest job asked for
         bool held = false;             // the tests' setHeld
         std::atomic<std::uint64_t> finishedAtomic { 0 };
         bool working = false;
         std::vector<PendingSound> pending;
         std::vector<LoadReport> reports;
         std::vector<JobResult> results;
+        std::vector<EmbedResult> embedResults;   // M7 V3
+        juce::File library;                      // M7 V3: the library folder
+        std::atomic<bool> libraryEnabled { false };
+        std::atomic<std::int64_t> librarySize { -1 };
+        std::atomic<std::uint64_t> libraryCopied { 0 };
         std::shared_ptr<const SoundView> currentView;
         std::shared_ptr<const FileOverview> lastOverview;
         std::uint64_t made = 0, analyses = 0, jobRuns = 0, stops = 0;

@@ -129,6 +129,19 @@ namespace sl::params
         return core::clampForEngine (inst);
     }
 
+    core::Inst readInst (const ParameterRefs& refs, const NonParamAtomics& state, const engine::SampleData* playing) noexcept
+    {
+        core::Inst inst = readInst (refs, state);
+        if (playing != nullptr && playing->excerpt.active && playing->n > 0)
+        {
+            // Only a part of the loaded range was kept in the project (M7 V3): the Region, a fraction of the loaded
+            // range, onto that part, kept inside it. The map only grows, so the edges stay in order.
+            inst.region.start = playing->excerpt.toSound (inst.region.start, playing->n);
+            inst.region.end = playing->excerpt.toSound (inst.region.end, playing->n);
+        }
+        return inst;
+    }
+
     bool readBypass (const ParameterRefs& refs) noexcept
     {
         return Reader { refs }.toggle (P::bypass);

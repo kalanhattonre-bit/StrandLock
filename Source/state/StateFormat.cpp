@@ -62,6 +62,46 @@ namespace sl::state
         {
             return a == b || bytesOf (a) == bytesOf (b);
         }
+
+        /** A container made in place (M7): 16 header bytes kept free, the chunks appended after them, then the header
+            written over them, so a 50 MB SAUD is copied once, not twice. */
+        void beginContainer (Bytes& out, std::size_t chunkBytes)
+        {
+            out.clear();
+            out.reserve (kHeaderSize + chunkBytes);
+            out.resize (kHeaderSize, 0);
+        }
+
+        void endContainer (Bytes& out)
+        {
+            Bytes head;
+            head.reserve (kHeaderSize);
+            ByteWriter w (head);
+            w.bytes (kMagic, sizeof (kMagic));
+            w.u16 (static_cast<std::uint32_t> (core::kStateFormatVersion));
+            w.u16 (0);
+            w.u32 (static_cast<std::uint32_t> (out.size()));
+            w.u32 (crc32 (head.data(), 12));
+            std::memcpy (out.data(), head.data(), kHeaderSize);
+        }
+
+        /** The bytes a chunk takes with its header and padding. */
+        std::size_t framed (std::size_t payloadBytes) noexcept { return kChunkHeaderSize + payloadBytes + padTo4 (payloadBytes); }
+
+        /** M7: the chunk is exactly what appendChunk makes of these payload bytes with its own version and flags (its CRC
+            good, its padding zero), so it can be written again from them instead of keeping its raw copy. */
+        bool reframes (const FoundChunk& c, const Bytes& payload) noexcept
+        {
+            if (c.truncated || ! c.crcOk || c.payload == nullptr || c.payloadLength != payload.size()
+                || c.rawLength != framed (c.payloadLength))
+                return false;
+            if (c.payloadLength > 0 && std::memcmp (c.payload, payload.data(), c.payloadLength) != 0)
+                return false;
+            for (std::size_t i = kChunkHeaderSize + c.payloadLength; i < c.rawLength; ++i)
+                if (c.raw[i] != 0)
+                    return false;
+            return true;
+        }
     }
 
     std::size_t payloadLimit (std::uint32_t tag) noexcept
@@ -360,10 +400,19 @@ namespace sl::state
     //==============================================================================================
     Bytes KeptLayout::standardContainer (const Payloads& now)
     {
-        Bytes chunks;
+        std::size_t total = 0;
         for (const auto tag : kWrittenTags)
-            appendChunk (chunks, tag, writtenVersion (tag), 0, payloadOf (now, tag));
-        return makeContainer (chunks);
+            total += framed (payloadOf (now, tag).size());
+        Bytes out;
+        beginContainer (out, total);
+        for (const auto tag : kWrittenTags)
+        {
+            if (isOptionalTag (tag) && payloadPtrOf (now, tag) == nullptr)
+                continue;   // M7: no sound kept in the project, no SAUD chunk
+            appendChunk (out, tag, writtenVersion (tag), 0, payloadOf (now, tag));
+        }
+        endContainer (out);
+        return out;
     }
 
     bool KeptLayout::isProjectContent (std::uint32_t tag) noexcept
@@ -401,7 +450,6 @@ namespace sl::state
             const FoundChunk& c = parsed.chunks[i];
             Slot s;
             s.tag = c.tag;
-            s.raw.assign (c.raw, c.raw + c.rawLength);
             s.version = c.version;
             s.flags = c.flags;
             s.truncated = c.truncated;
@@ -411,11 +459,16 @@ namespace sl::state
                 s.decoded = i < decoded.size() && decoded[i];
                 s.atLoad = payloadPtrOf (atLoad, c.tag);
                 s.unreadable = ! s.decoded;
+                // M7: a SAUD the processor holds byte for byte (up to 50 MB) is written again from its payload; its raw
+                // copy would only hold the same bytes a second time.
+                s.reframe = c.tag == kTagSaud && s.decoded && s.atLoad != nullptr && reframes (c, *s.atLoad);
             }
             else
             {
                 s.unreadable = ! c.crcOk || ! c.withinLimits || c.truncated;
             }
+            if (! s.reframe)
+                s.raw.assign (c.raw, c.raw + c.rawLength);
             k.slots.push_back (std::move (s));
         }
         return k;
@@ -427,43 +480,68 @@ namespace sl::state
         if (wholeBlob)
             return contentUnchanged (now) ? blob : standardContainer (now);
 
-        // A cut end (bytes that hold no whole chunk) is kept too, but written after everything else: in the
-        // middle, its header would claim the chunks that follow it as its payload.
-        Bytes chunks;
-        const Bytes* cutEnd = nullptr;
+        // What each slot writes, decided once (samePayload may compare 32 MiB), so the container is sized exactly and
+        // made in one buffer (M7: the SAUD chunk can be 50 MB).
+        enum class Use : std::uint8_t { raw, cutEnd, reframe, none, encodeKnown, encodeNew };
+        std::vector<Use> use (slots.size(), Use::raw);
+        std::size_t total = 0;
         std::set<std::uint32_t> emitted;
-        for (const Slot& s : slots)
+        for (std::size_t i = 0; i < slots.size(); ++i)
         {
+            const Slot& s = slots[i];
+            Use u = Use::raw;
             if (! s.written)
             {
-                if (s.truncated)
-                    cutEnd = &s.raw;
-                else
-                    chunks.insert (chunks.end(), s.raw.begin(), s.raw.end());
-                continue;
+                u = s.truncated ? Use::cutEnd : Use::raw;
             }
-
-            emitted.insert (s.tag);
-            const PayloadPtr payloadNow = payloadPtrOf (now, s.tag);
-            const Bytes& payload = bytesOf (payloadNow);
-            if (samePayload (payloadNow, s.atLoad))
-            {
-                if (s.truncated)
-                    cutEnd = &s.raw;
-                else
-                    chunks.insert (chunks.end(), s.raw.begin(), s.raw.end());
-            }
-            else if (s.decoded)
-                appendChunk (chunks, s.tag, std::max (s.version, writtenVersion (s.tag)), s.flags, payload);
             else
-                appendChunk (chunks, s.tag, writtenVersion (s.tag), 0, payload);
+            {
+                emitted.insert (s.tag);
+                const PayloadPtr payloadNow = payloadPtrOf (now, s.tag);
+                if (samePayload (payloadNow, s.atLoad))
+                    u = s.reframe ? Use::reframe : (s.truncated ? Use::cutEnd : Use::raw);
+                else if (isOptionalTag (s.tag) && payloadNow == nullptr)
+                    u = Use::none;   // M7: the part this chunk held has gone (another sound, nothing kept): not written
+                else
+                    u = s.decoded ? Use::encodeKnown : Use::encodeNew;
+            }
+            use[i] = u;
+            if (u == Use::raw || u == Use::cutEnd)
+                total += s.raw.size();
+            else if (u == Use::reframe)
+                total += framed (bytesOf (s.atLoad).size());
+            else if (u != Use::none)
+                total += framed (payloadOf (now, s.tag).size());
         }
         for (const auto tag : kWrittenTags)
-            if (emitted.count (tag) == 0)
-                appendChunk (chunks, tag, writtenVersion (tag), 0, payloadOf (now, tag));
+            if (emitted.count (tag) == 0 && ! (isOptionalTag (tag) && payloadPtrOf (now, tag) == nullptr))
+                total += framed (payloadOf (now, tag).size());
+
+        // A cut end (bytes that hold no whole chunk) is kept too, but written after everything else: in the
+        // middle, its header would claim the chunks that follow it as its payload.
+        Bytes out;
+        beginContainer (out, total);
+        const Bytes* cutEnd = nullptr;
+        for (std::size_t i = 0; i < slots.size(); ++i)
+        {
+            const Slot& s = slots[i];
+            switch (use[i])
+            {
+                case Use::raw:         out.insert (out.end(), s.raw.begin(), s.raw.end()); break;
+                case Use::cutEnd:      cutEnd = &s.raw; break;
+                case Use::reframe:     appendChunk (out, s.tag, s.version, s.flags, bytesOf (s.atLoad)); break;   // the bytes loaded
+                case Use::none:        break;
+                case Use::encodeKnown: appendChunk (out, s.tag, std::max (s.version, writtenVersion (s.tag)), s.flags, payloadOf (now, s.tag)); break;
+                case Use::encodeNew:   appendChunk (out, s.tag, writtenVersion (s.tag), 0, payloadOf (now, s.tag)); break;
+            }
+        }
+        for (const auto tag : kWrittenTags)
+            if (emitted.count (tag) == 0 && ! (isOptionalTag (tag) && payloadPtrOf (now, tag) == nullptr))
+                appendChunk (out, tag, writtenVersion (tag), 0, payloadOf (now, tag));
         if (cutEnd != nullptr)
-            chunks.insert (chunks.end(), cutEnd->begin(), cutEnd->end());
-        return makeContainer (chunks);
+            out.insert (out.end(), cutEnd->begin(), cutEnd->end());
+        endContainer (out);
+        return out;
     }
 
     bool KeptLayout::keepsUnreadable (const Payloads& now) const

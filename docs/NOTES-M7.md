@@ -338,3 +338,24 @@ chips and the suggestion line. Branch `m7-songs`, from main 1e9f61c.
   runDetect 'auto'); a song's first Region inside the load's own undo step (U2, known before the hand-over); the
   16-bit rounding (round half away from zero of v x 32768).
 - E3's line on the Sample tab (the prototype shows the suggestion there as well as on the strip) is not built.
+
+## V3
+
+Keeping the sound with the project (plan 7.9 V3, section 3 "Embedding", "The loaded range" and "Finding the sound on
+load", decisions 4 and 5): the SAUD chunk, "Keep the sound in the project" with the 20-50 MB question and its saved
+answer, the Region excerpt (FLAC 24-bit, never over 50 MB), the opt-in library and Locate. Branch `m7-songs`, from main
+9f8faa3.
+
+### Progress
+
+- Done: SAUD in `state/StateChunks` (read in place, kept whole) and `state/StateFormat` (an optional written tag; a
+  container made in one buffer; a SAUD written again from its payload, not held twice).
+- Done: `doc/SampleManager`: a file of up to 20 MB read into memory once (hashed and decoded from there, its bytes kept
+  as a ready SAUD payload); the embed jobs (the original bytes read again, or a FLAC 24-bit Region excerpt); the library
+  (lookup by SHA-256, copies, its size); the locate order (path, library, the project's SAUD, else missing); Locate.
+- Done: the processor's policy (`syncEmbed`), the question, the switch, the library switch, Locate, the sound notice;
+  `ParamBridge::readInst` maps the Region onto an excerpt; the strip draws and drags the Region on one.
+- Done: the UI: `ui/SoundBanner` (the question, Locate, a part kept) under the top bar; the Sound tab's switch, what is
+  kept, and the library line.
+- In progress: the first CI run of the code; the tests (`test_embed.cpp`, `test_locate.cpp`) and the pictures.
+- Next: the tests green on both platforms, the snapshots looked at, these notes finished, main fast-forwarded.

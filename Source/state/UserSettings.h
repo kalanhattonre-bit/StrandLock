@@ -54,6 +54,12 @@ namespace sl::state
         std::vector<std::string> dicePins() const;
         void setDicePins (const std::vector<std::string>& pins);
 
+        /** The sound library (M7, PLUGIN-PLAN 3): StrandLock keeps a copy of each sound file it loads in
+            Documents\StrandLock\Samples (named by its SHA-256), and finds a project's moved file there. Off unless the
+            person turns it on. */
+        bool libraryOn() const;
+        void setLibraryOn (bool on);
+
         /** Saves now; false when the file could not be written (shown, never thrown). */
         bool save();
 

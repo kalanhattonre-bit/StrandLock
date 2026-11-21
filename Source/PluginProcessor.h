@@ -262,6 +262,63 @@ public:
     /** How many states the undo history holds (the tests count steps with it). */
     std::size_t historySize() const;
 
+    //----------------------------------------------------------------------------------------------
+    // Keeping the sound with the project (M7 V3, PLUGIN-PLAN 3 "Embedding" and "Finding the sound on load", 7.9
+    // decision 5). Message thread unless it says otherwise.
+
+    /** "Keep the sound in the project": the project's switch (SMPL keepInProject, on by default). On, a file of up to
+        20 MB is kept whole without asking; from 20 to 50 MB StrandLock asks once (Yes / No / Just the Region); above
+        50 MB (or after Just the Region) the Region and up to 1 s either side are kept as FLAC 24-bit, never more than
+        50 MB. Off, nothing is kept and nothing is asked. Not an undo step: it says how the project holds the sound, not
+        what plays. */
+    bool getKeepInProject() const;
+    void setKeepInProject (bool on);
+
+    /** The answers to the 20-50 MB question (SMPL embedAnswer). */
+    enum class EmbedAnswer : std::uint8_t { notAsked = 0, yes = 1, no = 2, region = 3 };
+
+    /** The person's answer for the file playing now: saved in SMPL, so later saves, auto-saves and reloads never ask
+        again (loading another file asks again). Not an undo step. False when no question shows. */
+    bool answerEmbedQuestion (EmbedAnswer answer);
+
+    /** The library (Documents\StrandLock\Samples): per person (UserSettings), off unless turned on. Turned on, the file
+        playing now is copied there (on the worker), and so is every file loaded after; a project's moved file is found
+        there by its SHA-256. */
+    bool isLibraryOn() const;
+    void setLibraryOn (bool on);
+
+    /** The bytes the library holds (-1 until the worker has measured it). Any thread. */
+    std::int64_t getLibraryBytes() const noexcept { return sampleManager->libraryBytes(); }
+
+    /** What the sound line under the top bar says now: the 20-50 MB question; the Locate banner (the project's file was
+        found nowhere: every setting is kept until a file is chosen); or that only part of the sound was kept. */
+    struct SoundNotice
+    {
+        enum class Kind : std::uint8_t { none, question, locate, partKept };
+        Kind kind = Kind::none;
+        std::string text;
+    };
+    SoundNotice getSoundNotice() const;
+
+    /** Locate sample...: the file the person chose for the project's missing sound (or for the whole of a sound only
+        part of which was kept). It plays with every setting as it was (the Region, the root, the part loaded); one undo
+        step "Locate <name>". */
+    std::uint64_t locateSound (const juce::File& file);
+
+    /** What the project keeps of its sound now, in words (the Sound tab's line). */
+    std::string getEmbedStatus() const;
+
+    /** The SAUD payload the next save writes (null: none). Any thread. */
+    sl::state::PayloadPtr getEmbeddedPayload() const;
+
+    /** Brings the SAUD the next save writes up to date with the sound, the switch, the answer and the Region (a Region
+        excerpt at once, not after the Region has settled), waiting for the worker at most timeoutMs. True when nothing is
+        left on its way. getStateInformation calls it (at most kSaveEmbedWaitMs). Any thread. */
+    bool waitForEmbed (int timeoutMs = kLoadWaitMs);
+
+    /** How long a save waits for a Region excerpt the worker is making. */
+    static constexpr int kSaveEmbedWaitMs = 5000;
+
     /** Waits until the newest clip version is compiled and handed to the audio thread (at most timeoutMs). */
     bool waitForSnapshot (int timeoutMs = kLoadWaitMs);
 
@@ -427,6 +484,39 @@ private:
     std::vector<sl::state::SampleRef> knownCaches;
     std::vector<sl::doc::LoadReport> ownReports;
     double rootDueMs = -1.0;   // when the root suggestion for a new Region is asked for, or -1
+
+    // M7 V3: keeping the sound with the project. Under embedLock (any thread: a save brings it up to date); stateLock is
+    // never taken while it is held.
+    struct Embedded
+    {
+        sl::state::PayloadPtr payload;     // the SAUD chunk the next save writes (null: none)
+        sl::state::SampleRef sound;        // the SMPL record it keeps
+        sl::state::SaudHeader header;      // what it holds
+        bool fromProject = false;          // the loaded project's own SAUD, kept while its sound is the project's
+        bool usable = true;                // false: a SAUD this version cannot play, kept as it was for its sound
+        bool fromMemory = false;           // the file could not be read again: the sound as it played
+    };
+    void syncEmbed (bool now);                     // the SAUD follows the sound, the switch, the answer and the Region
+    void deliverEmbed();                           // the worker's embed results
+    void askEmbed (bool original, std::int64_t from, std::int64_t frames, std::uint64_t soundRequest, const std::string& key);   // under embedLock
+    void setEmbedded (Embedded e);                 // under embedLock: the one before is remembered for Undo
+    std::string takeEmbedToast();
+    sl::state::PayloadPtr saudFor (const sl::state::SampleRef& sound) const;   // a SAUD this session holds for those bytes
+    void keepAnswerOf (sl::state::SampleRef& sound) const;                       // the answer those bytes were given
+    void rememberAnswer (const sl::state::SampleRef& sound);
+    mutable std::mutex embedLock;
+    Embedded embedded;
+    std::vector<Embedded> otherSauds;              // the last sounds' SAUDs, so Undo can bring back a sound only they hold
+    std::vector<sl::state::SampleRef> embedAnswers;   // message thread: the newest answer given for each file's bytes
+    std::uint64_t embedJob = 0;                    // the embed job on its way (0: none)
+    std::uint64_t embedJobSound = 0;               // the sound request it is for
+    std::string embedJobKey;                       // what it makes
+    std::string embedTooLong;                      // the excerpt found too long (not asked for again)
+    std::string embedNote;                         // why nothing (or less) is kept now
+    std::string embedToast;                        // a toast for the message thread
+    std::pair<double, double> embedRegion { -1.0, -1.0 };   // a Region excerpt waits for the Region to settle
+    double embedRegionSince = 0.0;
+    std::atomic<bool> keepInProject { true };      // the project's switch (a file's SMPL holds it too)
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (StrandLockProcessor)
 };

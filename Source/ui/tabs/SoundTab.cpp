@@ -108,10 +108,55 @@ namespace sl::ui
             const int w = l->preferredWidth();
             lock = &add (std::move (l), w, 26);
         }
+        // M7 V3: keeping the sound with the project (PLUGIN-PLAN 3): the project's switch and what it keeps now, then the
+        // library (the person's own switch) and what it holds.
+        newRow();
+        {
+            auto k = std::make_unique<FlatButton> (t, "Keep the sound in the project");
+            k->setTooltip ("Save the sound file inside the Cubase project, so the project still plays it if the file moves: up to 20 MB "
+                           "without asking, up to 50 MB if you say yes, else the Region and 1 s either side (24-bit FLAC)");
+            k->setClickingTogglesState (false);
+            k->onClick = [this]
+            {
+                processor.setKeepInProject (! processor.getKeepInProject());
+                refresh();
+            };
+            const int w = k->preferredWidth();
+            keepToggle = &add (std::move (k), w, 26);
+        }
+        {
+            auto c = std::make_unique<Caption> (t, " ", Caption::Style::sub);
+            keepStatus = &add (std::move (c), 120, 18);
+        }
+        newRow();
+        {
+            auto l = std::make_unique<FlatButton> (t, "Library");
+            l->setTooltip ("Also keep a copy of every sound file you load in Documents\\StrandLock\\Samples, named by its fingerprint "
+                           "(SHA-256), so a project finds a moved file there (for every project; off unless you turn it on)");
+            l->setClickingTogglesState (false);
+            l->onClick = [this]
+            {
+                processor.setLibraryOn (! processor.isLibraryOn());
+                refresh();
+            };
+            const int w = l->preferredWidth();
+            libraryToggle = &add (std::move (l), w, 26);
+        }
+        {
+            auto c = std::make_unique<Caption> (t, " ", Caption::Style::sub);
+            libraryStatus = &add (std::move (c), 120, 18);
+        }
         newRow();
         caption ("The sound menu and Browse are on the waveform strip below; its chips suggest the root, the key and the parts.",
                  Caption::Style::sub);
         refresh();
+    }
+
+    juce::String SoundTab::libraryText (bool on, std::int64_t bytes)
+    {
+        const juce::String size = bytes < 0 ? juce::String ("not measured yet") : juce::String ((double) bytes / 1.0e6, 1) + " MB";
+        return on ? "On: copies of your sound files in Documents\\StrandLock\\Samples (" + size + ")"
+                  : juce::String ("Off: no copies are made (the library holds ") + size + ")";
     }
 
     void SoundTab::refresh()
@@ -133,5 +178,21 @@ namespace sl::ui
             scaleBox->setText (juce::String::fromUTF8 (s.scale.c_str()), juce::dontSendNotification);
         }
         lock->setToggleState (s.scaleLock != 0, juce::dontSendNotification);
+
+        // M7 V3: the switches and what they keep now; a text that changes takes its own width (the panel lays out again).
+        keepToggle->setToggleState (processor.getKeepInProject(), juce::dontSendNotification);
+        libraryToggle->setToggleState (processor.isLibraryOn(), juce::dontSendNotification);
+        bool moved = false;
+        auto show = [this, &moved] (Caption& c, const juce::String& words)
+        {
+            if (c.getText() == words)
+                return;
+            c.setText (words);
+            moved = resizeItem (c, juce::jmax (40, c.preferredWidth() + 2)) || moved;
+        };
+        show (*keepStatus, juce::String::fromUTF8 (processor.getEmbedStatus().c_str()));
+        show (*libraryStatus, libraryText (processor.isLibraryOn(), processor.getLibraryBytes()));
+        if (moved)
+            layoutChanged();
     }
 }

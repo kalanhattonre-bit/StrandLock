@@ -101,6 +101,7 @@ StrandLockProcessor::StrandLockProcessor()
     // The threads: the clip compiler and the sound worker (plan 1.3). Nothing makes a starter here.
     publisher = std::make_unique<doc::SnapshotPublisher> (snapshots);
     sampleManager = std::make_unique<doc::SampleManager> (samples);
+    sampleManager->setLibraryOn (userSettings->libraryOn());   // M7 V3: the person's library switch
     sampleManager->onPendingReady = [this] { triggerAsyncUpdate(); };
     sampleManager->onJobDone = [this] { triggerAsyncUpdate(); };
     sampleManager->onCommitted = [this] (const doc::SoundView& v) { textContext.soundSeconds.store (v.seconds()); };
@@ -227,7 +228,8 @@ void StrandLockProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::
     if (samples.acquire())
         eng.setSample (samples.current(), samples.currentEpoch());
 
-    eng.setInst (params::readInst (paramRefs, nonParam));
+    // M7 V3: on a Region excerpt kept in the project, the Region maps onto the excerpt (ParamBridge::readInst).
+    eng.setInst (params::readInst (paramRefs, nonParam, samples.current()));
     eng.setBypass (params::readBypass (paramRefs));
     if (snapRampsPending.exchange (false, std::memory_order_acq_rel) || firstBlock)
         eng.snapRamps();   // plan 2.3: the first block and a state load play their values at once
@@ -344,6 +346,15 @@ void StrandLockProcessor::timerCallback()
         sampleManager->suggestRoot (r.first, r.second);
     }
     updateEngineSuggestion();
+
+    // M7 V3: the library switch is the person's (another StrandLock may have changed it); the sound kept in the project
+    // follows the sound, the switch, the answer and the Region (an excerpt once the Region has settled).
+    sampleManager->setLibraryOn (userSettings->libraryOn());
+    deliverEmbed();
+    syncEmbed (false);
+    const auto toast = takeEmbedToast();
+    if (! toast.empty())
+        say (toast, 6000);
 }
 
 juce::AudioProcessorEditor* StrandLockProcessor::createEditor()
@@ -458,11 +469,14 @@ void StrandLockProcessor::applyStep (const doc::EditHistory::Step& step)
     }
     writeParams (values);
     auto np = step.state.np;
-    keepCacheOf (np.sound);   // the analysis cache is the file's (M7): the newest one known stays
+    keepCacheOf (np.sound);    // the analysis cache is the file's (M7): the newest one known stays
+    keepAnswerOf (np.sound);   // M7 V3: so is the answer to the 20-50 MB question, and the switch is the project's as it is now
+    if (np.sound.kind == state::kSampleFile)
+        np.sound.file.keepInProject = keepInProject.load() ? 1 : 0;
     clipDoc.setNonParam (np);
     clipDoc.replace (step.state.clip);
     if (soundChanges)
-        sampleManager->loadRef (np.sound, doc::LoadOrigin::undo);
+        sampleManager->loadRef (np.sound, doc::LoadOrigin::undo, saudFor (np.sound), keepInProject.load());
 
     // A root suggestion belongs to the Region it was heard in (sl-ui.js applyState: if (regionMoved) suggestRoot ()).
     const auto regionAfter = currentRegion();
@@ -539,13 +553,15 @@ std::uint64_t StrandLockProcessor::loadStarterSound (sounds::StarterId id, std::
 
 std::uint64_t StrandLockProcessor::loadSoundFile (const juce::File& file)
 {
-    return sampleManager->loadFile (file, doc::LoadOrigin::user);
+    // M7 V3: with the project keeping its sound, a file of up to 20 MB is read into memory once, ready to keep.
+    return sampleManager->loadFile (file, doc::LoadOrigin::user, std::nullopt, keepInProject.load());
 }
 
 void StrandLockProcessor::handleAsyncUpdate()
 {
     deliverSoundLoads();
     deliverAnalysis();
+    deliverEmbed();   // M7 V3
 }
 
 int StrandLockProcessor::deliverSoundLoads()
@@ -561,14 +577,24 @@ int StrandLockProcessor::deliverSoundLoads()
         // The sound leaving keeps its own root and cents (plan 2.4's SoundMeta), so Undo brings it back with them.
         rememberRoot (clipDoc.soundRef(), currentRoot(), currentCents());
 
-        // The sound's own root and cents and its Region, as host-visible edits (plan 2.4), then the sound.
+        // The sound's own root and cents and its Region, as host-visible edits (plan 2.4), then the sound. A file Locate
+        // found (M7 V3) has no patch: every setting stays as it was.
         const auto changed = params::applyPatch (apvts, p.patch);
         auto np = clipDoc.nonParam();
-        np.inst.regionStartExact = p.regionStartExact;
-        np.inst.regionEndExact = p.regionEndExact;
+        if (! p.locate)
+        {
+            np.inst.regionStartExact = p.regionStartExact;
+            np.inst.regionEndExact = p.regionEndExact;
+        }
         np.sound = p.view->ref;
-        std::string label = (p.view->builtIn ? "Sound: " : "Load ") + p.view->name;
-        if (p.view->cut && p.view->ref.file.loadedStartFrame > 0 && p.view->ref.file.fileSampleRate > 0.0)
+        if (np.sound.kind == state::kSampleFile)
+        {
+            // M7 V3: the project's switch, and the answer these bytes were given before (another file is asked again)
+            np.sound.file.keepInProject = keepInProject.load() ? 1 : 0;
+            keepAnswerOf (np.sound);
+        }
+        std::string label = p.locate ? "Locate " + p.view->name : (p.view->builtIn ? "Sound: " : "Load ") + p.view->name;
+        if (! p.locate && p.view->cut && p.view->ref.file.loadedStartFrame > 0 && p.view->ref.file.fileSampleRate > 0.0)
         {
             const auto from = (long long) std::floor ((double) p.view->ref.file.loadedStartFrame / p.view->ref.file.fileSampleRate);
             label += " (from " + std::to_string (from / 60) + ":" + (from % 60 < 10 ? "0" : "") + std::to_string (from % 60) + ")";
@@ -618,6 +644,8 @@ int StrandLockProcessor::deliverSoundLoads()
             suggestions = std::move (next);
             seenSound = sampleManager->current();
             rememberCache (np.sound);
+            if (np.sound.kind == state::kSampleFile)
+                sampleManager->copyToLibrary();   // M7 V3: when the library is on
             const std::lock_guard<std::mutex> hold (historyLock);
             // The step keeps the clip of the last finished edit, not the document's: a load can finish while a roll
             // drag is held, and the document then shows the drag's unfinished clip, which no undo step may keep. The
@@ -627,6 +655,8 @@ int StrandLockProcessor::deliverSoundLoads()
         }
     }
     syncSound();   // a project's or Undo's sound that the worker published itself
+    if (published > 0)
+        syncEmbed (false);   // M7 V3: what the project keeps of the new sound
     return published;
 }
 
@@ -651,7 +681,7 @@ std::vector<doc::LoadReport> StrandLockProcessor::takeSoundReports()
 
 std::uint64_t StrandLockProcessor::loadSoundFilePart (const juce::File& file, std::uint64_t startFrame)
 {
-    return sampleManager->loadFile (file, doc::LoadOrigin::user, startFrame);
+    return sampleManager->loadFile (file, doc::LoadOrigin::user, startFrame, keepInProject.load());
 }
 
 int StrandLockProcessor::currentRoot() const
@@ -758,6 +788,11 @@ void StrandLockProcessor::syncSound()
         suggestions = {};
         suggestions.soundRequest = now->request;
         suggestions.analysis = now->analysis;
+        // M7 V3: a project's file found at its path (or in the project's copy) goes into the library when it is on, and
+        // the answer the project saved for it is remembered (Undo and a load of the same file keep it).
+        if (now->ref.kind == state::kSampleFile && ! now->missing)
+            sampleManager->copyToLibrary();
+        rememberAnswer (clipDoc.soundRef());
     }
     // A project's file analysed after its load (its cache was empty or could not be read): the document's SMPL record
     // takes the cache, so the next save keeps it and a reload does not analyse again (decision 1).
@@ -1057,6 +1092,419 @@ std::size_t StrandLockProcessor::historySize() const
 }
 
 //==================================================================================================
+// Keeping the sound with the project (M7 V3, PLUGIN-PLAN 3, 7.9 decision 5).
+
+namespace
+{
+    /** "12.3 MB" (MB as the SAUD limit counts them: 1,000,000 bytes). */
+    std::string megabytes (std::uint64_t bytes)
+    {
+        return juce::String ((double) bytes / 1.0e6, 1).toStdString() + " MB";
+    }
+
+    /** "1:05" for a time in seconds. */
+    std::string mmss (double seconds)
+    {
+        const auto w = (long long) std::floor (std::max (0.0, seconds) + 1e-9);
+        return std::to_string (w / 60) + ":" + (w % 60 < 10 ? "0" : "") + std::to_string (w % 60);
+    }
+
+    std::string fileNameOf (const state::SampleRef& r)
+    {
+        return r.file.displayName.empty() ? r.file.path : r.file.displayName;
+    }
+}
+
+void StrandLockProcessor::setEmbedded (Embedded e)
+{
+    // The one before is remembered (the last two files' SAUDs), so an Undo back to a sound only its SAUD holds finds it.
+    if (embedded.payload != nullptr && embedded.usable && embedded.sound.kind == state::kSampleFile
+        && ! (e.payload != nullptr && state::sameBytes (e.sound, embedded.sound)))
+    {
+        otherSauds.erase (std::remove_if (otherSauds.begin(), otherSauds.end(),
+                                          [this] (const Embedded& o) { return state::sameBytes (o.sound, embedded.sound); }),
+                          otherSauds.end());
+        otherSauds.push_back (embedded);
+        while (otherSauds.size() > 2)
+            otherSauds.erase (otherSauds.begin());
+    }
+    embedded = std::move (e);
+}
+
+state::PayloadPtr StrandLockProcessor::saudFor (const state::SampleRef& sound) const
+{
+    if (sound.kind != state::kSampleFile)
+        return nullptr;
+    const std::lock_guard<std::mutex> hold (embedLock);
+    if (embedded.payload != nullptr && embedded.usable && state::sameBytes (embedded.sound, sound))
+        return embedded.payload;
+    for (const auto& o : otherSauds)
+        if (o.payload != nullptr && o.usable && state::sameBytes (o.sound, sound))
+            return o.payload;
+    return nullptr;
+}
+
+void StrandLockProcessor::keepAnswerOf (state::SampleRef& sound) const
+{
+    if (sound.kind != state::kSampleFile)
+        return;
+    for (const auto& a : embedAnswers)
+        if (state::sameBytes (a, sound))
+            sound.file.embedAnswer = a.file.embedAnswer;
+}
+
+void StrandLockProcessor::rememberAnswer (const state::SampleRef& sound)
+{
+    if (sound.kind != state::kSampleFile || sound.file.embedAnswer == 0)
+        return;
+    embedAnswers.erase (std::remove_if (embedAnswers.begin(), embedAnswers.end(),
+                                        [&sound] (const state::SampleRef& a) { return state::sameBytes (a, sound); }),
+                        embedAnswers.end());
+    embedAnswers.push_back (sound);
+    while (embedAnswers.size() > kSoundsRemembered)
+        embedAnswers.erase (embedAnswers.begin());
+}
+
+void StrandLockProcessor::askEmbed (bool original, std::int64_t from, std::int64_t frames, std::uint64_t soundRequest, const std::string& key)
+{
+    embedJob = original ? sampleManager->embedOriginal() : sampleManager->embedExcerpt (from, frames);
+    embedJobSound = embedJob != 0 ? soundRequest : 0;
+    embedJobKey = embedJob != 0 ? key : std::string();
+}
+
+void StrandLockProcessor::syncEmbed (bool now)
+{
+    const auto view = sampleManager->current();
+    const auto np = clipDoc.nonParam();
+    const auto region = currentRegion();
+    const std::lock_guard<std::mutex> hold (embedLock);
+
+    // A job for a sound that is no longer the one playing makes nothing that counts.
+    if (embedJob != 0 && (view == nullptr || view->request != embedJobSound))
+    {
+        embedJob = 0;
+        embedJobKey.clear();
+    }
+
+    const auto& f = np.sound.file;
+    const bool isFile = np.sound.kind == state::kSampleFile;
+    const bool keptForThis = embedded.payload != nullptr
+                          && (isFile ? state::sameBytes (embedded.sound, np.sound) : state::sameSound (embedded.sound, np.sound));
+
+    // A SAUD this version cannot play stays with its sound, as it was.
+    if (embedded.payload != nullptr && ! embedded.usable && embedded.fromProject && keptForThis)
+        return;
+    if (! isFile)
+    {
+        if (embedded.payload != nullptr)
+            setEmbedded ({});
+        embedNote.clear();
+        return;
+    }
+    if (f.keepInProject == 0)
+    {
+        if (embedded.payload != nullptr)
+            setEmbedded ({});
+        embedNote = "Keep the sound in the project is off: the project names the file, and the file must stay where it is.";
+        return;
+    }
+    // The project's file is not playing (it is missing, or its load is still on its way), or only a part of it is (a
+    // Region excerpt kept in the project, all StrandLock has): what is kept for its bytes stays as it is.
+    if (view == nullptr || view->missing || ! state::sameSound (view->ref, np.sound) || view->source == doc::SoundSource::excerpt)
+    {
+        if (embedded.payload != nullptr && ! keptForThis)
+            setEmbedded ({});
+        return;
+    }
+
+    // What the project keeps (plan 3): the file up to 20 MB; from 20 to 50 MB as the person answered (until they answer,
+    // the Region, as above 50 MB); above 50 MB the Region with up to 1 s either side.
+    enum class Want { none, original, excerpt };
+    Want want = Want::excerpt;
+    if (f.fileSize <= doc::SampleManager::kEmbedWithoutAsking)
+        want = Want::original;
+    else if (f.fileSize <= doc::SampleManager::kEmbedMost)
+        want = f.embedAnswer == (std::uint8_t) EmbedAnswer::yes ? Want::original
+             : f.embedAnswer == (std::uint8_t) EmbedAnswer::no ? Want::none
+                                                                 : Want::excerpt;
+
+    if (want == Want::none)
+    {
+        if (embedded.payload != nullptr)
+            setEmbedded ({});
+        embedNote = "You chose No for this file, so the project keeps nothing of it: the file must stay where it is.";
+        return;
+    }
+
+    if (want == Want::original)
+    {
+        // The file's bytes (or, when they could not be read again, the sound as it plays), described for the loaded range.
+        const bool rangeOk = embedded.header.excerptStartFrame == f.loadedStartFrame && embedded.header.excerptFrames == f.loadedFrames;
+        const bool haveIt = keptForThis && embedded.usable && rangeOk
+                         && (embedded.header.encoding == state::kSaudOriginal || embedded.fromMemory);
+        if (haveIt)
+            return;
+        if (view->original != nullptr)
+        {
+            Embedded e;
+            e.payload = view->original;
+            e.sound = np.sound;
+            state::SaudView sv;
+            if (state::decodeSaud (view->original->data(), view->original->size(), sv))
+                e.header = sv.header;
+            setEmbedded (std::move (e));
+            embedNote.clear();
+            return;
+        }
+        const std::string key = "original:" + std::to_string (view->request);
+        if (embedJob == 0 || embedJobKey != key)
+            askEmbed (true, 0, 0, view->request, key);
+        return;
+    }
+
+    // A Region excerpt: the Region's frames with up to 1 s either side, inside the loaded sound.
+    const double n = (double) view->frames;
+    const double margin = std::floor (doc::SampleManager::kExcerptMarginSeconds * view->sampleRate);
+    const double rs = std::floor (std::clamp (view->toSound (region.first), 0.0, 1.0) * n);
+    const double re = std::ceil (std::clamp (view->toSound (region.second), 0.0, 1.0) * n);
+    const auto from = (std::int64_t) std::max (0.0, rs - margin);
+    const auto to = (std::int64_t) std::min (n, re + margin);
+    const auto count = std::max<std::int64_t> (0, to - from);
+    const std::uint64_t fileFrom = view->fileFrameOf (from);
+    const auto needFrom = view->fileFrameOf ((std::int64_t) rs), needTo = view->fileFrameOf ((std::int64_t) re);
+    if (keptForThis && embedded.usable && embedded.header.encoding == state::kSaudFlac24)
+    {
+        const auto& h = embedded.header;
+        const bool covers = h.excerptStartFrame <= needFrom && h.excerptStartFrame + h.excerptFrames >= needTo;
+        const bool notTooBig = h.excerptFrames <= (std::uint64_t) std::max<std::int64_t> (2 * count, count + 1);
+        if (covers && notTooBig)
+            return;
+    }
+    const std::string key = "excerpt:" + std::to_string (view->request) + ":" + std::to_string (fileFrom) + ":" + std::to_string (count);
+    if (key == embedTooLong)
+        return;   // said already: the Region is too long to keep
+    if (embedJob != 0 && embedJobKey == key)
+        return;   // on its way
+    if (! now)
+    {
+        // The Region has to settle for 300 ms first (a drag moves it many times).
+        const double t = juce::Time::getMillisecondCounterHiRes();
+        if (! (juce::exactlyEqual (embedRegion.first, region.first) && juce::exactlyEqual (embedRegion.second, region.second)))
+        {
+            embedRegion = region;
+            embedRegionSince = t;
+            return;
+        }
+        if (t - embedRegionSince < 300.0)
+            return;
+    }
+    askEmbed (false, from, count, view->request, key);
+}
+
+void StrandLockProcessor::deliverEmbed()
+{
+    const auto results = sampleManager->takeEmbedResults();
+    if (results.empty())
+        return;
+    const auto np = clipDoc.nonParam();
+    const std::lock_guard<std::mutex> hold (embedLock);
+    for (const auto& res : results)
+    {
+        if (res.job != embedJob)
+            continue;   // asked for before a newer one
+        const auto key = embedJobKey;
+        embedJob = 0;
+        embedJobKey.clear();
+        if (res.stopped || ! state::sameSound (res.sound, np.sound))
+            continue;   // nothing made, or for a sound that has gone
+        if (res.saud != nullptr)
+        {
+            Embedded e;
+            e.payload = res.saud;
+            e.sound = np.sound;
+            e.header = res.header;
+            e.fromMemory = res.fromMemory;
+            setEmbedded (std::move (e));
+            embedTooLong.clear();
+            embedNote = res.fromMemory ? "The file could not be read again, so the project keeps the sound as it plays (FLAC 24-bit)." : "";
+            continue;
+        }
+        if (res.tooLong)
+        {
+            // Plan 3: the writer never writes an excerpt over 50 MB; the person is told.
+            setEmbedded ({});
+            embedTooLong = key;
+            embedNote = "The Region is too long to keep in the project: with 1 s either side it would take more than 50 MB. "
+                        "Make the Region shorter, or keep the file where it is.";
+            embedToast = "This Region is too long to keep in the project (over 50 MB). The project names the file, so keep the file where it is, "
+                         "or make the Region shorter.";
+            continue;
+        }
+        embedNote = "StrandLock could not make a copy of this sound to keep in the project.";
+    }
+}
+
+std::string StrandLockProcessor::takeEmbedToast()
+{
+    const std::lock_guard<std::mutex> hold (embedLock);
+    std::string t;
+    t.swap (embedToast);
+    return t;
+}
+
+bool StrandLockProcessor::waitForEmbed (int timeoutMs)
+{
+    const double until = juce::Time::getMillisecondCounterHiRes() + (double) std::max (0, timeoutMs);
+    for (int round = 0; round < 8; ++round)
+    {
+        deliverEmbed();
+        syncEmbed (true);
+        std::uint64_t pending = 0;
+        {
+            const std::lock_guard<std::mutex> hold (embedLock);
+            pending = embedJob;
+        }
+        if (pending == 0)
+            return true;
+        const double left = until - juce::Time::getMillisecondCounterHiRes();
+        if (left <= 0.0)
+            return false;
+        const bool idle = sampleManager->waitJobs ((int) std::ceil (left));
+        deliverEmbed();
+        if (idle)
+        {
+            // Every job is done: one that gave no result was dropped (a newer sound came), so nothing is on its way.
+            const std::lock_guard<std::mutex> hold (embedLock);
+            if (embedJob == pending)
+            {
+                embedJob = 0;
+                embedJobKey.clear();
+            }
+        }
+    }
+    const std::lock_guard<std::mutex> hold (embedLock);
+    return embedJob == 0;
+}
+
+state::PayloadPtr StrandLockProcessor::getEmbeddedPayload() const
+{
+    const std::lock_guard<std::mutex> hold (embedLock);
+    return embedded.payload;
+}
+
+bool StrandLockProcessor::getKeepInProject() const
+{
+    return keepInProject.load();
+}
+
+void StrandLockProcessor::setKeepInProject (bool on)
+{
+    keepInProject.store (on);
+    auto np = clipDoc.nonParam();
+    if (np.sound.kind == state::kSampleFile && (np.sound.file.keepInProject != 0) != on)
+    {
+        np.sound.file.keepInProject = on ? 1 : 0;
+        clipDoc.setNonParam (np);   // no undo step (sameNonParam leaves it out)
+    }
+    syncEmbed (true);
+}
+
+bool StrandLockProcessor::answerEmbedQuestion (EmbedAnswer answer)
+{
+    if (getSoundNotice().kind != SoundNotice::Kind::question || answer == EmbedAnswer::notAsked)
+        return false;
+    auto np = clipDoc.nonParam();
+    np.sound.file.embedAnswer = (std::uint8_t) answer;
+    clipDoc.setNonParam (np);   // saved in SMPL; no undo step (sameNonParam leaves it out)
+    rememberAnswer (np.sound);
+    syncEmbed (true);
+    return true;
+}
+
+bool StrandLockProcessor::isLibraryOn() const
+{
+    return userSettings->libraryOn();
+}
+
+void StrandLockProcessor::setLibraryOn (bool on)
+{
+    userSettings->setLibraryOn (on);
+    sampleManager->setLibraryOn (on);
+    if (on)
+        sampleManager->copyToLibrary();   // the file playing now (and the library measured)
+}
+
+std::uint64_t StrandLockProcessor::locateSound (const juce::File& file)
+{
+    const auto np = clipDoc.nonParam();
+    if (np.sound.kind != state::kSampleFile || file == juce::File())
+        return 0;
+    return sampleManager->locate (file, np.sound, keepInProject.load());
+}
+
+StrandLockProcessor::SoundNotice StrandLockProcessor::getSoundNotice() const
+{
+    SoundNotice n;
+    const auto view = sampleManager->current();
+    const auto np = clipDoc.nonParam();
+    if (view == nullptr || np.sound.kind != state::kSampleFile)
+        return n;
+    const auto& f = np.sound.file;
+    const auto name = fileNameOf (np.sound);
+    if (view->missing && view->ref.kind == state::kSampleFile)
+    {
+        n.kind = SoundNotice::Kind::locate;
+        n.text = "StrandLock cannot find the sound file \"" + name + "\" this project uses (" + f.path
+               + "). Every setting is kept until you choose the file.";
+        return n;
+    }
+    if (! state::sameSound (view->ref, np.sound))
+        return n;
+    if (view->source == doc::SoundSource::excerpt && f.fileSampleRate > 0.0)
+    {
+        n.kind = SoundNotice::Kind::partKept;
+        const double from = (double) view->excerptStartFrame / f.fileSampleRate;
+        const double to = (double) (view->excerptStartFrame + view->excerptFrames) / f.fileSampleRate;
+        n.text = "Part of this sound was not saved in the project: StrandLock plays the part kept with it (" + mmss (from) + " to "
+               + mmss (to) + " of \"" + name + "\"). Choose the file to play all of it.";
+        return n;
+    }
+    if (keepInProject.load() && f.embedAnswer == 0 && f.fileSize > doc::SampleManager::kEmbedWithoutAsking
+        && f.fileSize <= doc::SampleManager::kEmbedMost)
+    {
+        n.kind = SoundNotice::Kind::question;
+        n.text = "\"" + name + "\" is " + megabytes (f.fileSize) + ". Keep the whole file in the project, so the project still plays it if the file moves?";
+    }
+    return n;
+}
+
+std::string StrandLockProcessor::getEmbedStatus() const
+{
+    const auto np = clipDoc.nonParam();
+    if (np.sound.kind != state::kSampleFile)
+        return "A built-in sound is part of StrandLock: nothing needs keeping.";
+    if (np.sound.file.keepInProject == 0)
+        return "Off: the project names the file and keeps nothing of it, so the file must stay where it is.";
+    const std::lock_guard<std::mutex> hold (embedLock);
+    if (embedded.payload != nullptr && state::sameBytes (embedded.sound, np.sound))
+    {
+        const auto bytes = (std::uint64_t) embedded.payload->size();
+        if (! embedded.usable)
+            return "The project keeps a copy this StrandLock cannot play (" + megabytes (bytes) + "), as it was.";
+        if (embedded.header.encoding == state::kSaudOriginal)
+            return "Kept in the project: the whole file (" + megabytes (bytes) + ").";
+        if (embedded.fromMemory)
+            return "Kept in the project: the sound as it plays (" + megabytes (bytes) + ").";
+        return "Kept in the project: the Region and up to 1 s either side (" + megabytes (bytes) + ").";
+    }
+    if (embedJob != 0)
+        return "Making the copy to keep in the project...";
+    if (! embedNote.empty())
+        return embedNote;
+    return "Nothing is kept in the project yet.";
+}
+
+//==================================================================================================
 // The state outside the parameters and the document.
 
 state::UiState StrandLockProcessor::getUiState() const
@@ -1126,6 +1574,12 @@ state::Payloads StrandLockProcessor::currentPayloads() const
     p[state::kTagInst] = state::payload (state::encodeInst (np.inst));
     p[state::kTagClip] = clipPayload();
     p[state::kTagSmpl] = state::payload (state::encodeSmpl (np.sound));
+    {
+        // M7 V3: the sound kept in the project (shared, never copied here; none: no SAUD chunk is written).
+        const std::lock_guard<std::mutex> hold (embedLock);
+        if (embedded.payload != nullptr)
+            p[state::kTagSaud] = embedded.payload;
+    }
     p[state::kTagUist] = state::payload (state::encodeUist (uiState));
     return p;
 }
@@ -1134,6 +1588,9 @@ void StrandLockProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     try
     {
+        // M7 V3: what the project keeps of its sound is brought up to date first (a Region excerpt the worker is making
+        // is waited for, at most 5 s).
+        waitForEmbed (kSaveEmbedWaitMs);
         const std::lock_guard<std::mutex> hold (stateLock);
         const auto bytes = kept.write (currentPayloads());
         destData.replaceAll (bytes.data(), bytes.size());
@@ -1181,6 +1638,9 @@ void StrandLockProcessor::loadState (const void* data, std::size_t size)
     std::optional<model::Clip> clip;
     std::optional<state::SampleRef> smpl;
     std::optional<state::UiState> ui;
+    state::PayloadPtr saud;       // M7 V3: the SAUD chunk's payload, kept as it was
+    bool saudPlayable = false;    // and whether this version can play it
+    state::SaudHeader saudHeader;
     std::set<std::uint32_t> seen;
     for (std::size_t i = 0; i < parsed.chunks.size(); ++i)
     {
@@ -1188,6 +1648,24 @@ void StrandLockProcessor::loadState (const void* data, std::size_t size)
         const bool readTag = std::find (std::begin (state::kWrittenTags), std::end (state::kWrittenTags), c.tag) != std::end (state::kWrittenTags);
         if (! readTag || ! seen.insert (c.tag).second)
             continue;
+        if (c.tag == state::kTagSaud)
+        {
+            // M7 V3: the sound kept in the project. Its payload is kept whole (it is written back as it was while the
+            // project's sound is the one it keeps); one this version can read also goes to the worker, the last place to
+            // find the sound. A damaged one is kept too (the banner says so) and goes once the sound changes.
+            if (! c.truncated && c.payload != nullptr && c.withinLimits)
+            {
+                saud = state::payload (state::Bytes (c.payload, c.payload + c.payloadLength));
+                state::SaudView v;
+                if (c.crcOk && state::decodeSaud (c.payload, c.payloadLength, v))
+                {
+                    decoded[i] = true;   // read: an encoding this version does not know is kept with no banner
+                    saudPlayable = v.known();
+                    saudHeader = v.header;
+                }
+            }
+            continue;
+        }
         if (c.truncated || ! c.crcOk || ! c.withinLimits)
             continue;
 
@@ -1268,14 +1746,39 @@ void StrandLockProcessor::loadState (const void* data, std::size_t size)
     np.inst = inst ? *inst : state::InstState {};
     np.sound = smpl ? *smpl : state::SampleRef {};
 
+    // M7 V3: the project's switch (a file's SMPL holds it; a built-in sound's project has the default, on), and the SAUD
+    // the project kept, which stays with the project's sound until that sound changes.
+    keepInProject.store (np.sound.kind != state::kSampleFile || np.sound.file.keepInProject != 0);
+    const bool saudForWorker = saud != nullptr && saudPlayable && np.sound.kind == state::kSampleFile;
+    {
+        const std::lock_guard<std::mutex> hold (embedLock);
+        embedded = {};
+        otherSauds.clear();
+        embedJob = 0;
+        embedJobSound = 0;
+        embedJobKey.clear();
+        embedTooLong.clear();
+        embedNote.clear();
+        embedRegion = { -1.0, -1.0 };
+        if (saud != nullptr)
+        {
+            embedded.payload = saud;
+            embedded.sound = np.sound;
+            embedded.header = saudHeader;
+            embedded.fromProject = true;
+            embedded.usable = saudForWorker;
+        }
+    }
+
     // The sound (decision 3): handed to the worker, unless it is the one that plays already and nothing else
-    // is on its way. A file that is missing keeps its record (np.sound) while the default starter plays.
+    // is on its way. A file that is missing keeps its record (np.sound) while the default starter plays; M7 V3: a file
+    // not at its path is looked for in the library and then in the SAUD the project kept.
     std::uint64_t request = 0;
     {
         const auto playing = sampleManager->current();
         const bool same = playing != nullptr && ! playing->missing && state::sameSound (playing->ref, np.sound) && ! sampleManager->busy();
         if (! same)
-            request = sampleManager->loadRef (np.sound, doc::LoadOrigin::project);
+            request = sampleManager->loadRef (np.sound, doc::LoadOrigin::project, saudForWorker ? saud : nullptr, keepInProject.load());
     }
     // Before the clip goes to the compiler: from here the audio thread keeps clip notes silent until the sound is
     // there, so the new clip never plays on the old sound (fix pass RT2-2).

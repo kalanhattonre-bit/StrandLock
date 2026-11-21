@@ -38,10 +38,14 @@ namespace sl::doc
     bool sameNonParam (const NonParamState& a, const NonParamState& b)
     {
         // The SMPL analysis cache (M7) describes the file, not an edit: a cache that arrives later (a project's file
-        // analysed after its load, a Detect) is no change of state, so it never makes or splits an undo step.
+        // analysed after its load, a Detect) is no change of state, so it never makes or splits an undo step. So do the
+        // "Keep the sound in the project" switch and the 20-50 MB answer (M7 V3): they say how the project holds the
+        // sound, not what plays.
         auto withoutCache = [] (state::SampleRef r)
         {
             r.file.cache = {};
+            r.file.keepInProject = 1;
+            r.file.embedAnswer = 0;
             return r;
         };
         return state::encodeInst (a.inst) == state::encodeInst (b.inst)
