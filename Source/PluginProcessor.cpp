@@ -352,9 +352,6 @@ void StrandLockProcessor::timerCallback()
     sampleManager->setLibraryOn (userSettings->libraryOn());
     deliverEmbed();
     syncEmbed (false);
-    const auto toast = takeEmbedToast();
-    if (! toast.empty())
-        say (toast, 6000);
 }
 
 juce::AudioProcessorEditor* StrandLockProcessor::createEditor()
@@ -673,6 +670,17 @@ std::vector<doc::LoadReport> StrandLockProcessor::takeSoundReports()
     for (auto& r : ownReports)
         out.push_back (std::move (r));
     ownReports.clear();
+    // M7 V3: what keeping the sound in the project has to say (a Region too long to keep).
+    deliverEmbed();
+    if (auto text = takeEmbedToast(); ! text.empty())
+    {
+        doc::LoadReport r;
+        r.origin = doc::LoadOrigin::user;
+        r.ok = true;
+        r.message = std::move (text);
+        r.toastMs = 6000;
+        out.push_back (std::move (r));
+    }
     return out;
 }
 

@@ -108,6 +108,9 @@ public:
     /** The instrument the audio thread builds from the parameters now (any thread). */
     sl::core::Inst readInst() const noexcept { return sl::params::readInst (paramRefs, nonParam); }
 
+    /** The same as the audio thread builds it for this sample (M7 V3: on a Region excerpt the Region maps onto it). */
+    sl::core::Inst readInstFor (const sl::engine::SampleData* playing) const noexcept { return sl::params::readInst (paramRefs, nonParam, playing); }
+
     sl::diag::DiagModel& getDiag() noexcept { return diag; }
     const sl::host::HostInfo& getHostInfo() const noexcept { return hostInfo; }
     sl::state::UserSettings& getUserSettings() noexcept { return *userSettings; }
