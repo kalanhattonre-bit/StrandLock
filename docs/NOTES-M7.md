@@ -19,7 +19,11 @@ The analysis port: `prototype-v4/src/sl-analysis.js` (SLAnalysis) in `Source/ana
 - Done: run 44856126113 on fc592ac green on every job and step (figures below). After it, the test holds the starters
   while it builds the song (it was making repeated ones again) and names any case that is within tolerance but not
   bit for bit; these notes took the figures.
-- Next: a green run on the new head, then the fast-forward of main.
+- Done: run 44858939907 on 346421d (those two changes) is green on every job and step. The one case within tolerance
+  but not bit for bit is the Saw starter on both platforms: Hz 261.59511548626801 against the prototype's
+  261.59511548626807 (the C++ Saw is within 2e-7 of SLSounds', not bit for bit). The song now takes 911 ms to make on
+  Windows (369 ms on Linux).
+- Last: main is fast-forwarded to the commit that adds these lines once its own run is green (main is still 9270df9).
 
 ### Files
 
@@ -90,7 +94,7 @@ The analysis port: `prototype-v4/src/sl-analysis.js` (SLAnalysis) in `Source/ana
 |---|---|---|
 | `detectFixture` | fixtures `analysis/detect.json` | every case: n, channels and rate exact; detectPitch null-ness and MIDI exact, cents within 0.1, Hz within 1e-4 relative; detectKey key, scale and r exact; suggestParts count, kinds and labels exact, start and end within 1e-3, bpm and tempoFound exact on loops (0 and false elsewhere); the case count gated against the file (FileTally) and against 34; the DC case: the plugin says no pitch while the port with `prototypeDc` gives the recorded MIDI 90 +23.3 c 1500 Hz; on the 33 other cases detectPitch with and without `prototypeDc` agree exactly; every read stays inside the sound (a checking Source wraps every input) |
 | `detectionSyntheticTones` | detection: 5 pitches | C1, A1, A2, A3, C5, each at 0, +23 and -37 cents, 1 and 24 harmonics, 44.1 and 48 kHz (the prototype test's tone): all found, every error within 10 cents |
-| `detectionKeyProgressions` | detection: C major | the prototype test's I-IV-V-I in C major, and also G major and A minor (a chroma rotated the wrong way still finds C major); silence has no key |
+| `detectionKeyProgressions` | detection: C major | the prototype test's I-IV-V-I in C major, and also G major and A minor (a chroma rotated the wrong way would still find C major; the other two catch it); silence has no key |
 | `detectionNoClearPitch` | detection: white noise | 6 seeds of white noise; silence; a 30 ms note; DC (decision 3); and A3 riding on a DC offset keeps its pitch (the rule is narrow) |
 | `suggestPartsFiveMinutes` | speed | the 5-minute song built at test time; 3 runs, the slowest printed against 1.0 s and gated at 5 s in optimised builds; the runs agree; at least 3 valid parts (the prototype test's constraints) |
 | `longFileMemoryAndStop` | (for V2) | on the same song, each function's peak live heap stays under half the prototype's 11 kHz copy (6.6 MB; its mono copy would be 52.9 MB); a Stop that never fires changes nothing and is asked through each analysis; a Stop that fires on its fifth question gives no pitch, no key and no parts |
@@ -122,6 +126,10 @@ The analysis port: `prototype-v4/src/sl-analysis.js` (SLAnalysis) in `Source/ana
   1.42e-13 at most (the largest bin 183.3). estimateTempo: the prototype's 120, 139.67, 84.72 and 120 (not found).
 - The 5-minute song took 1279 ms to make on Windows (571 ms on Linux): the test let each starter go after its section,
   and the shared cache made it again for the next. The test now holds them.
+- Run 44858939907 on 346421d (the test holding its starters and naming the inexact case), all green with the same
+  totals: suggestParts 86.7 ms on Windows (the slowest of 3), 73.5 ms on Linux, 261 ms under the sanitizers;
+  detectPitch 57.4 ms, detectKey 28.2 ms (Windows). The case within tolerance but not bit for bit is the Saw starter
+  (its Hz, in the 16th digit).
 
 ### Hand-off for V2
 
@@ -131,7 +139,8 @@ The analysis port: `prototype-v4/src/sl-analysis.js` (SLAnalysis) in `Source/ana
   start, count > 0, start + count <= frames). For "Detect pitch & key" on the Region, a `Source` that offsets into the
   Region's frames is enough (or a FloatSource over offset pointers).
 - **Cancelling.** Pass a `Stop` that returns true once a newer request is waiting (the SampleManager's "newest wins").
-  A stopped call returns no pitch, no key or no parts, so check the Stop yourself before storing a result.
+  A stopped call returns no pitch, no key or no parts, so check the Stop yourself before storing a result. The
+  functions keep no state between calls, so two can run at once on different threads.
 - **Memory.** No full-length buffer is made: on the 5-minute stereo song suggestParts peaks at 1.66 MB live and the
   others far less (CI figures above). A 10-minute file at 48 kHz has 2.2 times the frames, so about 3.6 MB, well
   inside the long-files row's 16 MB.
