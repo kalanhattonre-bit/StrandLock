@@ -59,6 +59,18 @@ namespace sl::test::render
     /** Renders one renders.json case. False (why says what) when the case cannot be set up. */
     bool renderFixtureCase (const core::JsonValue& c, const std::map<std::string, model::Clip>& clips, Rendered& out, std::string& why);
 
+    /** M7 V4 (the fast-reads rows): the case's sound with its octave levels built, as the SampleManager's worker builds
+        them, and the engine's switch for them. The defaults render as M2 and M3 did: no levels at all. */
+    struct FixtureOptions
+    {
+        bool buildLevels = false;
+        bool levelsOn = true;
+    };
+
+    /** The same, with the octave levels as options say. */
+    bool renderFixtureCase (const core::JsonValue& c, const std::map<std::string, model::Clip>& clips, Rendered& out, std::string& why,
+                            const FixtureOptions& options);
+
     //==============================================================================================
 
     /** A test's own render: actions at exact samples, host blocks, a hook at each block start. */

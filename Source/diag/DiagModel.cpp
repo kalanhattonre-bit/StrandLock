@@ -324,18 +324,18 @@ namespace sl::diag
         bump (blocksWaitingForSound);
     }
 
-    void DiagModel::audioPreview (bool switchOn, bool playing, double beat) noexcept
+    void DiagModel::audioPreview (bool switchOn, bool clockPlaying, double beat) noexcept
     {
         previewOnNow.store (switchOn, relaxed);
-        previewPlayingNow.store (playing, relaxed);
+        previewPlayingNow.store (clockPlaying, relaxed);
         previewBeatNow.store (std::isfinite (beat) ? beat : 0.0, relaxed);
     }
 
-    juce::String DiagModel::previewText (bool switchOn, bool playing, double beat)
+    juce::String DiagModel::previewText (bool switchOn, bool clockPlaying, double beat)
     {
         if (! switchOn)
             return "off";
-        if (playing)
+        if (clockPlaying)
             return "on, at beat " + juce::String (beat, 3) + " (Cubase is stopped, so StrandLock plays the clip on its own clock)";
         return "on, not playing (it plays while Cubase is stopped)";
     }

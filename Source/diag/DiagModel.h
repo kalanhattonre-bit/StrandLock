@@ -92,11 +92,11 @@ namespace sl::diag
 
         /** Audio thread, every block (M7 V4, plan 7.9 decision 7b): Preview's switch as the block read it, whether the block
             played Preview's own clock (Cubase stopped), and that clock's beat at the next block. */
-        void audioPreview (bool switchOn, bool playing, double beat) noexcept;
+        void audioPreview (bool switchOn, bool clockPlaying, double beat) noexcept;
 
         /** The words the Diagnostics page and Copy report give Preview: "off"; "on, at beat 3.250 (Cubase is stopped, so
             StrandLock plays the clip on its own clock)"; or "on, not playing (it plays while Cubase is stopped)". */
-        static juce::String previewText (bool switchOn, bool playing, double beat);
+        static juce::String previewText (bool switchOn, bool clockPlaying, double beat);
 
         //==========================================================================================
         // Message thread.

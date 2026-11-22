@@ -25,6 +25,7 @@
 #include "engine/SourceRead.h"
 #include "sounds/StarterSounds.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>

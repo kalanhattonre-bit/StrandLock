@@ -98,7 +98,8 @@ namespace sl::engine
     {
         if (! (p > -1e12 && p < 1e12))
             p = 0;
-        const double fl = std::floor (p);
+        // floor (p), without the library call for the usual p >= 0 (a cast truncates toward zero, which is the floor there)
+        const double fl = p >= 0 ? static_cast<double> (static_cast<std::int64_t> (p)) : std::floor (p);
         const auto i = static_cast<std::int64_t> (fl);
         const auto phase = static_cast<std::int64_t> ((p - fl) * kLevelPhases + 0.5);   // 0 .. kLevelPhases
         const float* h = levelKernel() + phase * kLevelTaps;

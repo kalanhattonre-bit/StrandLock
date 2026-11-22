@@ -3,8 +3,8 @@
 // C3) with its file line and toasts (loaded, cut to 10 minutes, missing, could not be read), the Region box (a drag
 // across the wave, its edges, its band) with one host gesture per edge and one undo step, zoom (+, -, Show all, the
 // wheel, the view bar), and the heads drawn from a display frame. The snapshot writers at the end draw the strip
-// with a TestSignals sound and a Region, dark and light, at 100 % and at 900 x 560, zoomed, with heads, and with
-// the sound menu open.
+// with a TestSignals sound and a Region, dark and light, at 100 % and at 900 x 560, zoomed, with heads, with the
+// sound menu open, and (M7 V4) with the mouse held on the waveform outside the Region, the sound playing as recorded.
 //
 // Every test that changes the per-user settings puts them back (dark, 100 %, Keys off).
 
@@ -849,7 +849,26 @@ namespace
         bool zoomed = false;
         bool heads = false;
         bool played = false;   // the heads of the processor's own frames: Strand Demo and a held chord, 4 heads each
+        bool rawHeld = false;  // M7 V4: the mouse held on the waveform outside the Region (the sound as recorded, its line)
     };
+
+    /** M7 V4 (plan 7.9 decision 7a): the mouse pressed on the waveform at 70 %, after the Region, while the processor plays
+        20 blocks (0.21 s): the sound plays as recorded from there, so the next refreshNow takes a frame with its moving
+        line, and the readout says so. The mouse stays down; the caller lets go. */
+    void holdOutsideRegion (StrandLockProcessor& proc, ui::WaveStrip& strip)
+    {
+        proc.setPlayConfigDetails (0, 2, 48000.0, 512);
+        proc.prepareToPlay (48000.0, 512);
+        const float x = strip.xOf (0.7);
+        strip.mouseDown (mouse (strip, { x, midY (strip) }, { x, midY (strip) }, false));
+        juce::AudioBuffer<float> buffer (2, 512);
+        juce::MidiBuffer midi;
+        for (int b = 0; b < 20; ++b)
+        {
+            buffer.clear();
+            proc.processBlock (buffer, midi);
+        }
+    }
 
     /** The processor plays 1.2 s of Strand Demo at 120 bpm (the play head moving) with a chord held, 4 heads with
         Spread 0.6, so its display slot holds the frames of a real playing engine. */
@@ -903,8 +922,16 @@ namespace
                 strip.setDisplayFrame (frame.get());
             if (s.played)
                 playStrandDemo (proc);   // the next refreshNow takes the newest frame from the slot
+            if (s.rawHeld)
+                holdOutsideRegion (proc, strip);
             editor.refreshNow();
             image = editor.createComponentSnapshot (editor.getLocalBounds(), true, 1.0f);
+            if (s.rawHeld)
+            {
+                const float x = strip.xOf (0.7);
+                strip.mouseUp (mouse (strip, { x, midY (strip) }, { x, midY (strip) }, false, juce::ModifierKeys()));
+                proc.releaseResources();
+            }
             if (s.menuOpen)
             {
                 const auto area = paintMenuOpen (image, editor, strip.getSoundMenu(), 4);
@@ -972,3 +999,5 @@ SL_SNAPSHOT (strip_zoomed_heads_dark)     { return stripShot ({ ThemeId::dark, 0
 SL_SNAPSHOT (strip_zoomed_heads_light)    { return stripShot ({ ThemeId::light, 0, 0, false, true, true }); }
 SL_SNAPSHOT (strip_playing_dark)          { return stripShot ({ ThemeId::dark, 0, 0, false, false, false, true }); }
 SL_SNAPSHOT (strip_playing_light)         { return stripShot ({ ThemeId::light, 0, 0, false, false, false, true }); }
+SL_SNAPSHOT (strip_raw_audition_dark)     { return stripShot ({ ThemeId::dark, 0, 0, false, false, false, false, true }); }
+SL_SNAPSHOT (strip_raw_audition_light)    { return stripShot ({ ThemeId::light, 0, 0, false, false, false, false, true }); }

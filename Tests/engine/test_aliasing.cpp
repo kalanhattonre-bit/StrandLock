@@ -480,7 +480,7 @@ SL_TEST ("engine", fastReadsLevelsMatchTheSound)
         seed = seed * 1664525u + 1013904223u;
         return static_cast<double> (seed >> 8) / 16777216.0;
     };
-    double worst[3] = { 0, 0, 0 }, worst16[3] = { 0, 0, 0 }, far = 0;
+    double worst[3] = { 0, 0, 0 }, worst16[3] = { 0, 0, 0 }, offFrame = 0;
     for (int k = 0; k < 1000; ++k)
     {
         const double x = 200 + next() * static_cast<double> (n - 400);
@@ -496,13 +496,13 @@ SL_TEST ("engine", fastReadsLevelsMatchTheSound)
         }
         double a = 0, b = 0;
         engine::readLevel (*f32, 3, x + 8, a, b);
-        far = std::max (far, std::max (std::abs (a - wantL), std::abs (b - wantR)));
+        offFrame = std::max (offFrame, std::max (std::abs (a - wantL), std::abs (b - wantR)));
     }
     const bool aligned = worst[0] < 2e-3 && worst[1] < 2e-3 && worst[2] < 2e-3 && worst16[0] < 2e-3 && worst16[1] < 2e-3 && worst16[2] < 2e-3;
-    check (aligned && far > 0.1,
+    check (aligned && offFrame > 0.1,
            fmt ("each level read at the sound's frame x gives the sound at x: within %.2e / %.2e / %.2e (float) and %.2e / %.2e / %.2e (16-bit), "
                 "under 2e-3; a level-3 read one level frame off is up to %.3f away (the control, > 0.1)",
-                worst[0], worst[1], worst[2], worst16[0], worst16[1], worst16[2], far));
+                worst[0], worst[1], worst[2], worst16[0], worst16[1], worst16[2], offFrame));
 
     // The filter's bands, on level 1: a tone at 0.15 of the rate keeps its level, one at 0.27 is 60 dB down.
     auto levelOneGain = [] (double fraction)

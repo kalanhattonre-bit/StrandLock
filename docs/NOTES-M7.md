@@ -532,13 +532,121 @@ Preview on the Diagnostics page) and the M7 part of the Cubase checklist. Branch
 
 ### Progress
 
-- Done: the design, tried in node on the prototype engine with the levels patched into a copy of it (scratch
+- Done: the design, tried first in node on the prototype engine with the levels patched into a copy of it (scratch
   `m7v4/sim-engine.js`, `sim-design.js`, `sim-sweep.js`): the decimation filter, the level read and the level rule.
-- Done (code, not yet built): `engine/OctaveLevels` (the levels, their read, the rule), the level choice in VoiceTick,
-  runTapeLevels, the grains' and Lock's level reads, `Engine::setOctaveLevels` (the tests' switch) and
-  `Stats::levelReads`; the SampleManager builds the levels after every decode and keeps a starter's with it; the raw
-  audition (`Engine::rawAuditionOn` / `Off`, two CommandQueue commands, the strip's press outside the Region, its
-  readout and moving line); Preview's line on the Diagnostics page and in Copy report.
-- In progress: the tests (test_aliasing's gated rows, the sweeps, the parity on and off, memory, CPU, the raw audition,
-  the Preview line).
-- Next: the Cubase checklist's M7 section, these notes' results and the M7 summary, then the merge.
+- Done: `engine/OctaveLevels` (the levels, their read, the rule), the level choice in VoiceTick, runTapeLevels, the
+  grains' and Lock's level reads, `Engine::setOctaveLevels` (the tests' switch), `Stats::levelReads` and `levelUses`;
+  the SampleManager builds the levels after every decode and keeps a starter's with it; the raw audition
+  (`Engine::rawAuditionOn` / `Off`, two CommandQueue commands, the strip's press outside the Region, its readout and its
+  moving line); Preview's line on the Diagnostics page and in Copy report.
+- Done: run 44941857786 on 3b462da (the code, no new test yet) built on both platforms; every test passed but V2's
+  long-file budget (219.7 MB against the old 131.2 MB), which the tests commit moves to the new budget.
+- Done: the tests (below), the Cubase checklist's M7 section, these notes.
+- Done: run 44943723393 on bf7e80d did not build: the tests commit left out `EngineRender.h`'s `FixtureOptions`.
+- In progress: the commit with it (also a DiagModel parameter renamed for -Wshadow, and the raw audition's pictures,
+  `strip_raw_audition_dark` / `_light`) and its CI run.
+- Next: the CI results below, the pictures looked at, the M7 summary, then the merge.
+
+### Files
+
+- `Source/engine/OctaveLevels.h/.cpp` (new; plan 1.1 does not list them): `levelFor` (the rule), `readLevel` (the
+  8-tap windowed-sinc read of a level), `buildOctaveLevels` / `attachOctaveLevels` / `addOctaveLevels` (the builder,
+  with a stop question), `LevelSet`; the read kernel and the decimation filter, built at static-init time.
+- `Source/engine/SampleData.h`: `OctaveLevel`, `kMaxOctaveLevels`, `SampleData::numLevels`, `levels`, `levelStorage`,
+  `levelBytes`.
+- `Source/engine/Region.h`: `readRegLevel` (readReg line for line, every read from a level). `readReg`, `PlainStretch`
+  and SourceRead.h are unchanged.
+- `Source/engine/Head.h` (`lv`, `lvPrev`, `gL`), `Voice.h` (`VoiceContext::levels`, `levelReads`, `levelUses`,
+  `countLevel`; `runTapeLevels`), `VoiceTick.cpp` (the level each Tape or Lock head reads, per tick), `VoiceRender.cpp`
+  (`runTapeLevels`), `VoiceGrains.cpp` (a level per grain), `VoiceLock.cpp` (the taps' level, and lockRho's).
+- `Source/engine/Engine.h/.cpp`, `EngineDisplay.cpp`, `EngineConfig.h`, `DisplayFrame.h`, and `EngineRaw.cpp` (new; plan
+  1.1 does not list it): `setOctaveLevels`, `Stats::levelReads` / `levelUses`, the raw audition (`rawAuditionOn`,
+  `rawAuditionOff`, four `RawPlayer`s, `renderRaw` after the output stage), `DisplayFrame::rawOn` / `rawPos`.
+- `Source/doc/SampleManager.h/.cpp`: the levels after `fileSound` (stoppable, before the analysis), and a starter's
+  levels kept in its cache entry; `Source/doc/CommandQueue.h`: `rawAuditionOn`, `rawAuditionOff`.
+- `Source/PluginProcessor.cpp`: the two commands; Preview's state to the diagnostics each block.
+- `Source/diag/DiagModel.h/.cpp` (`audioPreview`, `previewText`, the Snapshot fields, the report line),
+  `Source/ui/DiagnosticsPage.cpp` (the Preview row), `Source/ui/strip/WaveStrip.h/.cpp` (the raw audition on a press
+  outside the Region, its readout, its line).
+- Tests: `Tests/engine/test_aliasing.cpp` (rewritten: the M3 figure is now gated), `Tests/engine/test_raw_audition.cpp`
+  (new), `Tests/engine/EngineRender.h/.cpp` (`FixtureOptions`), `Tests/plugin/test_long_file.cpp` (the new budget and
+  the levels), `Tests/plugin/test_diag.cpp` (the Preview line), `Tests/ui/test_strip.cpp` (an M2 check follows decision
+  7a; the raw audition's line). `docs/CUBASE-CHECKLIST.md` (the M7 section, and one sentence in its introduction).
+
+### Decisions and deviations
+
+- **The level rule is "the lowest level at which the read is at most 1.25x", not floor (log2 rate).** With the
+  plan's floor, a read between 1x and 2x reads the sound itself, and a level L read between 2^L and 2^(L+1) folds the
+  top of that level's band. The plan's own row cannot pass then: in a 48 kHz session the 44.1 kHz Saw one octave up
+  is a read at 1.84x, floor gives the sound itself, and that is M3's -27.8 dB; at 96 kHz +24 st (1.84x) the same. So
+  each level holds nothing above 0.4 of its own rate (below), and the rule takes the lowest level where the read is at
+  most 1.25x (0.4 x 1.25 = 0.5: nothing folds): level 0 up to 1.25x, level 1 up to 2.5x, level 2 up to 5x, level 3
+  above. A read at or below 1.25x never touches a level, a wider promise than the plan's "at or below 1x", so a 48 kHz
+  song in a 44.1 kHz session (1.09x at its own pitch) keeps its whole band and plays bit for bit as in M3. The price
+  of octave levels with no aliasing: just past each change (1.25x, 2.5x, 5x) the output's band is half the Nyquist
+  (11 kHz at 44.1 kHz), rising to all of it just before the next change. In node on the prototype engine the floor
+  rule at 48 kHz gave -27.8 / -19.6 / -15.1 dB at +12 / +24 / +36 st (no change from M3); this rule, with the read
+  below, -54.3 / -51.2 / -48.2 dB.
+- **A level is read with an 8-tap Kaiser-windowed sinc (beta 5, 512 fractions, the nearest taken), not the 4-point
+  Hermite.** Read slower than its own rate (the 44.1 kHz Saw at 48 kHz: a level read at 0.92x), the Hermite leaves
+  images of the upper part of a level's band at -8 to -30 dB, and a level's band is full of the note's own strong
+  harmonics (level 3 of the Saw holds its harmonics 1 to 8), so in node the Hermite gave -39.1 / -36.0 / -32.8 dB at
+  48 kHz, over the -40 the plan allows. A 6-point Lagrange gave -45.6 / -42.5 / -39.3, a 6-tap sinc -42.7 at worst,
+  the 8-tap sinc -48.2 at worst; 256 or 1024 fractions changed nothing. The read sums its taps in pairs (no older read
+  to match). Reads of the sound itself keep the Hermite, so M3's reads are untouched.
+- **The decimation filter is a 75-tap Kaiser-windowed sinc (cut-off 0.225 of the rate, 60 dB, beta 5.65): flat to a
+  fifth of the rate, at least 60 dB down from a quarter (the new half rate).** Not a half-band filter in the DSP sense:
+  that one's transition is centred on the new half rate and folds what lies just above it (only 6 dB down at the
+  edge), which on the Saw's level 3 alone was enough to miss -40 dB. "Half-band low-passed" in the plan's sense:
+  everything above the new half rate taken out. The edges are held (the last frame repeats), as the reads hold them.
+  Each output sums its taps in a fixed order, one tap at a time over a block of 4096 outputs, so the compiler can
+  use its vector registers. 70 and 80 dB designs changed no figure in node.
+- **The crossfade.** A Tape head's level is chosen per tick from its speed; when it changes, each read of that tick is
+  the two levels' reads crossfaded with the weight (ph + j + 1) / 32, as the head gains ramp, so the tick ends on the
+  new level alone. A Lock head reads at the rate ratio, which never changes for a voice, so Lock needs no fade (its
+  level is chosen per tick the same way). A Voice or Cloud grain keeps the level its own read speed chose when it
+  started; the grain windows crossfade one level into the next. Both levels of a fade are the same sound at the same
+  frame (level L's frame j is the sound's frame j x 2^L), so a plain line fades them.
+- **The plan's Voice sweep reads one level all along.** A Voice note's grains read at the formant's speed (the pitch
+  sets their spacing, not their speed), so C3 -> C6 with the formant at +12 st reads level 1 throughout at 44.1 and
+  48 kHz (the sound itself at 96 kHz): there is no level change to measure. The test checks exactly that, and adds two
+  Voice sweeps that do change level: the formant raised from 0 to +12 st, and the formant at +12 st with the Tape
+  switch and Speed 1 -> 4.
+- **The levels are built on the worker after the decode, before the analysis and the hand-over** (so a sound never
+  arrives without them and no second swap is needed), for every file, library copy, project copy (SAUD) and Region
+  excerpt, through `fileSound`'s caller; a newer request stops the build at its next block. A starter's levels are
+  built once and kept with it in the cache of 4. They take 7/8 of the sound's own bytes (n/2 + n/4 + n/8 frames).
+- **The raw audition (decision 7a)** plays after the engine's output stage, at the prototype's 0.7, so outGain and the
+  limiter leave it alone (the prototype's buffer source goes straight to its master), and the bypass fade applies. It
+  starts at the frame floor (pos x n) of the sound that plays, reads at the sound's rate over the session's (a read
+  above 1.25x reads a level, like every read), rises from 0 over 12 ms and falls from where it is over 30 ms. A second
+  hold fades the first out (the prototype's stopAudition before rawAuditionStart); four players, so quick holds never
+  allocate. A sound swap fades it on the sound it started on, whose epoch it keeps until the fade ends (as a stolen
+  voice, 8.2 #23); all notes off fades it; reset and releaseResources stop it at once. It stops at the end of the sound,
+  as the prototype's buffer source does. The strip draws its moving line (sl-ui.js rawPos) from two new display frame
+  fields, `rawOn` and `rawPos`, so a frame of zeros draws none.
+- **Preview's line (decision 7b)** is one sentence for the page (Position and tempo card) and the report (after the cycle
+  wraps): "off"; "on, at beat 2.427 (Cubase is stopped, so StrandLock plays the clip on its own clock)"; or "on, not
+  playing (it plays while Cubase is stopped)". The audio thread hands the switch as the block read it, whether the
+  block played Preview's clock, and that clock's beat to DiagModel each block (atomics).
+- **An M2 check follows decision 7a.** `ui/stripRegionGestures` (section 6) checked that holding the mouse outside the
+  Region asks nothing to play. It now checks the raw audition's two commands (from that spot, then its release) and the
+  new readout.
+- **Decision 7c** stands: Region start, Region end and Loop fade are M0's sliders, and MidiRouter's Preview hand-over is
+  as built.
+
+### Tests
+
+| Test | Plan row | What it checks |
+|---|---|---|
+| `engine/fastReadsAliasing` | fast reads: -40 dB, +0 st | the Saw on Tape at +12, +24, +36 st at 44.1, 48, 96 kHz with its levels: at most -40 dB off the harmonic lines, each read from the rule's level (Stats::levelUses); +0 st bit for bit with the levels switched off, no level read; the levels-off (M3) figure printed beside each; the measure itself (the Saw < -60 dB, a naive saw > -40 dB) |
+| `engine/fastReadsParity` | renders.json at or below 1x bit for bit with M3; above 1x bit for bit with the prototype with the levels off | all 73 cases rendered three ways: no levels (M3's render, which `fixtureEngineRendersTape` / `Grains` compare with the prototype), levels built and switched off (bit for bit with it: samples and stats), levels on (every case that reads no level bit for bit with it; the others named, still sounding); the prototype hash matches counted |
+| `engine/fastReadsSweeps` | the sweeps | Tape C3 -> C6 over 2 s (Bend range 36) at 44.1, 48, 96 kHz: 3, 3, 2 level changes; Voice formant 0 -> +12 st: 1, 1, 0; Voice formant +12 st with the Tape switch and Speed 1 -> 4: 2, 2, 2; each change's largest step (5 ms before to 15 ms after) over the largest steady step (the 30 ms before) < 1.5; the plan's Voice sweep (C3 -> C6, formant +12 st) reads the formant's level all along with no change; a click of twice the steady step reads > 1.5 (the control) |
+| `engine/fastReadsLevelsMatchTheSound` | fast reads: memory (the levels' shape) | 3 levels of ceil (n / 2^L) frames in the sound's format, float and 16-bit, at most 7/8 of its bytes; each level read at the sound's frame x within 2e-3 of the sound at x (two tones, 1000 places), one level-3 frame off > 0.1 away (the control); level 1 keeps 0.15 of the rate within 0.05 dB and takes 0.27 out by more than 55 dB; 20 frames give 1 level, 15 none; a stop on its third question ends the build with none |
+| `cpu/fastReadsTapeCpu96k` | fast reads: CPU | 16 voices x 8 heads Tape at 96 kHz, every head above 2x: with the levels against without, printed (target at most 15 % slower), gated faster than real time on Windows; levels read with them, none without |
+| `songs/longFileLoadsAs16Bit` (V2's, new budget) | fast reads: memory | the 10-minute stereo 48 kHz file: peak live on the worker at most 2 x 115.2 MB + 16 MB, its 3 levels 16-bit and 100.8 MB, made on the worker; 0 allocations on the audio thread at the swap |
+| `engine/rawAuditionPlaysAsRecorded` | decision 7a | held at 30 %: 12 ms rising, then exactly 0.7 x the stored samples from the held frame, both channels; the display frame's position; released: falling over 30 ms, then silence; a second hold replaces the first after the first's fade; outGain +12 dB changes nothing; a 48 kHz sound at 44.1 kHz plays the sound's readAbs every 48 / 44.1 frames, bit for bit; a swap keeps the old sound's epoch until the fade ends; no sound, nothing |
+| `alloc/rawAuditionAllocatesNothing` | decision 7a | holds, releases, second holds and a sound swap while one plays, with notes, through the processor's command queue: 0 allocations and frees (the Debug CRT run counts every heap call) |
+| `ui/stripRawAuditionLine`, `ui/stripRegionGestures` | decision 7a | a press outside the Region: its readout "... outside the Region: the file as recorded", it plays, the line is drawn where the engine says, and goes after the release; the two commands |
+| the `strip_raw_audition_dark` / `_light` snapshots | (pictures) | the strip with the mouse held at 70 %, after the Region, while the chord plays as recorded: its line and the readout |
+| `diag/previewLineOnThePageAndInTheReport` | decision 7b | off; on at beat 2.427 while Cubase is stopped (the beat exact), the same words on the page and in the report; off once Cubase plays |
