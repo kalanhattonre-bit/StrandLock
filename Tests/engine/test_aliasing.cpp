@@ -160,7 +160,7 @@ SL_TEST ("engine", fastReadsAliasing)
                 m3At48[q] = m3;
             }
         }
-    note (fmt ("In plain words: at 48 kHz, played one, two and three octaves up, the Tape engine's Saw now has %.3f %%, %.3f %% and %.3f %% of "
+    note (fmt ("In plain words: at 48 kHz, played one, two and three octaves up, the Tape engine's Saw now has %.4f %%, %.4f %% and %.4f %% of "
                "its sound off the harmonic lines (%.1f, %.1f and %.1f dB), where M3's reads had %.1f %%, %.1f %% and %.1f %% (%.1f, %.1f and %.1f dB); "
                "the worst of the nine cases is %.1f dB.",
                100 * std::pow (10.0, at48[1] / 10), 100 * std::pow (10.0, at48[2] / 10), 100 * std::pow (10.0, at48[3] / 10), at48[1], at48[2], at48[3],

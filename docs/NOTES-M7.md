@@ -543,9 +543,14 @@ Preview on the Diagnostics page) and the M7 part of the Cubase checklist. Branch
   long-file budget (219.7 MB against the old 131.2 MB), which the tests commit moves to the new budget.
 - Done: the tests (below), the Cubase checklist's M7 section, these notes.
 - Done: run 44943723393 on bf7e80d did not build: the tests commit left out `EngineRender.h`'s `FixtureOptions`.
-- In progress: the commit with it (also a DiagModel parameter renamed for -Wshadow, and the raw audition's pictures,
-  `strip_raw_audition_dark` / `_light`) and its CI run.
-- Next: the CI results below, the pictures looked at, the M7 summary, then the merge.
+- Done: run 44978133608 on 140c271 (that header, a DiagModel parameter renamed for -Wshadow, the raw audition's
+  pictures `strip_raw_audition_dark` / `_light`) is green on every job and step (figures below). Every V4 picture looked
+  at: the raw audition (its line and readout, dark and light), the Diagnostics page with its Preview row (dark and
+  light), and the playing strip (heads, no raw line).
+- Done: the Cubase checklist's M7 steps follow the order of the task (moving the file before the 20-50 MB question),
+  name the controls as the build shows them, and say plainly when the over-50 MB message comes.
+- Last: the commit with these lines (it also prints the plain-words percentages with four decimals) gets its own
+  green run, then main is fast-forwarded to it.
 
 ### Files
 
@@ -571,7 +576,7 @@ Preview on the Diagnostics page) and the M7 part of the Cubase checklist. Branch
 - Tests: `Tests/engine/test_aliasing.cpp` (rewritten: the M3 figure is now gated), `Tests/engine/test_raw_audition.cpp`
   (new), `Tests/engine/EngineRender.h/.cpp` (`FixtureOptions`), `Tests/plugin/test_long_file.cpp` (the new budget and
   the levels), `Tests/plugin/test_diag.cpp` (the Preview line), `Tests/ui/test_strip.cpp` (an M2 check follows decision
-  7a; the raw audition's line). `docs/CUBASE-CHECKLIST.md` (the M7 section, and one sentence in its introduction).
+  7a; the raw audition's line and its two pictures). `docs/CUBASE-CHECKLIST.md` (the M7 section, and one sentence in its introduction).
 
 ### Decisions and deviations
 
@@ -584,9 +589,11 @@ Preview on the Diagnostics page) and the M7 part of the Cubase checklist. Branch
   above. A read at or below 1.25x never touches a level, a wider promise than the plan's "at or below 1x", so a 48 kHz
   song in a 44.1 kHz session (1.09x at its own pitch) keeps its whole band and plays bit for bit as in M3. The price
   of octave levels with no aliasing: just past each change (1.25x, 2.5x, 5x) the output's band is half the Nyquist
-  (11 kHz at 44.1 kHz), rising to all of it just before the next change. In node on the prototype engine the floor
-  rule at 48 kHz gave -27.8 / -19.6 / -15.1 dB at +12 / +24 / +36 st (no change from M3); this rule, with the read
-  below, -54.3 / -51.2 / -48.2 dB.
+  (11 kHz at 44.1 kHz), rising to all of it just before the next change. In node on the prototype engine with these
+  levels, the floor rule gave -27.8 / -23.4 / -20.3 dB at +12 / +24 / +36 st at 48 kHz (M3: -27.8 / -19.6 / -15.1)
+  and -35.9 / -32.3 dB at +24 / +36 st at 96 kHz: clean only at 44.1 kHz, where those reads are exactly 2x, 4x and
+  8x. This rule, with the read below, gave -54.3 / -51.2 / -48.2 dB at 48 kHz and nothing above -48.2 dB in the nine
+  cases.
 - **A level is read with an 8-tap Kaiser-windowed sinc (beta 5, 512 fractions, the nearest taken), not the 4-point
   Hermite.** Read slower than its own rate (the 44.1 kHz Saw at 48 kHz: a level read at 0.92x), the Hermite leaves
   images of the upper part of a level's band at -8 to -30 dB, and a level's band is full of the note's own strong
@@ -650,3 +657,119 @@ Preview on the Diagnostics page) and the M7 part of the Cubase checklist. Branch
 | `ui/stripRawAuditionLine`, `ui/stripRegionGestures` | decision 7a | a press outside the Region: its readout "... outside the Region: the file as recorded", it plays, the line is drawn where the engine says, and goes after the release; the two commands |
 | the `strip_raw_audition_dark` / `_light` snapshots | (pictures) | the strip with the mouse held at 70 %, after the Region, while the chord plays as recorded: its line and the readout |
 | `diag/previewLineOnThePageAndInTheReport` | decision 7b | off; on at beat 2.427 while Cubase is stopped (the beat exact), the same words on the page and in the report; off once Cubase plays |
+
+### Results (run 44978133608 on 140c271, all green)
+
+- Windows Release: 2321 checks in 392 tests, 0 failed (engine 101 tests, 627 checks; cpu 5, 20; songs 16, 127; ui 136,
+  662; diag 4, 42; alloc 10, 45). Linux Release: 2312 checks in 392 tests, 0 failed. Sanitizers: contract, model, engine
+  and analysis 957 checks in 159 tests (the five new engine tests among them); state 169 checks in 23 tests. Debug CRT
+  `--only alloc`: 46 checks in 10 tests, 0 JUCE assertions; Debug snapshots (146 pictures): 0 JUCE assertions.
+  pluginval strictness 10: SUCCESS. Fixture check: passed (26 files, 4,962,066 bytes). No compiler warning from V4's
+  lines (the float-equal warnings in SampleData.h, DiagModel.cpp, EngineRender.cpp and test_diag.cpp are older lines).
+- **The aliasing figure, in plain words.** At 48 kHz, played one, two and three octaves up, the Saw on Tape now has
+  about 0.0004 %, 0.0008 % and 0.0015 % of its sound off the note's harmonics (-54.25, -51.20 and -48.15 dB), where
+  M3 had 0.17 %, 1.1 % and 3.1 % (-27.77, -19.58 and -15.10 dB). The worst of the nine cases is -48.15 dB, against
+  the -40 dB allowed. At 44.1 kHz: -99.12 / -62.07 / -63.88 dB (M3 -23.76 / -17.96 / -13.96). At 96 kHz: -56.10 dB at
+  +12 st (a 0.92x read: no level, the same as M3), -64.99 and -62.30 dB at +24 and +36 st (M3 -35.92 / -22.82). Every
+  run read the level the rule chose (2738, 2798 and 3548 head runs per note). +0 st is bit for bit with the levels
+  off at all three rates (-104.04, -42.13 and -47.60 dB: M3's reads). The same on Linux, to the last digit printed.
+  The node model of the design (`m7v4/sim-design.js`) had predicted these figures.
+- Parity: all 73 renders.json cases rendered three ways. Levels built and switched off: 73 of 73 bit for bit with no
+  levels at all (samples and stats). Levels on: the 60 cases that read no level are bit for bit with M3's render; 13
+  read one (tape-forward-c5, tape-chain-c3-g3-legato, chase-inside-chain, loop-3-passes-133bpm, live-bend-range-7,
+  live-poly4-6-keys, voice-formant-up6, cloud-tape-switch-2x, tape-head-tune-octaves, strand-demo-2s,
+  strand-demo-recipe-6, inst-change-macros, raw-snapshot), each still the note (within 20 dB of M3's loudness). The
+  prototype's own hash matches 48 cases on Windows and 24 on Linux, with the levels switched off and with none: M3's
+  counts.
+- Sweeps (largest step at a level change over the steady largest step, at most 1.5): Tape C3 -> C6 0.905 / 1.000 /
+  0.968 at 44.1 kHz, 0.967 / 0.949 / 0.977 at 48 kHz, 0.934 / 0.980 at 96 kHz; Voice with the formant raised 0.905
+  (44.1) and 1.015 (48), no change at 96 kHz; Voice with the formant at +12 st, the Tape switch and Speed 1 -> 4 0.912 /
+  0.989, 0.950 / 0.939 and 0.941 / 0.993. The row's own Voice sweep reads level 1 all along at 44.1 and 48 kHz (2179
+  and 2180 grains) and none at 96 kHz. The control, a click of twice the steady step, reads 2.03.
+- The levels: a stereo sound of 96,007 frames gets levels of 48,004, 24,002 and 12,001 frames, 672,056 of its 768,056
+  bytes (float) and 336,028 of 384,028 (16-bit). Each level read at a frame of the sound is the sound there within
+  4.7e-4 / 7.8e-4 / 9.7e-4 (levels 1 / 2 / 3); one level-3 frame off is 0.287 away. Level 1 keeps a tone at 0.15 of
+  the rate (-0.000 dB) and takes one at 0.27 down by 69.5 dB.
+- Memory: the 10-minute stereo 48 kHz file peaks at 219.74 MB live on the worker on Windows (219.63 MB on Linux)
+  against the new budget of 246.40 MB (2 x 115.2 MB + 16 MB). Its 3 levels are 16-bit, 100,800,000 bytes. The audio
+  thread made 0 allocations and frees at the swap. The load (hash, decode, levels, analysis) took 2332 ms on Windows
+  and 1382 ms on Linux, against 1170 and 1167 ms in V2's run: the levels add about 1.1 s to a 10-minute song on
+  Windows and about 0.3 s on Linux (the old sound plays meanwhile). Not checked: whether MSVC leaves the decimation's
+  tap loops unvectorised where GCC does not, which would explain the difference. V3's 45 MB project now loads in 670 ms
+  on Windows (291 ms in V3) and 553 ms on Linux (432 ms), inside its 2 s target.
+- **CPU: the target is missed.** Tape with 16 voices x 8 heads at 96 kHz, every head reading above 2x: 6.79 x real
+  time with the levels against 9.63 x with M3's reads on Windows, 42.0 % slower; the target is at most 15 %. On Linux
+  8.15 x against 10.00 x, 22.7 % slower. The gate (faster than real time) passes. The cost is the read: a level read
+  takes 8 frames and 8 kernel values per channel where M3's Hermite takes 4 frames, about 3.5 ns more per head per
+  sample. The Hermite cannot read the levels inside -40 dB (-32.8 dB at 48 kHz, above), so the cheaper read is
+  not an option. Ways to win most of it back, all giving the same output bits: the kernel stored as doubles (no
+  conversion per tap), a plain-stretch fast path for level reads like M3's PlainStretch (the level's pointers and the
+  read's bounds worked out once per run), and both channels in one SSE2 register. Left for the fix pass, with the
+  plan's timing rule (a missed target is reported, not a red build).
+- The raw audition: held at 30 % (frame 28,800), the first 576 samples rise to 0.7 (within 1.4e-8 of the line), then
+  13,824 samples are exactly 0.7 x the stored ones, both channels; let go, it falls over 30 ms (within 1.5e-8) and the
+  last sound is 1439 samples after the release, under 1440; a second hold: after 30 ms 8160 samples are exactly the
+  second's; outGain +12 dB changes no bit; a 48 kHz sound at 44.1 kHz plays the sound's own reads exactly (7469
+  samples); a swap keeps the old sound's epoch until the fade ends. 0 allocations and frees in processBlock on Windows
+  Release, Linux (malloc too) and the Debug CRT (every heap call). On the strip a press at 20 % says "0:01.20 · outside
+  the Region: the file as recorded", plays (peak 0.441) and draws the line where the engine reads (0.230, 99
+  head-coloured pixels); after the release, silence and no line.
+- Preview's line: "off"; with Preview on and Cubase stopped at ppq 2 for 20 blocks of 512, "on, at beat 2.427 (Cubase
+  is stopped, so StrandLock plays the clip on its own clock)" on the page and in Copy report (the beat 2.426667, as
+  expected); "off" again once Cubase plays.
+
+### For the architect
+
+- Plan 1.1's `engine` folder has three new files: `OctaveLevels.h` and `OctaveLevels.cpp` (the levels, their read and
+  the rule) and `EngineRaw.cpp` (the raw audition).
+- Plan 4 M7 "fast reads": the rule takes the lowest level at which a read is at most 1.25x (level 1 from 1.25x, level 2
+  from 2.5x, level 3 from 5x), not floor (log2 rate), whose reads between 1x and 2x of the sound or of a level fold as
+  M3's did (the row's own +12 st case at 48 kHz is a 1.84x read). A read at or below 1.25x plays as in M3, a wider
+  promise than the row's "at or below 1x". "Half-band low-passed" is built as everything above the new half rate taken
+  out (a 75-tap filter), and a level is read with an 8-tap windowed sinc, not the Hermite.
+- Plan 4 M7 "fast reads": the row's Voice sweep (C3 -> C6 with the formant at +12 st) has no level change to measure: a
+  Voice note's grains read at the formant's speed whatever the pitch. The test checks that, and adds two Voice sweeps
+  that do change level.
+- Plan 4 M7 "fast reads: memory and CPU": the CPU target (at most 15 % slower) is missed: 42 % on Windows, 23 % on
+  Linux (Results). The -40 dB gate needs the 8-tap read; the fix pass can try the same-output speed-ups named there.
+  The plan has no row for the time the levels take to build: about 1.1 s more for a 10-minute song on Windows, 0.3 s
+  on Linux (Results).
+- Plan 8.2 could take rows for: the octave levels (the prototype has none; the engine's test-only switch keeps the
+  parity cases); the raw audition added after the output stage at 0.7 (outGain and the limiter leave it alone, as the
+  prototype's buffer source goes straight to its master; the bypass fade applies; it ends at the end of the sound, as
+  the buffer source does, and 30 ms after the release, where the prototype stops its source at 40 ms).
+- Plan 1.3's command list gains `rawAuditionOn` (with startPos) and `rawAuditionOff`; `engine::DisplayFrame` gains
+  `rawOn` and `rawPos`; `engine::Stats` gains `levelReads` and `levelUses`.
+- V2's E3 line on the Sample tab is still not built (V2, For the architect).
+
+## M7 summary
+
+M7 makes StrandLock work with Kalan's own songs. It was built in four parts on branch `m7-songs`, each merged to main
+when its CI run was green.
+
+- **V1, the analysis.** `Source/analysis/` ports sl-analysis.js line by line: pitch (YIN), key (chroma and
+  Krumhansl-Kessler), suggested parts (steady note, big hit, quiet texture, one-bar loop with its tempo) and the
+  prototype's FFT. All 34 fixture cases agree with the prototype (33 bit for bit). DC says "no clear pitch" (decision
+  3). Suggesting parts for a 5-minute song takes about 90 ms on Windows (target 1 s), with under 2 MB of memory.
+- **V2, long songs.** A sound longer than 3 minutes is kept as 16-bit samples, which play bit for bit as the same
+  values in float. A file longer than 10 minutes loads a 10-minute part, chosen in the part picker. The Region's exact
+  edges keep a one-bar loop on a 10-minute file from drifting (0 frames over 64 passes). The analysis runs on the
+  worker, is saved in the project, and gives the part chips, the root, key and engine suggestions (never applied by
+  themselves) and Detect pitch & key on the Sound tab.
+- **V3, keeping the sound.** The project keeps the sound (SAUD): files up to 20 MB without asking, 20-50 MB if Kalan
+  says yes (asked once per file), else the Region with 1 s either side as 24-bit FLAC, never over 50 MB. The opt-in
+  library and Locate sample... find a moved file, with every setting kept. A 45 MB project saves in about 0.1 s and
+  loads in about 0.3 s.
+- **V4, fast reads and M6's leftovers.** After a decode the worker builds three octave levels of the sound; a read
+  faster than 1.25x reads a level, so Tape far up no longer aliases: at 48 kHz the Saw three octaves up has 0.0015 % of
+  its sound off its harmonics, where M3 had 3.1 %. Level changes in a sweep do not click. The levels take 7/8 of the
+  sound's memory again. Holding the mouse on the waveform outside the Region now plays the song as recorded, and the
+  Diagnostics page and Copy report have a Preview line.
+- **Figures at the end** (run 44978133608): 2321 checks in 392 tests on Windows and 2312 on Linux, all passing; the
+  sanitizers, the Debug allocation run, the Debug pictures (0 JUCE assertions) and pluginval at strictness 10 pass.
+- **Not done, or open:** the CPU target of the fast reads (V4: 42 % slower on Windows in the worst case, not 15 %);
+  the levels' build time on Windows (about 1.1 s more for a 10-minute song); E3's line on the Sample tab (V2); the
+  drag sources only Cubase can test (MediaBay, the Pool, a trimmed audio event: `docs/CUBASE-CHECKLIST.md`, M7 step
+  2); Kalan's answers to the M7 checklist.
+- **For the fix pass:** each part's "For the architect" list; the CPU speed-ups and the build time in V4's Results;
+  the checklist answers when they come.

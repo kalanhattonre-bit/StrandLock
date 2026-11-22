@@ -663,7 +663,8 @@ What is new, and where it is:
    and the lit chip follows. Hold the mouse over a chip first: a dashed box on the waveform shows the part, and the
    hint bar says what kind of part it is. Play a note at C3 after each click: does each part sound like what its name
    says? Click **Undo** once after a chip: the Region goes back (one step each). **Use the whole file** takes all of
-   it. For **One-bar loop**, a message says the tempo it found: is it your song's tempo?
+   it. The **One-bar loop** chip says the tempo it found, and when Cubase is at another tempo a message says which
+   tempo to set: is it your song's tempo?
 
 4. **Detect pitch & key, and the root.** Put the Region on a held note of the song (**Steady note** is a good start).
    A chip such as **Use C2 as the root** (with whatever note it heard) may appear: hold the mouse over it to read why,
@@ -675,16 +676,11 @@ What is new, and where it is:
 
 5. **A song longer than 10 minutes.** Load a file longer than 10 minutes (a long live recording, or two songs joined).
    StrandLock loads its first 10 minutes at once, so something plays, and the part picker opens over the waveform.
-   Drag across the picture to choose where your 10 minutes start; the line at the top says which minutes. Click
+   Drag the box along the song to choose your 10 minutes; the line at the top says which minutes. Click
    **Load this part**: the file line then names the part (for example "6:00 to 12:00 of 12:00"). Later,
    **Load another part...** on the chip row opens the picker again. Does the right part load and play?
 
-6. **The 20 to 50 MB question.** Load a file between 20 and 50 MB (a WAV of about 2 to 5 minutes). The line under the
-   top bar asks whether to keep the whole file in the project, with **Yes**, **No** and **Just the Region**. Click
-   **Yes**. Save the project, close it and open it again: the question must not come back for that file. (Files up to
-   20 MB are kept without asking; for files over 50 MB only the Region is kept.)
-
-7. **Save, close, move the file, reopen.** These check where StrandLock finds a sound when its file has moved.
+6. **Save, close, move the file, reopen.** These check where StrandLock finds a sound when its file has moved.
    - a. Load a small sound file (under 20 MB). Save the project and close it. In Windows Explorer move that file to
      another folder (or rename it). Open the project again: does it play as before? A message says it plays the copy
      kept in the project, and nothing asks you anything.
@@ -695,15 +691,23 @@ What is new, and where it is:
    - c. On the **Sound** tab turn **Library** on. Load a file, save the project, close it, move the file, reopen. Does
      it play from the library (a message says so)? The line next to **Library** says how much the library holds. You
      can turn **Library** off again; the copies stay in Documents\StrandLock\Samples until you delete them.
-   - d. Load a song over 50 MB, set a Region of a few minutes and save. A message says the Region is too long to keep
-     in the project (over 50 MB). A short Region of the same song is kept: save again and the message does not come.
+
+7. **The 20 to 50 MB question, and a song over 50 MB.**
+   - a. Load a file between 20 and 50 MB (a WAV of about 2 to 5 minutes). The line under the top bar asks whether to
+     keep the whole file in the project, with **Yes**, **No** and **Just the Region**. Click **Yes**. Save the project,
+     close it and open it again: the question must not come back for that file. (Files up to 20 MB are kept without
+     asking.)
+   - b. Load a song over 50 MB (a WAV of 8 minutes or more) and drag the Region across nearly all of it. For a file
+     over 50 MB only the Region is kept, and only when that fits in 50 MB. When it does not, a message says the Region
+     is too long to keep in the project (over 50 MB). Then drag a Region of a minute or so: that one is kept, and the
+     message does not come again. Which songs and Regions gave the message?
 
 8. **Tape far up, now clean.** Load a sound with bright, steady high notes (the Saw from the sound menu, a synth
    stab, or a cymbal), set **ENGINE** to **Tape** on the Sample tab, and play C5 and C6 (two and three octaves above
    C3). Before this build those notes had a harsh, gritty, metallic edge (tones that are not part of the note). Now
    they should sound clean, only higher. Play a slow upward slide too (pitch bend, or a glide between two notes far
-   apart): does the sound stay smooth, with no click or step on the way up? Try a raised **FORMANT** on **Voice**
-   too. Is it clean? Is it any duller than you expected?
+   apart): does the sound stay smooth, with no click or step on the way up? Try **Voice** too, with the **FORMANT**
+   knob under **WHOLE-CLIP OFFSETS** (the **Macros** tab) turned up. Is it clean? Is it any duller than you expected?
 
 9. **Hold the mouse on the waveform outside the Region.** Hold the mouse down on the waveform outside the orange box:
    you now hear the song itself from that spot, as recorded, until you let go, and a line moves along the waveform
@@ -711,9 +715,9 @@ What is new, and where it is:
    (This replaces what M6 step 4 said: before this build nothing played there.) Inside the Region it is as before:
    a note at the root from that spot. Does it start quickly and stop cleanly, with no click?
 
-10. **Play it back.** Make a short phrase on a part of your song, with notes that move through it (Sample mode,
-    **Travel**). Press Play in Cubase. Does it play what you see, the same on every loop? Save, close and reopen: are
-    the part, the Region, the root and the key as you left them?
+10. **Play it back.** Make a short phrase on a part of your song, with notes that move through it (**8 Sample** on the
+    mode bar, then their **Travel** lines). Press Play in Cubase. Does it play what you see, the same on every loop?
+    Save, close and reopen: are the part, the Region, the root and the key as you left them?
 
 11. **Copy report.** Open the **Diagnostics** tab. In **POSITION AND TEMPO** a new line **Preview** says whether
     Preview is off or on, and while it plays with Cubase stopped, at which beat. Click **Preview** on the Sample tab
