@@ -92,6 +92,8 @@ namespace sl::engine
     void Engine::renderRaw (float* L, float* R, int from, int count, int gridPos, double byp0, double byp1) noexcept
     {
         const double attack = kRawFadeInSeconds * sr, release = kRawFadeOutSeconds * sr;
+        std::int64_t bad = 0;
+        bool played = false;
         for (RawPlayer& r : raw)
         {
             if (r.data == nullptr)
@@ -113,17 +115,42 @@ namespace sl::engine
                     readLevel (S, r.level, r.pos, l, rr);
                 else
                     readAbs (S, r.pos, l, rr);
+                // The output stage's guard (fix pass M7R-SST-2): a float file can hold NaN, inf or huge values, which go
+                // straight to the host here (after the output stage) unless they become 0, counted as the engine's are.
+                if (! (l > -kOutputGuard && l < kOutputGuard))
+                {
+                    l = 0;
+                    ++bad;
+                }
+                if (! (rr > -kOutputGuard && rr < kOutputGuard))
+                {
+                    rr = 0;
+                    ++bad;
+                }
                 const double c = static_cast<double> (gridPos + j + 1) / kCtrl;
                 const double bp = byp1 == byp0 ? byp0 : byp0 + (byp1 - byp0) * c;
                 const double g = kRawGain * env * bp;
                 const int o = from + j;
                 L[o] = static_cast<float> (L[o] + l * g);
                 R[o] = static_cast<float> (R[o] + rr * g);
+                played = true;
                 r.pos += r.step;
                 r.age += 1;
                 if (! r.held)
                     r.relAge += 1;
             }
+        }
+        st.nonFinite += bad;
+        if (! played)
+            return;
+        // The output never leaves +-0.98, as the output stage promises (plan 1.8): the audition added after it keeps that
+        // (fix pass M7R-SST-2; a sample of the sound above about 1.4, or the engine near its ceiling, would pass it).
+        const float most = static_cast<float> (kOutputClamp);
+        for (int j = 0; j < count; ++j)
+        {
+            const int o = from + j;
+            L[o] = L[o] > most ? most : L[o] < -most ? -most : L[o];
+            R[o] = R[o] > most ? most : R[o] < -most ? -most : R[o];
         }
     }
 }

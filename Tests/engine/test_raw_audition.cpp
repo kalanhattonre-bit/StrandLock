@@ -7,6 +7,8 @@
 //    replaces the first (after the first's 30 ms fade, the second's samples alone); outGain and the limiter leave it alone;
 //    a sound at another rate plays at its own rate (the sound's readAbs at every 48/44.1 frames); the display's line; a
 //    swap while it fades keeps the old sound's epoch until the fade ends; no sound, nothing.
+//  - rawAuditionGuardsItsSamples (engine, fix pass M7R-SST-2): a float sound holding NaN, inf and a huge value plays them
+//    as 0, counted in Stats::nonFinite; a sample past full scale stops at the output's ceiling (0.98).
 //  - rawAuditionAllocatesNothing (alloc, so the Debug CRT counts every heap call too): holds, releases, a second hold and a
 //    sound swap while it fades, with live notes, through the processor's command queue.
 // The readout and the strip's press are in Tests/ui/test_strip.cpp (stripRegion, section 6; stripRawAuditionLine).
@@ -29,7 +31,9 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace
@@ -260,6 +264,55 @@ SL_TEST ("engine", rawAuditionPlaysAsRecorded)
             silent = silent && sameFloat (v, 0.0f);
         check (silent, "with no sound a hold plays nothing");
     }
+}
+
+SL_TEST ("engine", rawAuditionGuardsItsSamples)
+{
+    section ("raw audition (fix pass M7R-SST-2): a float sound holding NaN, inf and a huge value: the reads they reach play as 0, counted as "
+             "the engine counts its own (Stats::nonFinite); a sample above full scale stops at the output's ceiling of 0.98; the rest as recorded");
+
+    const double sr = 48000;
+    std::vector<float> left = signals::noise (1.0, sr, 5, 0.5), right = signals::noise (1.0, sr, 9, 0.5);
+    const auto clean = engine::makeSampleData (left, right, sr, "clean");
+    // held at 10 % (frame 4800), read at the sound's own rate: output sample k is frame 4800 + k, past the 12 ms fade in
+    const std::size_t at = 4800 + 2000;
+    left[at] = std::numeric_limits<float>::quiet_NaN();
+    right[at + 10] = std::numeric_limits<float>::infinity();
+    left[at + 20] = 3.0e38f;
+    right[at + 30] = -2.0f;   // a float file may go past full scale: 0.7 x -2 = -1.4
+    const auto bad = engine::makeSampleData (left, right, sr, "bad floats");
+
+    auto play = [sr] (const engine::SampleData& s, std::int64_t& nonFinite)
+    {
+        RawRig rig (sr);
+        rig.e->setSample (&s, 1);
+        rig.e->rawAuditionOn (0.1);
+        rig.render (static_cast<std::int64_t> (0.1 * sr));
+        nonFinite = rig.e->stats().nonFinite;
+        return std::make_pair (rig.L, rig.R);
+    };
+    std::int64_t cleanBad = -1, badBad = -1;
+    const auto heardClean = play (*clean, cleanBad);
+    const auto heard = play (*bad, badBad);
+
+    // every output sample finite and within the ceiling; away from the bad samples (and their reads' 4-frame reach) as the
+    // clean sound plays
+    bool finite = true, ceiling = true, elsewhere = true;
+    for (std::size_t k = 0; k < heard.first.size(); ++k)
+    {
+        const float l = heard.first[k], r = heard.second[k];
+        finite = finite && std::isfinite (l) && std::isfinite (r);
+        ceiling = ceiling && l >= -0.98f && l <= 0.98f && r >= -0.98f && r <= 0.98f;
+        const bool near = k + 4800 + 3 >= at && k + 4800 <= at + 33;
+        if (! near)
+            elsewhere = elsewhere && sameFloat (l, heardClean.first[k]) && sameFloat (r, heardClean.second[k]);
+    }
+    const std::size_t pastFull = at + 30 - 4800;
+    check (finite && ceiling && badBad >= 3 && badBad <= 12 && cleanBad == 0 && elsewhere && sameFloat (heard.second[pastFull], -0.98f),
+           fmt ("every sample finite (%s) and within +-0.98 (%s); %lld reads replaced and counted (%lld for the clean sound); the sample at -2 plays "
+                "as %.4f; away from the bad samples the output is the clean sound's, bit for bit (%s)",
+                finite ? "yes" : "NO", ceiling ? "yes" : "NO", (long long) badBad, (long long) cleanBad, (double) heard.second[pastFull],
+                elsewhere ? "yes" : "NO"));
 }
 
 SL_TEST ("alloc", rawAuditionAllocatesNothing)
