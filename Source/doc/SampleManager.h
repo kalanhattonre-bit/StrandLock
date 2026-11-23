@@ -448,6 +448,10 @@ namespace sl::doc
             worker is idle. */
         std::function<void (bool starting)> workerProbe;
 
+        /** For the tests: called on the worker thread before each 1 MB block a library copy reads from the file's path (fix
+            pass M7R-SST-3: a newer sound request stops the copy at the next block). Set it while the worker is idle. */
+        std::function<void()> libraryProbe;
+
     private:
         enum class Kind : std::uint8_t { starter, file, ref, locate };
 

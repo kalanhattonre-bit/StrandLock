@@ -1726,6 +1726,7 @@ namespace sl::doc
 
         const SoundView& v = *j.view;
         const auto& f = v.ref.file;
+        bool stopped = false;   // a newer sound request stopped the copy (fix pass M7R-SST-3)
         if (isLibraryOn() && v.ref.kind == state::kSampleFile && ! v.missing && f.fileSize > 0)
         {
             const auto target = libraryFileFor (f);
@@ -1744,7 +1745,9 @@ namespace sl::doc
                 }
                 else if (const auto from = fileAt (f.path); from.has_value() && from->existsAsFile())
                 {
-                    // from the file at its path, hashed while it is copied
+                    // from the file at its path, hashed while it is copied; a newer sound request (a load, a project, an
+                    // Undo) or the plugin closing stops it at the next 1 MB block, so nothing waits for a long copy (fix
+                    // pass M7R-SST-3). A stopped copy is made again the next time that file plays with the library on.
                     juce::FileInputStream in (*from);
                     part.deleteFile();
                     juce::FileOutputStream os (part);
@@ -1755,6 +1758,13 @@ namespace sl::doc
                         ok = true;
                         for (;;)
                         {
+                            if (libraryProbe)
+                                libraryProbe();
+                            if (supersededBy (j.afterRequest))
+                            {
+                                stopped = true;
+                                break;
+                            }
                             const int n = in.read (buffer.data(), static_cast<int> (buffer.size()));
                             if (n <= 0)
                                 break;
@@ -1762,7 +1772,7 @@ namespace sl::doc
                             ok = ok && os.write (buffer.data(), static_cast<std::size_t> (n));
                         }
                         os.flush();
-                        ok = ok && os.getStatus().wasOk() && hash.finish() == f.sha256;
+                        ok = ok && ! stopped && os.getStatus().wasOk() && hash.finish() == f.sha256;
                     }
                 }
                 if (ok && part.moveFileTo (target))
@@ -1770,6 +1780,12 @@ namespace sl::doc
                 else
                     part.deleteFile();
             }
+        }
+        if (stopped)
+        {
+            const std::lock_guard<std::mutex> hold (lock);
+            ++stops;
+            return;   // the newer request's own library job measures the library
         }
         measure();
         if (onJobDone)
