@@ -631,13 +631,13 @@ something looks wrong.
 
 What is new, and where it is:
 - **The waveform strip's file line** (the top line of the strip) now ends with what listening found: for example
-  "key A minor", or "no clear pitch" for noise and drums, or "listening..." for a moment after a load.
+  "key A minor", or "no clear pitch" for noise and drums, or "listening..." while **Detect pitch & key** works.
 - **Part chips.** For a song, a row of chips under the file line names the parts StrandLock suggests, each with
   where it starts: **Steady note** (a held, steady stretch), **Big hit**, **Quiet texture** and **One-bar loop**
-  (with the tempo it found, for example "One-bar loop 120 bpm 0:29"). The chip of the part the Region is on now is
-  lit. **Use the whole file** sets the Region back to the whole file. A built-in sound has one **Parts** chip beside
-  the file line instead, with its parts in a menu.
-- **Suggestions**, on the same row: **Use A1 as the root** (with the note it heard), **Use key A major** (with the
+  (with the tempo it found, for example "One-bar loop 120 bpm 0:29"). When they do not all fit on one row, they go
+  on to a second row. The chip of the part the Region is on now is lit. **Use the whole file** sets the Region back
+  to the whole file. A built-in sound has one **Parts** chip beside the file line instead, with its parts in a menu.
+- **Suggestions**, on the same rows: **Use A1 as the root** (with the note it heard), **Use key A major** (with the
   key it heard), **Loop cleanly** (for a short file whose whole Region loops) and **Try Cloud** or
   **Cloud suits this sound (on)** (an engine that suits the sound). Nothing changes until you click one.
 - **The Sound tab**: **Detect pitch & key**, **Key**, **Scale** and **Scale lock**; then
@@ -684,13 +684,15 @@ What is new, and where it is:
    - a. Load a small sound file (under 20 MB). Save the project and close it. In Windows Explorer move that file to
      another folder (or rename it). Open the project again: does it play as before? A message says it plays the copy
      kept in the project, and nothing asks you anything.
-   - b. On the **Sound** tab turn **Keep the sound in the project** off. Load a file, set a Region and turn a few
-     knobs. Save, close, move the file, reopen. Now the line under the top bar says StrandLock cannot find the file.
-     Click **Locate sample...** and pick the file where it is now. Does it play with the same Region, root and knobs
-     as before? Click **Undo** once: the line comes back. Turn **Keep the sound in the project** on again afterwards.
-   - c. On the **Sound** tab turn **Library** on. Load a file, save the project, close it, move the file, reopen. Does
-     it play from the library (a message says so)? The line next to **Library** says how much the library holds. You
-     can turn **Library** off again; the copies stay in Documents\StrandLock\Samples until you delete them.
+   - b. Open the **Sound** tab and scroll down in it: **Keep the sound in the project** is under **Key**, **Scale**
+     and **Scale lock**. Turn it off. Load a file, set a Region and turn a few knobs. Save, close, move the file,
+     reopen. Now the line under the top bar says StrandLock cannot find the file. Click **Locate sample...** and pick
+     the file where it is now. Does it play with the same Region, root and knobs as before? Click **Undo** once: the
+     line comes back. Turn **Keep the sound in the project** on again afterwards.
+   - c. On the **Sound** tab (scroll down in it, as in b) turn **Library** on. Load a file, save the project, close
+     it, move the file, reopen. Does it play from the library (a message says so)? The line next to **Library** says
+     how much the library holds. You can turn **Library** off again; the copies stay in Documents\StrandLock\Samples
+     until you delete them.
 
 7. **The 20 to 50 MB question, and a song over 50 MB.**
    - a. Load a file between 20 and 50 MB (a WAV of about 2 to 5 minutes). The line under the top bar asks whether to

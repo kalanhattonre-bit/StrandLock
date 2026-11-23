@@ -773,3 +773,18 @@ when its CI run was green.
   2); Kalan's answers to the M7 checklist.
 - **For the fix pass:** each part's "For the architect" list; the CPU speed-ups and the build time in V4's Results;
   the checklist answers when they come.
+
+## Fix
+
+The M7 fix pass (plan 7.9: review, then a fix pass). Three reviewers (analysis parity; samples, state and threads; tests
+and UI) reported 17 findings on main 15a2f8e. Each was read against the code first. Branch `m7-fixes`, from main
+15a2f8e.
+
+### Progress
+
+- Done: every finding checked against the code (all 17 are real; none rejected). F1 was also checked in node on the V4
+  builder's model of the engine with the levels patched in (`m7v4/sim-engine.js`, the reviewer's `review7-ap/alias-grid.js`
+  and the fix pass's own `m7fix/grid.js`): it reproduces the CI figures and the -34 to -40 dB between the octave points.
+- Done: the code and tests for every finding but C7-2's extra picture (below), the Cubase checklist, these notes.
+- In progress: the first CI run of the branch.
+- Next: read every failure and figure from CI, look at the new chip pictures, fill in Results, then main.
