@@ -1098,6 +1098,7 @@ namespace sl::doc
             {
                 out.source = SoundSource::embedded;
                 out.original = saud;
+                out.saud = saud;
             }
             return out;
         }
@@ -1210,6 +1211,7 @@ namespace sl::doc
             out.record.loadedStartFrame = h.excerptStartFrame;
             out.record.loadedFrames = h.excerptFrames;
         }
+        out.saud = saud;   // fix pass M7R-SST-1: the sound keeps the SAUD it plays from
         return out;
     }
 
@@ -1344,6 +1346,7 @@ namespace sl::doc
         view->ref.file = decoded.record;
         view->source = decoded.source;
         view->original = std::move (decoded.original);
+        view->saud = std::move (decoded.saud);
         view->excerptStartFrame = decoded.excerptStartFrame;
         view->excerptFrames = decoded.excerptFrames;
         m.view = std::move (view);

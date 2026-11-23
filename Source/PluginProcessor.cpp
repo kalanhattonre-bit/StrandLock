@@ -1225,12 +1225,42 @@ void StrandLockProcessor::syncEmbed (bool now)
         embedNote = "Keep the sound in the project is off: the project names the file, and the file must stay where it is.";
         return;
     }
-    // The project's file is not playing (it is missing, or its load is still on its way), or only a part of it is (a
-    // Region excerpt kept in the project, all StrandLock has): what is kept for its bytes stays as it is.
-    if (view == nullptr || view->missing || ! state::sameSound (view->ref, np.sound) || view->source == doc::SoundSource::excerpt)
+    // The project's file is not playing (it is missing, or its load is still on its way): what is kept for its bytes stays
+    // as it is.
+    if (view == nullptr || view->missing || ! state::sameSound (view->ref, np.sound))
     {
         if (embedded.payload != nullptr && ! keptForThis)
             setEmbedded ({});
+        return;
+    }
+
+    // The SAUD the sound itself was decoded from (fix pass M7R-SST-1): kept again when nothing is kept for these bytes, after
+    // another sound and Undo, or the switch off and on. Without it a sound only that SAUD holds would play on, but the next
+    // save would keep nothing of it.
+    auto keepOwnSaud = [this, &view, &np]
+    {
+        Embedded e;
+        e.payload = view->saud;
+        e.sound = np.sound;
+        state::SaudView sv;
+        if (state::decodeSaud (view->saud->data(), view->saud->size(), sv))
+            e.header = sv.header;
+        // a whole copy of the samples (not the file's bytes) is the sound as it played when it was kept
+        e.fromMemory = view->source == doc::SoundSource::embedded && e.header.encoding != state::kSaudOriginal;
+        setEmbedded (std::move (e));
+        embedNote.clear();
+    };
+
+    // Only a part of it plays (a Region excerpt kept in the project, all StrandLock has): that part is kept as it is.
+    if (view->source == doc::SoundSource::excerpt)
+    {
+        if (! keptForThis)
+        {
+            if (view->saud != nullptr)
+                keepOwnSaud();
+            else if (embedded.payload != nullptr)
+                setEmbedded ({});
+        }
         return;
     }
 
@@ -1271,6 +1301,13 @@ void StrandLockProcessor::syncEmbed (bool now)
                 e.header = sv.header;
             setEmbedded (std::move (e));
             embedNote.clear();
+            return;
+        }
+        // A whole copy of the samples kept in the project (the file could not be read again when it was kept, and still
+        // cannot be): kept as it is, never encoded again (fix pass M7R-SST-5).
+        if (view->saud != nullptr && view->source == doc::SoundSource::embedded)
+        {
+            keepOwnSaud();
             return;
         }
         const std::string key = "original:" + std::to_string (view->request);
@@ -1791,6 +1828,11 @@ void StrandLockProcessor::loadState (const void* data, std::size_t size)
             embedded.header = saudHeader;
             embedded.fromProject = true;
             embedded.usable = saudForWorker;
+            // A whole copy of the loaded range's samples (FLAC 24-bit or 16-bit PCM, kept when the file could not be read
+            // again): the sound as it played, so it is not encoded again on every open (fix pass M7R-SST-5).
+            embedded.fromMemory = saudForWorker && saudHeader.encoding != state::kSaudOriginal
+                               && saudHeader.excerptStartFrame == np.sound.file.loadedStartFrame
+                               && saudHeader.excerptFrames == np.sound.file.loadedFrames;
         }
     }
 

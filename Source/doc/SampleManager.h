@@ -121,6 +121,9 @@ namespace sl::doc
         SoundSource source = SoundSource::starter;
         state::PayloadPtr original;             // a SAUD payload (encoding 0) of the file's bytes, ready to keep in the project:
                                                 // the file read into memory at the load (at most 20 MB), or the project's own copy
+        state::PayloadPtr saud;                 // source embedded or excerpt: the project's SAUD payload it was decoded from (any
+                                                // encoding), so the project keeps it again after Undo brings the sound back or the
+                                                // switch goes off and on (fix pass M7R-SST-1)
         engine::ExcerptMap excerpt;             // source excerpt: the loaded range's fractions onto these frames
         std::uint64_t excerptStartFrame = 0;    // source excerpt: the frames of the file it holds
         std::uint64_t excerptFrames = 0;
@@ -493,6 +496,7 @@ namespace sl::doc
             // M7 V3
             SoundSource source = SoundSource::file;
             state::PayloadPtr original;                  // the file's bytes as a SAUD payload (read into memory, or the project's)
+            state::PayloadPtr saud;                      // the project's SAUD it was decoded from (fix pass M7R-SST-1)
             bool excerpt = false;                        // only a part of the loaded range (a Region excerpt)
             std::uint64_t excerptStartFrame = 0, excerptFrames = 0;
             std::int64_t frames() const noexcept { return static_cast<std::int64_t> (i16 ? left16.size() : left.size()); }
