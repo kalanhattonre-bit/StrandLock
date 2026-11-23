@@ -540,7 +540,9 @@ namespace sl::doc
             const auto& v = currentView;
             if (v == nullptr || v->builtIn || ! v->hasSamples() || regionWhole (regionStart, regionEnd))
                 return 0;
-            const double lenS = (regionEnd - regionStart) * v->seconds();
+            // The Region is a fraction of the loaded range; on a Region excerpt kept in the project these samples hold only
+            // part of it, so its length is measured where it falls on them, as runJob listens to it (fix pass M7R-SST-4).
+            const double lenS = (v->toSound (regionEnd) - v->toSound (regionStart)) * v->seconds();
             if (! (lenS >= 0.05 && lenS <= 30.0))
                 return 0;
             j.view = v;
@@ -2066,9 +2068,21 @@ namespace sl::doc
             return;
         }
         if (fromProject)
+        {
             m.view->ref = r.ref;   // the record as the project wrote it (its analysis cache too)
+        }
+        else if (locating && ! otherFile)
+        {
+            // The same file at a new place: the project's whole record, with the new path. Its trailing bytes (fields a newer
+            // version appended) stay too, as plan 3's append-only rule asks (fix pass M7R-SST-7).
+            auto ref = r.ref;
+            ref.file.path = m.view->ref.file.path;
+            m.view->ref = std::move (ref);
+        }
         else if (locating && otherFile)
+        {
             m.view->ref.file.keepInProject = r.ref.file.keepInProject;   // the project's switch; the question is asked again
+        }
 
         // M7, decision 1: the analysis, unless the project's cache can be read (then it is not analysed again).
         if (auto cached = keepsRecord ? fromCache (r.ref.file.cache) : std::nullopt)
