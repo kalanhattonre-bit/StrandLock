@@ -782,9 +782,172 @@ and UI) reported 17 findings on main 15a2f8e. Each was read against the code fir
 
 ### Progress
 
-- Done: every finding checked against the code (all 17 are real; none rejected). F1 was also checked in node on the V4
-  builder's model of the engine with the levels patched in (`m7v4/sim-engine.js`, the reviewer's `review7-ap/alias-grid.js`
-  and the fix pass's own `m7fix/grid.js`): it reproduces the CI figures and the -34 to -40 dB between the octave points.
-- Done: the code and tests for every finding but C7-2's extra picture (below), the Cubase checklist, these notes.
-- In progress: the first CI run of the branch.
-- Next: read every failure and figure from CI, look at the new chip pictures, fill in Results, then main.
+- Done: every finding checked against the code. All 17 are real; none is rejected. F1 was also checked in node on the V4
+  builder's model of the engine with the levels patched in (scratch `m7v4/sim-engine.js`, the reviewer's
+  `review7-ap/alias-grid.js` and the fix pass's own `m7fix/grid.js`): the model gives CI's figures to 0.01 dB, and
+  -34 to -40 dB between the octave points.
+- Done: the code and a test for every finding (C7-2 in the checklist only, below), the Cubase checklist, these notes.
+- Done: run 45265952702 on 9af4d21 is green on every job and step (Results). Every new picture looked at: the part chips
+  on a song (dark and light at 100 %, dark at 200 %) now take two rows and show the loop chip; the part picker's chips
+  take two rows too; the suggestion line and the strip on a kept part are as before.
+- Last: the commit with these lines (it also makes one test message print the excerpt's frames: both compilers made
+  the message before the check decoded them, so it said 0) gets its own green run, then main is fast-forwarded to it.
+
+### Findings
+
+F2 and T7-3 are the same finding from two reviewers, and so are F4 and T7-4.
+
+| Finding | Severity | What was done |
+|---|---|---|
+| analysis-parity:F1 (fast reads off the octave points) | medium | Fixed. The decimation filter passes 0.15 and stops at 0.2 of the parent rate (0.4 of the level's own); the header comment says what a level holds; 12 points between the octaves are gated in `fastReadsAliasing`; the band check takes out 0.21 of the rate. |
+| analysis-parity:F2 and tests-ui:T7-3 (which cases must match M3 came from the engine's own counter) | medium, low | Fixed. The 13 cases that read a level are pinned with their reads per level; every other case must read none. `fastReadsLockLevel` adds the Lock row. |
+| analysis-parity:F3 (detect.json coverage) | low | Fixed but for one branch. Six cases appended to detect.json and four onset curves added to `analysisPieces`; estimateTempo's halving above 200 bpm is still not reached (below). |
+| analysis-parity:F4 and tests-ui:T7-4 (the parity row's wording) | low | The reading is recorded for the architect (below). |
+| samples-state-threads:M7R-SST-1 (a kept excerpt lost after a round trip) | high | Fixed. A sound keeps the SAUD it was decoded from (`SoundView::saud`), and syncEmbed keeps it again. |
+| samples-state-threads:M7R-SST-2 (the raw audition unguarded) | medium | Fixed. The output stage's guard on each read, and the sum kept within +-0.98. |
+| samples-state-threads:M7R-SST-3 (a library copy could not be stopped) | medium | Fixed. A stop question before each 1 MB block. |
+| samples-state-threads:M7R-SST-4 (root suggestions on an excerpt) | low | Fixed. The Region is measured where it falls on the excerpt. |
+| samples-state-threads:M7R-SST-5 (a whole copy encoded again on every open) | low | Fixed. loadState marks such a SAUD as the sound as it played, and syncEmbed keeps the sound's own copy. |
+| samples-state-threads:M7R-SST-6 (a kept blob replaced with no edit) | low | Fixed. SAUD is left out of the whole-blob comparison, as UIST is. |
+| samples-state-threads:M7R-SST-7 (Locate dropped trailing bytes) | low | Fixed. The same-file Locate keeps the project's whole record and changes only its path. |
+| tests-ui:UI7-1 (part chips hidden) | medium | Fixed. The chips wrap onto as many rows as they need. |
+| tests-ui:T7-1 (the tests could not see a hidden chip) | medium | Fixed. Every part's chip must be on screen, at 100 % and at 200 %; a test click reaches only a chip on screen. |
+| tests-ui:P7-1 (the CPU target) | medium | The level read is faster: 20.0 % slower than M3's reads on Windows (was 42 to 44 %), 11.9 % on Linux. The 15 % target is still missed on Windows (Results, and for the architect). |
+| tests-ui:T7-2 (the root suggestion check could not fail) | low | Fixed. |
+| tests-ui:C7-1 ("listening..." in the checklist) | low | Fixed. |
+| tests-ui:C7-2 (two Sound tab rows below the fold) | low | Fixed in the checklist: steps 6b and 6c say to scroll down. The default-size picture `strandlock_sound_dark` already shows what Kalan sees, so no picture was added. |
+
+### Decisions and deviations
+
+- **F1: what a level holds.** A level is read at 0.625x to 1.25x of its own rate. Read at 1.25x, nothing above 0.4 of its
+  rate may be there, or it folds; read near 0.63x, what lies above 0.2 of its rate comes back as images, which the 8-tap
+  kernel takes out only from about 0.6 up. The old filter (pass 0.2, stop 0.25 of the parent rate) left the band from 0.4
+  to 0.5 of the level's rate, so between the octave points the Saw had -34 to -40 dB off its lines. The new filter passes
+  0.15 and stops at 0.2 of the parent rate (75 taps and 60 dB, as before, so it costs the same to build). In the node model
+  every level read of the Saw from +4 to +39 st at 44.1, 48 and 96 kHz is at most -53.3 dB (the old filter: -34.3 dB),
+  and CI gives the model's figures to the last digit printed.
+- **F1: the price is the top of the band.** Just after each level change (a read at 0.625x of the level) the output is
+  flat to 8.3 kHz at 44.1 kHz and 6 dB down at 9.7 kHz (before: flat to 11 kHz, 6 dB down at 12.4 kHz); just before the
+  next change (1.25x) it is flat to 16.5 kHz (before: the whole band, its top folded). So Tape far up is a little duller
+  than in V4, and clean. A narrower transition would keep more of the band but take more taps to build (the levels already
+  add about 1.1 s to a 10-minute song on Windows); 75 taps were kept.
+- **F1: what the levels do not cover.** Reads between 1x and 1.25x of the sound itself are M3's reads, as V4 decided (the
+  plan's "at or below 1x" is bit for bit with M3, and the plan's own floor rule reads the sound itself up to 2x): the Saw
+  there has -37 to -40 dB off its lines (44.1 kHz +1 to +3 st, 48 kHz +1 to +5 st), as in M3. Above 10x (level 3 read
+  faster than 1.25x; there is no level 4) reads fold too: -31.8 dB at +40 st and -23.7 dB at +42 st at 44.1 kHz in the
+  model. Both are for the architect (below).
+- **F2: the pinned counts are the engine's own**, printed by runs 44980720214 and 44983293729 and the same on Windows,
+  Linux and under the sanitizers. They still gate the set: a read at or below 1.25x that takes a level adds a case or
+  changes a count, and fails. The Lock row does not depend on them: it is worked out from the rate ratio alone.
+- **F3: the inputs.** The half rule needs a held tone whose loudest blocks are noise: 60 blocks of a G3 (4 partials,
+  amplitude 0.12), then 13 (found) or 14 (no pitch) blocks of noise at 0.9, then 4000 frames of the tone. The rotated hit
+  needs the first downbeat a little louder: a new input `{gain, frames, of}` (in the generator and the C++ test)
+  multiplies the first 2000 frames of two Beat loops and the Pad by 1.4. The tempo branches are onset curves in
+  `analysisPieces`, which already compared estimateTempo with the prototype's values: 29 frames with a spike every 3 (no
+  lags between 60 and 200 bpm), a spike every 88 frames (past the slowest lag: a weak peak), a spike every 87 frames
+  (59.4 bpm, folded up to 119) and a rising ramp (no peak). Each branch was confirmed on an instrumented copy of
+  sl-analysis.js (the reviewer's `review7-ap/cov.js`). The halving above 200 bpm was not reached: the tempo weight
+  prefers the lag of two beats to the one at 200 bpm, so only a bar refinement that lands past 200 bpm halves, and no
+  simple curve gave one. By reading, the C++ halves as the prototype does.
+- **M7R-SST-1: the sound keeps its SAUD.** `SoundView::saud` holds the SAUD payload a sound was decoded from (an excerpt,
+  a whole FLAC copy or the original bytes), shared, never copied. When the project's sound plays from it and nothing is
+  kept for its bytes (after another sound and Undo, or after the switch off and on), syncEmbed keeps it again, so the next
+  save writes it byte for byte (it is the same payload). A whole copy of the samples is marked as the sound as it played.
+- **M7R-SST-2: the guard and the ceiling.** Each read the raw audition makes goes through the output stage's guard (not a
+  number, or outside +-1e6: 0, counted in `Stats::nonFinite`), and after it is added the output is kept within +-0.98,
+  as the output stage promises (plan 1.8). V4 let it pass the limiter (the prototype's buffer source goes straight to its
+  master); it still does, but no sample leaves +-0.98. A float file's sample above about 1.4, or the engine near its
+  ceiling, would have.
+- **M7R-SST-3: what stops a copy.** A newer sound request, or the worker ending (the plugin closing), stops a library copy
+  at its next 1 MB block; a newer library job does not (it would only copy the same file again). The `.part` file is
+  deleted and the copy counted as a stop. A copy from bytes in memory is one write and needs no stop.
+- **M7R-SST-6: SAUD is not an edit.** While a whole blob is kept (a newer formatVersion, a bad header), SAUD is left out of
+  the comparison that decides whether the person has edited anything, as UIST is. Everything the person does that changes
+  what SAUD keeps (another sound, the Region, the switch, the answer) changes PARM, INST or SMPL as well.
+- **UI7-1: the chips wrap.** A file's chips fill their row left to right and go on to another row when the next one does
+  not fit, as the prototype's strip wraps them; the strip grows by 26 px a row and the roll gives the room up. In the
+  default 1100 x 680 window the one-minute test song (root, key, engine, Use the whole file and four parts) takes two
+  rows. A starter's one "Parts" chip still sits beside the file line. `WaveStrip::preferredHeight` takes the strip's
+  width now (MainView passes it), and a change in the number of rows lays the page out again.
+- **P7-1: the faster read.** The read kernel is stored as doubles (no conversion of the taps on each read) and the 8-tap
+  sum runs in two lanes, even taps and odd taps, so one SSE2 register holds both and a stereo read is half the steps it
+  was. Without SSE2 the same operations run in the same order, so every machine gives the same bits; no FMA and no AVX
+  (plan 1.6). Near an edge the held frames go through the same sum. The levels' output changed with F1 anyway, so the
+  order of the sum is free (no level read has an older one to match).
+
+### Tests
+
+| Test | Finding | What it checks |
+|---|---|---|
+| `engine/fastReadsAliasing` (12 new points) | F1 | the Saw on Tape between the octaves, each level just after its change and just before the next: +4, +15, +16, +27, +28, +39 st at 44.1 kHz and +6, +17, +18, +29, +30, +39 st at 48 kHz, at most -40 dB each, from the rule's level; the count of points gated |
+| `engine/fastReadsLevelsMatchTheSound` (the band check) | F1 | level 1 keeps 0.15 of the rate within 0.05 dB and takes 0.21 out by more than 55 dB (0.42 of the level's own rate, which a 1.25x read would fold; the old filter passed it at -0.6 dB) |
+| `engine/fastReadsParity` (the pinned table) | F2, T7-3 | the 13 cases that read a level, with their reads at levels 1, 2 and 3, and none in the other 60 |
+| `engine/fastReadsLockLevel` (new) | F2 | Lock in a 44.1 kHz session at keys 36, 60 and 84: a 96 kHz sound reads level 1 only, a 44.1 or 48 kHz sound none; every note sounds |
+| `analysis/detectFixture` (6 new cases) | F3 | the half rule (found and not), a file under 1.2 s, A3 at 8 and 11.025 kHz, the rotated hit; 40 cases gated |
+| `analysis/analysisPieces` (4 new curves) | F3 | estimateTempo's empty lag range, weak peak, octave fold up, and a ramp with no peak, against the prototype's values |
+| `engine/rawAuditionGuardsItsSamples` (new) | M7R-SST-2 | a float sound with NaN, inf, 3e38 and -2.0 in it, held: every output sample finite and within +-0.98, the reads they reach counted in nonFinite (none for the clean sound), -2.0 plays as -0.98, and away from them the output is the clean sound's, bit for bit |
+| `songs/excerptKeptAfterRoundTrips` (new) | M7R-SST-1, M7R-SST-4 | a 21 MB file kept as its Region excerpt and then deleted: the excerpt plays and is saved; after a starter and Undo, and after the switch off and on, the save keeps the same SAUD byte for byte; a 0.5 s Region on the excerpt asks a root job and gets A1 (MIDI 45) |
+| `songs/wholeCopyKeptAsItIs` (new) | M7R-SST-5 | the same file moved before Yes: the project keeps all of it as FLAC 24-bit; reopened with the file gone, the copy kept is the project's own payload (not made again), the project re-saves byte for byte, the Sound tab says "the sound as it plays"; after a starter and Undo the same payload |
+| `songs/locateKeepsTrailingFields` (new) | M7R-SST-7 | a project whose SMPL record has 8 trailing bytes, its file moved: after Locate the saved record is the project's, byte for byte, but for its path |
+| `songs/libraryCopyStops` (new) | M7R-SST-3 | a 3 MB file copied from its path into the library while a newer sound is asked at the first block: the copy stops there, nothing is left in the library (no `.part`), a stop is counted; loaded again, it is copied whole |
+| `state/unreadableBlobKeptWhileSaudArrives` (new) | M7R-SST-6 | a formatVersion 2 blob loaded while the sound's SAUD is on its way: two saves write it back byte for byte with the banner, while the SAUD arrives; a parameter edit then writes a new container with its SAUD (the control) |
+| `ui/partChipsSetTheRegion` | UI7-1, T7-1, T7-2 | every part's chip on screen in the default window (visible, inside the chips' rows); clicks only reach chips on screen; the Big hit's Region gets a root suggestion, and another chip hides it at once |
+| `ui/m7Pictures` and `m7_chips_*` | UI7-1, T7-1 | the chips picture requires every part's chip on screen, dark and light at 100 % and dark at 200 % |
+
+### Results (run 45265952702 on 9af4d21, all green)
+
+- Windows Release: 2375 checks in 399 tests, 0 failed. Linux Release: 2366 checks in 399 tests, 0 failed. Sanitizers:
+  contract, model, engine and analysis 985 checks in 161 tests; state 172 checks in 24 tests. Debug CRT `--only alloc`:
+  46 checks in 10 tests, 0 JUCE assertions; Debug snapshots: 0 JUCE assertions. pluginval strictness 10: SUCCESS.
+  Fixture check: passed (26 files, 4,965,335 bytes).
+- **The aliasing figure, in plain words.** At 48 kHz, played one, two and three octaves up, the Saw on Tape now has about
+  0.0001 %, 0.0001 % and 0.0003 % of its sound off the note's harmonics (-61.20, -58.29 and -55.25 dB; V4 -54.25, -51.20
+  and -48.15; M3 -27.77, -19.58 and -15.10). At 44.1 kHz -99.89 / -77.40 / -73.95 dB, at 96 kHz -56.10 (no level, as M3)
+  / -65.25 / -62.59 dB. Between the octaves the worst is -53.27 dB (44.1 kHz +39 st, level 3 at 1.19x), where V4 had
+  -34.34 dB there. Every point read the rule's level. The same figures on Linux, to the last digit printed.
+- Parity: 73 of 73 cases bit for bit with M3 with the levels switched off; with them on, the 60 that read no level bit for
+  bit, and the 13 that read one exactly as pinned.
+- Lock: a 96 kHz sound at 44.1 kHz reads level 1 (690 head runs per note, rms 0.12 to 0.26); a 44.1 or 48 kHz sound none.
+- Sweeps (the largest step at a level change over the steady one, at most 1.5): Tape C3 -> C6 0.905 / 1.003 / 0.996 at
+  44.1 kHz, 0.967 / 0.992 / 0.992 at 48 kHz, 0.934 / 0.997 at 96 kHz; the Voice sweeps at most 1.014.
+- The levels: each read at a frame of the sound is the sound there within 4.7e-4 / 7.7e-4 / 8.4e-4 (levels 1 / 2 / 3);
+  level 1 keeps a tone at 0.15 of the rate (-0.006 dB) and takes one at 0.21 down by 63.4 dB.
+- **CPU (P7-1).** Tape with 16 voices x 8 heads at 96 kHz, every head above 2x: on Windows 7.73 x real time with the levels
+  against 9.28 x with M3's reads, 20.0 % slower (V4: 42 to 44 %); on Linux 11.75 x against 13.15 x, 11.9 % slower (V4:
+  23 to 31 %). The 15 % target is met on Linux and still missed on Windows by 5 points. The gate (faster than real time)
+  passes.
+- detect.json: 40 of 40 cases within the plan's tolerance (39 bit for bit, the Saw starter's Hz as before), on Windows,
+  Linux and under the sanitizers. estimateTempo on the new curves: 120 (not found), 119, 120 (not found) and 120 (not
+  found), the prototype's values.
+- The raw audition: 9 reads replaced and counted (the NaN and inf each reach 4 Hermite reads, 3e38 one); -2.0 plays as
+  -0.98; the rest bit for bit with the clean sound.
+- Keeping the sound: the excerpt (the Region and 1 s either side, 0.1 MB as the Sound tab says) is kept again after a starter and Undo and after the switch off
+  and on, and the project after Undo is the loaded project byte for byte; the 0.5 s Region gets MIDI 45 +0 cents. The
+  whole copy (2.3 MB of FLAC for 110 s) is the project's own payload after the open, after Undo, and re-saves byte for
+  byte. The library copy stopped at its first block and was copied whole the next time. The kept blob survived two
+  saves while the SAUD arrived.
+- The chips: on the one-minute song all 8 chips are on screen on 2 rows, in the default window and at 200 %; the Big hit
+  gets a root suggestion (MIDI 35 +11 cents) and another chip hides it.
+
+### For the architect
+
+- Plan 4 M7 "fast reads" (F4, T7-4): the row's "every case that reads above 1x bit for bit with the prototype when the
+  levels are switched off" is read as "bit for bit with the M3 build's render, which is within section 5's tolerance of the
+  prototype". 25 renders.json cases on Windows and 49 on Linux are within tolerance but not bit for bit with the
+  prototype, as they were in M3 (the same hashes); 5 (Windows) and 10 (Linux) of them read a level. The test gates the
+  levels switched off against M3's render, bit for bit.
+- Plan 4 M7 "fast reads": the decimation filter passes 0.15 and stops at 0.2 of the parent rate (F1), so a level holds
+  nothing above 0.4 of its own rate. The cost is the top of the band just after each level change (8.3 kHz flat at 44.1
+  kHz, Decisions). The row's nine points could take the in-between points this pass gates.
+- Plan 4 M7 "fast reads": reads between 1x and 1.25x of the sound itself fold as M3's did (the Saw at -37 to -40 dB), and
+  reads above 10x fold from level 3 (-31.8 dB at +40 st, -23.7 dB at +42 st at 44.1 kHz in the model). A level 4, and a
+  rule for reads just above 1x, would be plan changes.
+- Plan 4 M7 "fast reads: memory and CPU": the target (at most 15 % slower) is met on Linux (11.9 %) and missed on Windows
+  (20.0 %). What is left on Windows would need a plain-stretch path for level reads (the level's pointers and bounds
+  worked out once per run, as M3's PlainStretch does) or the accepted cost.
+- Plan 1.8 and decision 7a: the raw audition's sum is kept within +-0.98 like every other output sample (M7R-SST-2).
+- Plan 3: a project's whole copy of the samples (FLAC 24-bit of the loaded range, kept when the file could not be read
+  again) is now kept as it is on every open (M7R-SST-5), and a blob kept whole is written back while only SAUD changes
+  (M7R-SST-6).
+- Section 5: detect.json has 40 cases and a new input kind `{gain, frames, of}`; estimateTempo's halving above 200 bpm is
+  not reached by any fixture or test.

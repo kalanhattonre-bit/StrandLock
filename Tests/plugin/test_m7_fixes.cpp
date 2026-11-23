@@ -157,9 +157,10 @@ SL_TEST ("songs", excerptKeptAfterRoundTrips)
     }
     const auto kept = saudOf (project);
     state::SaudView v;
-    check (kept.has_value() && state::decodeSaud (kept->data(), kept->size(), v) && v.header.encoding == state::kSaudFlac24
-               && v.header.excerptFrames <= (std::uint64_t) (6 * 48000 + 2),
-           fmt ("the project keeps the Region and 1 s either side as FLAC 24-bit (%llu frames)", kept.has_value() ? (unsigned long long) v.header.excerptFrames : 0ull));
+    // decoded before the check: the compilers make the check's message before its condition
+    const bool read = kept.has_value() && state::decodeSaud (kept->data(), kept->size(), v);
+    check (read && v.header.encoding == state::kSaudFlac24 && v.header.excerptFrames <= (std::uint64_t) (6 * 48000 + 2),
+           fmt ("the project keeps the Region and 1 s either side as FLAC 24-bit (%llu frames)", read ? (unsigned long long) v.header.excerptFrames : 0ull));
     file.deleteFile();
 
     StrandLockProcessor q;
