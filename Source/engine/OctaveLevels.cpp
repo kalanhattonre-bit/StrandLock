@@ -70,13 +70,16 @@ namespace sl::engine
                     sum += w[j];
                 }
                 for (int j = 0; j < kLevelTaps; ++j)
-                    kernel[k * kLevelTaps + j] = static_cast<float> (w[j] / sum);
+                    kernel[k * kLevelTaps + j] = w[j] / sum;
             }
 
-            // The decimation filter: a windowed-sinc low-pass of 75 taps, its band edge half way between a fifth and a
-            // quarter of the rate (0.225), in a Kaiser window for 60 dB (beta 0.1102 (60 - 8.7)): flat to 0.2, at least
-            // 60 dB down from 0.25, the new half rate. Scaled to sum to 1 (a steady value keeps its level).
-            constexpr double cutoff = 0.225;
+            // The decimation filter: a windowed-sinc low-pass of 75 taps, its band edge half way between 0.15 and 0.2 of
+            // the rate (0.175), in a Kaiser window for 60 dB (beta 0.1102 (60 - 8.7)): flat to 0.15, at least 60 dB down
+            // from 0.2, which is 0.4 of the new level's own rate. So a level read at up to 1.25x never folds (0.4 x 1.25 =
+            // 0.5), and read down to 0.625x its images start at 0.6 of its rate, where the read kernel takes them out
+            // (fix pass F1: the stopband was at 0.25, the new half rate, and the band from 0.2 to 0.25 folded or imaged at
+            // -34 to -40 dB between the octave points). Scaled to sum to 1 (a steady value keeps its level).
+            constexpr double cutoff = 0.175;
             constexpr double filterBeta = 0.1102 * (60.0 - 8.7);
             double h[2 * kLevelHalf + 1] {};
             double sum = 0;

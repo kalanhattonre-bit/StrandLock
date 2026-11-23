@@ -7,10 +7,14 @@
 //  - fastReadsAliasing: the Saw on Tape at +12, +24 and +36 st at 44.1, 48 and 96 kHz, with its octave levels built as the
 //    SampleManager's worker builds them: at most -40 dB each, every read from the level the rule chooses; +0 st bit for
 //    bit with the levels off; the M3 figure (the levels off) beside each; the measure itself (the band-limited Saw reads
-//    < -60 dB, a naive saw > -40 dB).
+//    < -60 dB, a naive saw > -40 dB). Fix pass F1: also between the octaves, each level read just after its change
+//    (about 0.63x of its own rate) and just before the next (about 1.2x), at 44.1 and 48 kHz.
 //  - fastReadsParity: every engine/renders.json case with its sound's levels built: switched off, bit for bit with no
 //    levels at all (M3's render, which fixtureEngineRendersTape and fixtureEngineRendersGrains compare with the
-//    prototype); switched on, every case that reads at or below 1.25x bit for bit with that too.
+//    prototype); switched on, every case that reads at or below 1.25x bit for bit with that too. Fix pass F2: which cases
+//    read a level, and how often from each, is pinned, so a read at or below 1.25x that takes a level fails.
+//  - fastReadsLockLevel (fix pass F2): a Lock note reads at the rate ratio: a 96 kHz sound in a 44.1 kHz session reads
+//    level 1, a 44.1 or 48 kHz sound none, whatever the note.
 //  - fastReadsSweeps: C3 -> C6 over 2 s on Tape (44.1, 48 and 96 kHz) and Voice notes that read above 1x (the formant
 //    raised to +12 st; the formant at +12 st with the Tape switch and Speed 1 -> 4; the plan's C3 -> C6 with the formant
 //    at +12 st): the largest step around each level change over the largest steady step before it, < 1.5.
@@ -107,65 +111,92 @@ namespace
 SL_TEST ("engine", fastReadsAliasing)
 {
     section ("fast reads (9.6): the Saw on Tape at +12, +24 and +36 st at 44.1, 48 and 96 kHz: at most -40 dB of the energy off the "
-             "harmonic lines with the octave levels (M3: -27.8 / -19.6 / -15.1 dB at 48 kHz); +0 st bit for bit as with the levels off");
+             "harmonic lines with the octave levels (M3: -27.8 / -19.6 / -15.1 dB at 48 kHz); +0 st bit for bit as with the levels off; "
+             "between the octaves too, each level read near 0.63x and near 1.2x of its own rate (fix pass F1)");
 
     const sounds::StarterSound saw = sounds::makeStarterSound (sounds::StarterId::saw, 1);
-    const double rates[] = { 44100, 48000, 96000 };
-    const int steps[] = { 0, 12, 24, 36 };
-    double worst = -1000;
+    struct Point
+    {
+        int rateHz = 48000;
+        int steps = 0;
+        bool between = false;   // fix pass F1: a point between the octaves
+    };
+    std::vector<Point> points;
+    for (const int rateHz : { 44100, 48000, 96000 })
+        for (const int st : { 0, 12, 24, 36 })
+            points.push_back ({ rateHz, st, false });
+    // Between the octaves (fix pass F1): each level read just after its change (about 0.63x of its own rate) and just
+    // before the next (about 1.2x), where a level's band from 0.4 to 0.5 of its rate imaged or folded at -34 to -40 dB
+    // before the fix. At 44.1 kHz: level 1 at 0.630x (+4) and 1.189x (+15), level 2 (+16, +27), level 3 (+28, +39); at
+    // 48 kHz: level 1 at 0.650x (+6) and 1.226x (+17), level 2 (+18, +29), level 3 at 0.650x (+30) and 1.093x (+39).
+    for (const int st : { 4, 15, 16, 27, 28, 39 })
+        points.push_back ({ 44100, st, true });
+    for (const int st : { 6, 17, 18, 29, 30, 39 })
+        points.push_back ({ 48000, st, true });
+
+    double worst = -1000, worstBetween = -1000;
     double at48[4] = { 0, 0, 0, 0 }, m3At48[4] = { 0, 0, 0, 0 };
-    for (int ri = 0; ri < 3; ++ri)
-        for (int q = 0; q < 4; ++q)
+    int betweenCount = 0;
+    for (const Point& pt : points)
+    {
+        const double sr = pt.rateHz;
+        const auto start = static_cast<std::int64_t> (0.5 * sr);
+        const double f0 = signals::midiHz (60 + pt.steps);
+        const double rate = saw.sampleRate / sr * std::pow (2.0, pt.steps / 12.0);   // frames of the Saw per output sample
+        const int expect = engine::levelFor (rate, engine::kMaxOctaveLevels);
+        auto renderNote = [&] (bool levels, engine::Stats& stats)
         {
-            const double sr = rates[ri];
-            const auto start = static_cast<std::int64_t> (0.5 * sr);
-            const double f0 = signals::midiHz (60 + steps[q]);
-            const double rate = saw.sampleRate / sr * std::pow (2.0, steps[q] / 12.0);   // frames of the Saw per output sample
-            const int expect = engine::levelFor (rate, engine::kMaxOctaveLevels);
-            auto renderNote = [&] (bool levels, engine::Stats& stats)
-            {
-                grains::Play play (sr, grains::instWith (core::Engine::tape), sawSample (saw, true));
-                play.e->setOctaveLevels (levels);
-                play.e->noteOn (60 + steps[q], 1);
-                play.render (start + 65536);
-                stats = play.e->stats();
-                return play.L;
-            };
-            engine::Stats on, off;
-            const std::vector<float> withLevels = renderNote (true, on);
-            const std::vector<float> without = renderNote (false, off);
-            const double fig = offLinesDb (withLevels, sr, f0, start, 16), m3 = offLinesDb (without, sr, f0, start, 16);
-            const double rms = rmsOf (withLevels);
-            // the read chose the rule's level for every run (and none at all with the switch off)
-            const bool asRule = off.levelReads == 0
-                                && (expect == 0 ? on.levelReads == 0
-                                                : on.levelReads > 0 && on.levelUses[static_cast<std::size_t> (expect - 1)] == on.levelReads);
-            if (steps[q] == 0)
-            {
-                check (sameBits (withLevels, without) && asRule && rms > 0.01,
-                       fmt ("%.1f kHz, +0 st (a read at %.4fx): no level read, bit for bit as with the levels off; %.2f dB off the lines, rms %.3f",
-                            sr / 1000, rate, fig, rms));
-            }
-            else
-            {
-                check (fig <= -40.0 && asRule && rms > 0.01,
-                       fmt ("%.1f kHz, +%d st: %.2f dB off the harmonic lines (at most -40; with the levels off, M3's reads, %.2f dB); a read at %.4fx "
-                            "from level %d (level reads 1 / 2 / 3: %s); rms %.3f",
-                            sr / 1000, steps[q], fig, m3, rate, expect, usesText (on).c_str(), rms));
-                worst = std::max (worst, fig);
-            }
-            if (ri == 1)
-            {
-                at48[q] = fig;
-                m3At48[q] = m3;
-            }
+            grains::Play play (sr, grains::instWith (core::Engine::tape), sawSample (saw, true));
+            play.e->setOctaveLevels (levels);
+            play.e->noteOn (60 + pt.steps, 1);
+            play.render (start + 65536);
+            stats = play.e->stats();
+            return play.L;
+        };
+        engine::Stats on, off;
+        const std::vector<float> withLevels = renderNote (true, on);
+        const std::vector<float> without = renderNote (false, off);
+        const double fig = offLinesDb (withLevels, sr, f0, start, 16), m3 = offLinesDb (without, sr, f0, start, 16);
+        const double rms = rmsOf (withLevels);
+        // the read chose the rule's level for every run (and none at all with the switch off)
+        const bool asRule = off.levelReads == 0
+                            && (expect == 0 ? on.levelReads == 0
+                                            : on.levelReads > 0 && on.levelUses[static_cast<std::size_t> (expect - 1)] == on.levelReads);
+        if (pt.steps == 0)
+        {
+            check (sameBits (withLevels, without) && asRule && rms > 0.01,
+                   fmt ("%.1f kHz, +0 st (a read at %.4fx): no level read, bit for bit as with the levels off; %.2f dB off the lines, rms %.3f",
+                        sr / 1000, rate, fig, rms));
+            continue;
         }
+        const double atLevel = rate * engine::kLevelScale[expect];
+        check (fig <= -40.0 && asRule && rms > 0.01 && (! pt.between || expect > 0),
+               fmt ("%.1f kHz, +%d st%s: %.2f dB off the harmonic lines (at most -40; with the levels off, M3's reads, %.2f dB); a read at %.4fx, "
+                    "level %d at %.4fx of its own rate (level reads 1 / 2 / 3: %s); rms %.3f",
+                    sr / 1000, pt.steps, pt.between ? " (between the octaves)" : "", fig, m3, rate, expect, atLevel, usesText (on).c_str(), rms));
+        if (pt.between)
+        {
+            worstBetween = std::max (worstBetween, fig);
+            ++betweenCount;
+        }
+        else
+        {
+            worst = std::max (worst, fig);
+        }
+        if (! pt.between && pt.rateHz == 48000)
+        {
+            const auto q = static_cast<std::size_t> (pt.steps / 12);
+            at48[q] = fig;
+            m3At48[q] = m3;
+        }
+    }
+    check (betweenCount == 12, fmt ("12 points between the octaves measured (%d)", betweenCount));
     note (fmt ("In plain words: at 48 kHz, played one, two and three octaves up, the Tape engine's Saw now has %.4f %%, %.4f %% and %.4f %% of "
                "its sound off the harmonic lines (%.1f, %.1f and %.1f dB), where M3's reads had %.1f %%, %.1f %% and %.1f %% (%.1f, %.1f and %.1f dB); "
-               "the worst of the nine cases is %.1f dB.",
+               "the worst of the nine cases is %.1f dB, and of the 12 between the octaves %.1f dB.",
                100 * std::pow (10.0, at48[1] / 10), 100 * std::pow (10.0, at48[2] / 10), 100 * std::pow (10.0, at48[3] / 10), at48[1], at48[2], at48[3],
                100 * std::pow (10.0, m3At48[1] / 10), 100 * std::pow (10.0, m3At48[2] / 10), 100 * std::pow (10.0, m3At48[3] / 10), m3At48[1],
-               m3At48[2], m3At48[3], worst));
+               m3At48[2], m3At48[3], worst, worstBetween));
 
     // The measure itself: the band-limited Saw source reads very low, a naive (aliased) saw high.
     const double source = offLinesDb (saw.left, saw.sampleRate, signals::midiHz (60), 0, 16);
@@ -432,8 +463,8 @@ SL_TEST ("engine", fastReadsSweeps)
 SL_TEST ("engine", fastReadsLevelsMatchTheSound)
 {
     section ("octave levels: 3 levels of ceil (n / 2^L) frames in the sound's own format, 7/8 of its bytes; level L read at the sound's frame x "
-             "is the sound at x (a 500 Hz and a 700 Hz tone within 2e-3 at 1000 places, one level frame off far from it); flat to a fifth of the "
-             "rate, 60 dB down from a quarter; a short sound gets fewer; a stop ends the build with none");
+             "is the sound at x (a 500 Hz and a 700 Hz tone within 2e-3 at 1000 places, one level frame off far from it); flat to 0.15 of the "
+             "rate, 60 dB down from 0.2 (0.4 of the level's own rate, fix pass F1); a short sound gets fewer; a stop ends the build with none");
 
     const double sr = 48000;
     const auto n = static_cast<std::int64_t> (2 * sr) + 7;   // an odd length: each level keeps the last frame
@@ -504,7 +535,8 @@ SL_TEST ("engine", fastReadsLevelsMatchTheSound)
                 "under 2e-3; a level-3 read one level frame off is up to %.3f away (the control, > 0.1)",
                 worst[0], worst[1], worst[2], worst16[0], worst16[1], worst16[2], offFrame));
 
-    // The filter's bands, on level 1: a tone at 0.15 of the rate keeps its level, one at 0.27 is 60 dB down.
+    // The filter's bands, on level 1: a tone at 0.15 of the rate keeps its level, one at 0.21 is 60 dB down (fix pass F1:
+    // 0.42 of the level's own rate, which a read at 1.25x would fold; the filter before the fix passed it at -0.6 dB).
     auto levelOneGain = [] (double fraction)
     {
         std::vector<float> x (48000);
@@ -519,9 +551,9 @@ SL_TEST ("engine", fastReadsLevelsMatchTheSound)
             a += static_cast<double> (q.L[j]) * q.L[j];
         return std::sqrt (a / static_cast<double> (count)) / (0.5 / std::sqrt (2.0));
     };
-    const double pass = levelOneGain (0.15), stop = levelOneGain (0.27);
+    const double pass = levelOneGain (0.15), stop = levelOneGain (0.21);
     check (std::abs (20 * std::log10 (pass)) < 0.05 && 20 * std::log10 (stop) < -55,
-           fmt ("level 1 keeps a tone at 0.15 of the rate (%.3f dB) and takes out one at 0.27 (%.1f dB, under -55)", 20 * std::log10 (pass),
+           fmt ("level 1 keeps a tone at 0.15 of the rate (%.3f dB) and takes out one at 0.21 (%.1f dB, under -55)", 20 * std::log10 (pass),
                 20 * std::log10 (stop)));
 
     // A short sound gets fewer levels (each keeps at least 8 frames); one of 15 frames none.
