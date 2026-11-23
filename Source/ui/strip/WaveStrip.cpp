@@ -134,9 +134,21 @@ namespace sl::ui
         return windowHeight > 820 ? 124 : windowHeight > 720 ? 112 : 104;
     }
 
-    int WaveStrip::preferredHeight (int windowHeight) const noexcept
+    int WaveStrip::preferredHeight (int windowHeight, int stripWidth) const noexcept
     {
-        return heightFor (windowHeight) + (chipRow ? chipRowHeight : 0);
+        return heightFor (windowHeight) + chipRowsFor (stripWidth) * chipRowHeight;
+    }
+
+    int WaveStrip::chipRowsAt (int stripWidth) const noexcept
+    {
+        // the chips' own row is the strip less its sound column, 8 px either side (resized)
+        static_assert (chipRowHeight == PartChips::chipHeight + PartChips::rowGap, "a chip row is a chip and the gap under it");
+        return juce::jmax (1, chips.rowsFor (stripWidth - columnWidth - 16));
+    }
+
+    int WaveStrip::chipRowsFor (int stripWidth) const noexcept
+    {
+        return chipRow ? chipRowsAt (stripWidth) : 0;
     }
 
     void WaveStrip::showPart (double partStart, double partEnd)
@@ -155,12 +167,15 @@ namespace sl::ui
 
     void WaveStrip::layoutChips()
     {
-        // A file's suggestions and part chips get a row of their own under the file line; a starter's one "Parts"
-        // chip sits beside it (the prototype's stripSugs follow the file line when there is room).
+        // A file's suggestions and part chips get a row of their own under the file line, more rows when they do not fit
+        // on one (fix pass UI7-1); a starter's one "Parts" chip sits beside it (the prototype's stripSugs follow the file
+        // line when there is room).
         const bool want = sound != nullptr && ! sound->builtIn && chips.preferredWidth() > 0;
-        if (want != chipRow)
+        const int rows = want ? chipRowsAt (getWidth()) : 0;
+        if (want != chipRow || rows != chipRowCount)
         {
             chipRow = want;
+            chipRowCount = rows;
             if (onLayoutChange)
                 onLayoutChange();
         }
@@ -622,10 +637,12 @@ namespace sl::ui
         const int aw = atEnd->preferredWidth();
         atEnd->setBounds (head.removeFromRight (aw).withSizeKeepingCentre (aw, 22));
 
-        // M7: a file's chips on their own row; a starter's beside the file line, right after its text when there is room.
+        // M7: a file's chips on their own rows (as many as they need at this width, fix pass UI7-1); a starter's beside the
+        // file line, right after its text when there is room.
         if (chipRow)
         {
-            chips.setBounds (r.removeFromTop (chipRowHeight).reduced (8, 2));
+            chipRowCount = chipRowsAt (getWidth());
+            chips.setBounds (r.removeFromTop (chipRowCount * chipRowHeight).reduced (8, 2));
         }
         else
         {

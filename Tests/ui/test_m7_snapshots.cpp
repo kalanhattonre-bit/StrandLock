@@ -117,9 +117,23 @@ namespace
                     if (parts.size() > 1)
                         strip.getChips().showHover (parts[1]);
                     editor.refreshNow();
-                    const auto texts = strip.getChips().texts();
-                    out.shows = strip.hasChipRow() && texts.size() >= 4 && strip.getChips().hoveredPart().has_value();
-                    out.what = fmt ("chips: %s; one hovered", texts.joinIntoString (" | ").toRawUTF8());
+                    // Fix pass UI7-1 and T7-1: every part's chip on screen (made, visible, inside the chips' rows), not only
+                    // in the list of texts; before the fix the last one did not fit the one row and was hidden.
+                    const auto& chips = strip.getChips();
+                    juce::StringArray hidden;
+                    for (const auto& part : parts)
+                    {
+                        const auto label = juce::String::fromUTF8 (part.label.c_str());
+                        const auto* b = chips.chip (label);
+                        const bool shown = b != nullptr && b->isVisible() && b->getX() >= 0 && b->getY() >= 0 && b->getRight() <= chips.getWidth()
+                                        && b->getBottom() <= chips.getHeight();
+                        if (! shown)
+                            hidden.add (label);
+                    }
+                    const auto texts = chips.texts();
+                    out.shows = strip.hasChipRow() && texts.size() >= 4 && chips.hoveredPart().has_value() && parts.size() >= 4 && hidden.isEmpty();
+                    out.what = fmt ("chips: %s; one hovered; %d row(s), %s", texts.joinIntoString (" | ").toRawUTF8(), strip.chipRowsFor (strip.getWidth()),
+                                    hidden.isEmpty() ? "every part's chip on screen" : ("NOT on screen: " + hidden.joinIntoString (" | ")).toRawUTF8());
                     break;
                 }
                 case Subject::suggestions:
@@ -177,16 +191,18 @@ SL_TEST ("ui", m7Pictures)
 
     for (const auto subject : { Subject::chips, Subject::suggestions, Subject::picker, Subject::soundTab })
         for (const auto theme : { ThemeId::dark, ThemeId::light })
-        {
-            const int scale = 100;
-            const auto pic = shootM7 (subject, theme, scale);
-            const bool dark = theme == ThemeId::dark;
-            const double lum = pic.image.isValid() ? meanLuminance (pic.image) : -1.0;
-            const bool size = pic.image.getWidth() == pic.logicalWidth * scale / 100 && pic.image.getHeight() == pic.logicalHeight * scale / 100;
-            check (size && (dark ? lum < 0.25 : lum > 0.75) && pic.shows,
-                   fmt ("%s, %s: %d x %d px, mean luminance %.3f, %s", nameOf (subject), dark ? "dark" : "light", pic.image.getWidth(), pic.image.getHeight(),
-                        lum, pic.what.c_str()));
-        }
+            for (const int scale : { 100, 200 })
+            {
+                if (scale == 200 && (subject != Subject::chips || theme != ThemeId::dark))
+                    continue;   // the chips at 200 % too (fix pass T7-1), as the m7_chips_dark_200 picture
+                const auto pic = shootM7 (subject, theme, scale);
+                const bool dark = theme == ThemeId::dark;
+                const double lum = pic.image.isValid() ? meanLuminance (pic.image) : -1.0;
+                const bool size = pic.image.getWidth() == pic.logicalWidth * scale / 100 && pic.image.getHeight() == pic.logicalHeight * scale / 100;
+                check (size && (dark ? lum < 0.25 : lum > 0.75) && pic.shows,
+                       fmt ("%s, %s, %d %%: %d x %d px, mean luminance %.3f, %s", nameOf (subject), dark ? "dark" : "light", scale, pic.image.getWidth(),
+                            pic.image.getHeight(), lum, pic.what.c_str()));
+            }
 }
 
 SL_SNAPSHOT (m7_chips_dark_100)        { return shootM7 (Subject::chips, ThemeId::dark, 100).image; }

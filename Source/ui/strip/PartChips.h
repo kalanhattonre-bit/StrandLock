@@ -38,7 +38,12 @@ namespace sl::ui
 
         /** The width the chips take in one row (gaps included); 0 with none. */
         int preferredWidth() const;
-        static constexpr int chipHeight = 22, gap = 4;
+
+        /** The rows the chips take at this width, each filled left to right in order (a chip wider than the row has one of its
+            own); 0 with none. Fix pass UI7-1: a chip that did not fit was hidden, and a song's last part chip with it. */
+        int rowsFor (int width) const;
+
+        static constexpr int chipHeight = 22, gap = 4, rowGap = 4;
 
         /** The part the mouse is over (the strip draws its box), if any. */
         std::optional<sl::analysis::Part> hoveredPart() const { return hovered; }

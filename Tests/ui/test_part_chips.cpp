@@ -36,11 +36,20 @@ namespace
         return std::memcmp (&r.first, &a, sizeof (double)) == 0 && std::memcmp (&r.second, &b, sizeof (double)) == 0;
     }
 
-    /** Clicks the chip showing text (its onClick, at once); false when no chip shows it. */
+    /** The chip showing text is on screen: made, visible, and inside the chips' own area (fix pass T7-1: a chip that did
+        not fit the row used to be made and hidden, and the tests that read the chips' texts could not see it). */
+    bool onScreen (const ui::PartChips& chips, const juce::String& text)
+    {
+        const auto* b = chips.chip (text);
+        return b != nullptr && b->isVisible() && chips.isVisible() && chips.getWidth() > 0 && b->getX() >= 0 && b->getY() >= 0
+            && b->getRight() <= chips.getWidth() && b->getBottom() <= chips.getHeight();
+    }
+
+    /** Clicks the chip showing text (its onClick, at once), as the mouse can: only one on screen. False when none is. */
     bool click (ui::PartChips& chips, const juce::String& text)
     {
         auto* b = chips.chip (text);
-        if (b == nullptr || ! b->onClick)
+        if (b == nullptr || ! b->onClick || ! onScreen (chips, text))
             return false;
         b->onClick();
         return true;
@@ -83,14 +92,25 @@ SL_TEST ("ui", partChipsSetTheRegion)
            fmt ("U2: the song opens on the suggested part \"%s\" (%.4f .. %.4f), inside the one undo step \"%s\"", chosen.has_value() ? chosen->label.c_str() : "",
                 r0.first, r0.second, p.undoLabel().value_or ("").c_str()));
 
-    // The chips: the suggestion line first, then Use the whole file and one chip per part, on a row of their own.
+    // The chips: the suggestion line first, then Use the whole file and one chip per part, on rows of their own. Every
+    // part's chip is on screen in the default 1100 x 680 window (fix pass UI7-1 and T7-1: the last one, the loop with its
+    // tempo, was made but hidden for want of room on one row).
     auto& chips = strip.getChips();
     const auto texts = chips.texts();
     bool allParts = true;
+    juce::StringArray hidden;
     for (const auto& q : parts)
-        allParts = allParts && texts.contains (juce::String::fromUTF8 (q.label.c_str()));
+    {
+        const auto label = juce::String::fromUTF8 (q.label.c_str());
+        allParts = allParts && texts.contains (label);
+        if (! onScreen (chips, label))
+            hidden.add (label);
+    }
     check (strip.hasChipRow() && texts.contains ("Use the whole file") && allParts,
-           fmt ("the chips (on their own row): %s", texts.joinIntoString (" | ").toRawUTF8()));
+           fmt ("the chips (on their own rows): %s", texts.joinIntoString (" | ").toRawUTF8()));
+    check (hidden.isEmpty() && onScreen (chips, "Use the whole file") && editor.getWidth() >= 1100 && strip.chipRowsFor (strip.getWidth()) >= 1,
+           fmt ("every part chip is on screen in a %d x %d window, on %d row(s) of chips%s%s", editor.getWidth(), editor.getHeight(),
+                strip.chipRowsFor (strip.getWidth()), hidden.isEmpty() ? "" : "; NOT on screen: ", hidden.joinIntoString (" | ").toRawUTF8()));
     auto* lit = chips.chip (juce::String::fromUTF8 (chosen->label.c_str()));
     check (lit != nullptr && lit->getToggleState(), "the chip of the part that is the Region is lit");
 
@@ -105,14 +125,16 @@ SL_TEST ("ui", partChipsSetTheRegion)
     check (chips.chip (juce::String::fromUTF8 (other.label.c_str())) != nullptr && chips.chip (juce::String::fromUTF8 (other.label.c_str()))->getToggleState(),
            "and its chip is lit now");
 
-    // The new Region gets a root suggestion when it has a pitch (sl-ui.js suggestRoot), after its moment.
+    // The new Region gets a root suggestion when it has a pitch (sl-ui.js suggestRoot), after its moment. The Big hit has
+    // one (fix pass T7-2: the check passed with no suggestion at all, so a Region that never asked would have passed too).
     p.waitForAnalysis (30000);
     editor.refreshNow();
     const auto& sug = p.getSuggestions();
     note (fmt ("after the part chip: %s", sug.root.has_value() ? fmt ("a root suggestion MIDI %d %+d cents for %.4f .. %.4f", sug.root->root, sug.root->cents,
                                                                            sug.root->regionStart, sug.root->regionEnd).c_str()
                                                                : "no root suggestion (the part has no single pitch)"));
-    check (! sug.root.has_value() || p.showsRootSuggestion(), "a root suggestion shows only for the Region it was heard in");
+    check (other.kind == analysis::PartKind::hit && sug.root.has_value() && p.showsRootSuggestion(),
+           fmt ("the Region on \"%s\" (a hit, which has a pitch) gets a root suggestion, shown for that Region", other.label.c_str()));
 
     // Use the whole file: one undo step; then Undo goes back to the part.
     const auto steps2 = p.historySize();
@@ -123,6 +145,22 @@ SL_TEST ("ui", partChipsSetTheRegion)
     p.undo();
     editor.refreshNow();
     check (isRegion (p.currentRegion(), other.start, other.end), "Undo puts the part back");
+
+    // A root suggestion belongs to the Region it was heard in (fix pass T7-2): back on the hit it comes again, and another
+    // part's chip hides it at once, before anything is heard in the new Region.
+    p.waitForAnalysis (30000);
+    editor.refreshNow();
+    const bool again = p.getSuggestions().root.has_value() && p.showsRootSuggestion();
+    const auto elsewhere = parts[0].label == other.label ? parts[1] : parts[0];
+    const bool movedAway = click (chips, juce::String::fromUTF8 (elsewhere.label.c_str()));
+    editor.refreshNow();
+    bool rootChip = false;
+    for (const auto& t : chips.texts())
+        rootChip = rootChip || (t.startsWith ("Use ") && t.endsWith (" as the root"));
+    check (again && movedAway && isRegion (p.currentRegion(), elsewhere.start, elsewhere.end) && ! p.showsRootSuggestion()
+               && ! p.getSuggestions().root.has_value() && ! rootChip,
+           fmt ("the hit's suggestion shows again on the hit (%s); a click on \"%s\" moves the Region and hides it (and its chip) at once",
+                again ? "yes" : "NO", elsewhere.label.c_str()));
 
     // A chip's hover draws its box on the waveform and says what it is.
     chips.showHover (other);

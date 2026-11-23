@@ -106,6 +106,24 @@ namespace sl::ui
         return w;
     }
 
+    int PartChips::rowsFor (int width) const
+    {
+        // the same greedy rows resized () lays out
+        if (chips.empty())
+            return 0;
+        int rows = 1, x = 0;
+        for (const auto& c : chips)
+        {
+            if (x > 0 && x + c->width > width)
+            {
+                ++rows;
+                x = 0;
+            }
+            x += c->width + gap;
+        }
+        return rows;
+    }
+
     bool PartChips::refresh()
     {
         // renderChips' chipKey: the sound and its parts, the Region, which suggestions show, the engine and At the end.
@@ -257,13 +275,24 @@ namespace sl::ui
 
     void PartChips::resized()
     {
-        int x = 0;
-        const int y = juce::jmax (0, (getHeight() - chipHeight) / 2);
+        // One row, centred in the height, when they fit; else the rows rowsFor counts, each filled left to right in order,
+        // as the prototype's strip wraps its chips (fix pass UI7-1: a chip that did not fit was hidden). The strip gives a
+        // file's chips the height of all their rows, so every chip shows; one wider than the whole row is cut to it. Beside
+        // the file line (a starter's one row) a chip that would need a second row stays hidden.
+        const int width = getWidth();
+        const int rows = rowsFor (width);
+        const int top = rows <= 1 ? juce::jmax (0, (getHeight() - chipHeight) / 2) : 0;
+        int x = 0, row = 0;
         for (auto& c : chips)
         {
-            const bool fits = x + c->width <= getWidth();
-            c->button->setVisible (fits);
-            c->button->setBounds (x, y, c->width, chipHeight);
+            if (x > 0 && x + c->width > width)
+            {
+                ++row;
+                x = 0;
+            }
+            const int y = top + row * (chipHeight + rowGap);
+            c->button->setVisible (y + chipHeight <= getHeight());
+            c->button->setBounds (x, y, juce::jlimit (0, juce::jmax (0, width), c->width), chipHeight);
             x += c->width + gap;
         }
     }

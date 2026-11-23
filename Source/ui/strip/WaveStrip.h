@@ -52,12 +52,16 @@ namespace sl::ui
             part picker. */
         void refresh();
 
-        /** The strip's height for this window: heightFor's, plus a row for a file's suggestions and part chips when
-            it has any (M7). */
-        int preferredHeight (int windowHeight) const noexcept;
+        /** The strip's height for this window, the strip stripWidth wide: heightFor's, plus the rows a file's suggestions
+            and part chips take when it has any (M7; more than one when they do not fit on one, fix pass UI7-1). */
+        int preferredHeight (int windowHeight, int stripWidth) const noexcept;
         bool hasChipRow() const noexcept { return chipRow; }
 
-        /** Called when preferredHeight changed (the chips' row came or went): MainView lays the page out again. */
+        /** The rows a file's chips take on a strip this wide: 0 without a row of their own (fix pass UI7-1). */
+        int chipRowsFor (int stripWidth) const noexcept;
+
+        /** Called when preferredHeight changed (the chips' rows came, went or changed in number): MainView lays the page
+            out again. */
         std::function<void()> onLayoutChange;
 
         /** The hint line while a part chip is hovered ("" = back to the mode's hint). */
@@ -172,6 +176,7 @@ namespace sl::ui
         bool updateStarts();
         juce::String headerExtra() const;   // M7: the loaded part and what listening found
         void layoutChips();
+        int chipRowsAt (int stripWidth) const noexcept;   // the rows the chips take at this width (at least 1)
 
         const Theme& theme;
         StrandLockProcessor& processor;
@@ -220,6 +225,7 @@ namespace sl::ui
         PartChips chips;
         PartPicker picker;
         bool chipRow = false;
+        int chipRowCount = 0;              // the rows the chips took at the last layout (fix pass UI7-1)
         std::uint64_t pickerOffered = 0;   // the user load the picker opened for by itself
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (WaveStrip)

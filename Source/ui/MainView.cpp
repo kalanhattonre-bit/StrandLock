@@ -1099,7 +1099,7 @@ namespace sl::ui
         // the pane keeps a scrolling row when a tab is open. A new width can change the drawer's height: it takes it now
         // unless the roll holds the bar's room still.
         {
-            const int below = kTabsHeight + kHintHeight + strip.preferredHeight (getHeight());
+            const int below = kTabsHeight + kHintHeight + strip.preferredHeight (getHeight(), area.getWidth());
             const bool paneOpen = ! folded && openTabIndex != diagTab;
             const int rollMin = juce::jlimit (140, 400, juce::roundToInt ((double) getHeight() * 0.26));
             const int room = area.getHeight() - kSelRowHeight - kInspectorRowHeight - roll::SelectionBar::lineHeight - 4 - below
@@ -1114,7 +1114,7 @@ namespace sl::ui
         // controls above the roll's floor, or the tabs fold while the window is too short for that (the person's fold
         // stays as it is); with the tabs folded and a drawer open, a window too short for the roll's floor gives the
         // inspector's line to the roll.
-        const int stripHeight = strip.preferredHeight (getHeight());   // M7: a file's chips add a row
+        const int stripHeight = strip.preferredHeight (getHeight(), area.getWidth());   // M7: a file's chips add their rows
         const bool diag = openTabIndex == diagTab && ! folded;
         const int shared = area.getHeight() - kSelRowHeight - barHeight - kInspectorRowHeight - kTabsHeight - kHintHeight - stripHeight;
         int paneHeight = 0;
