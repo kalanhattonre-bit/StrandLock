@@ -234,11 +234,15 @@ namespace sl::state
         std::vector<Slot> slots;
         bool wholeBlob = false;
         Bytes blob;
-        Payloads contentAtLoad;   // whole blob: this version's payloads right after the load, UIST left out
+        Payloads contentAtLoad;   // whole blob: this version's payloads right after the load, UIST and SAUD left out
 
         static Bytes standardContainer (const Payloads& now);
 
-        /** Whether a chunk holds the project's content (PARM, INST, CLIP, SMPL; later SAUD), not UIST. */
+        /** Whether a chunk holds what the person edits (PARM, INST, CLIP, SMPL): not UIST (the window's own state), and not
+            SAUD, which the worker makes for the sound by itself (an excerpt following the Region, a file's bytes read
+            again). Every change of what SAUD keeps that the person makes (the sound, the Region, the switch, the answer)
+            changes one of the others, so a SAUD that arrives by itself never replaces a blob kept whole (fix pass
+            M7R-SST-6). */
         static bool isProjectContent (std::uint32_t tag) noexcept;
 
         /** Whole blob: every content payload of now equals the one right after the load. */

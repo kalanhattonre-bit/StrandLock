@@ -417,7 +417,7 @@ namespace sl::state
 
     bool KeptLayout::isProjectContent (std::uint32_t tag) noexcept
     {
-        return tag != kTagUist;
+        return tag != kTagUist && tag != kTagSaud;   // fix pass M7R-SST-6: see the header
     }
 
     KeptLayout KeptLayout::unreadable (const void* data, std::size_t size, const Payloads& atLoad)
