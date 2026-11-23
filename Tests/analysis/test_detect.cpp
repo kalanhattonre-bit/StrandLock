@@ -42,8 +42,9 @@ namespace
     using namespace sl::test;
     using core::JsonValue;
 
-    /** analysis/detect.json's cases: 28, and 6 appended in M7 V1 (other sample rates and the 5-minute song). */
-    constexpr std::size_t kDetectCases = 34;
+    /** analysis/detect.json's cases: 28, 6 appended in M7 V1 (other sample rates and the 5-minute song) and 6 in the M7
+        fix pass (F3: detectPitch's half rule found and not, a file under 1.2 s, A3 at 8 and 11.025 kHz, the rotated hit). */
+    constexpr std::size_t kDetectCases = 40;
 
     struct Audio
     {
@@ -232,9 +233,21 @@ namespace
         return true;
     }
 
-    /** A fixture input: {starter, seed?} | {signal, args} | {silence: seconds, sampleRate} | {concat: [...]} | {song}. */
+    /** A fixture input: {starter, seed?} | {signal, args} | {silence: seconds, sampleRate} | {concat: [...]} | {song}
+        | {gain, frames, of} (the M7 fix pass: the first frames of every channel times gain, as a Float32Array's *=). */
     bool inputAudio (const JsonValue& inp, Audio& out, std::string& why)
     {
+        if (const JsonValue* gain = inp.find ("gain"); gain != nullptr)
+        {
+            if (! inputAudio (inp["of"], out, why))
+                return false;
+            const double g = gain->asNumber();
+            const auto frames = static_cast<std::size_t> (std::max (0.0, inp["frames"].asNumber()));
+            for (auto& c : out.channels)
+                for (std::size_t i = 0; i < std::min (frames, c.size()); ++i)
+                    c[i] = static_cast<float> (static_cast<double> (c[i]) * g);   // x *= g on a Float32Array: in double, stored as float
+            return true;
+        }
         if (const JsonValue* s = inp.find ("starter"); s != nullptr)
         {
             const auto id = sounds::parseStarter (s->asString());
@@ -890,6 +903,11 @@ SL_TEST ("analysis", analysisPieces)
         { "every 37, a smaller one half-way", 3000, 37, 18, 20, 8, 139.67, true },
         { "every 61, a smaller one half-way", 4000, 61, 30, 15, 9, 84.72, true },
         { "5 spikes (fewer than 8 strong onsets)", 500, 100, 0, 20, 0, 120, false },
+        // the M7 fix pass (F3): the branches the four above never reach, each confirmed in node on an instrumented copy of
+        // sl-analysis.js
+        { "29 frames, a spike every 3 (no lags between the slowest and the fastest tempo)", 29, 3, 0, 20, 0, 120, false },
+        { "a spike every 87 frames (59.4 bpm, folded up an octave)", 2000, 87, 0, 20, 0, 119, true },
+        { "a spike every 88 frames (past the slowest lag: only a weak peak)", 2000, 88, 0, 20, 0, 120, false },
     };
     const double tf = 128.0 / 11025;
     for (const Curve& cv : curves)
@@ -906,4 +924,10 @@ SL_TEST ("analysis", analysisPieces)
     }
     const analysis::Tempo flat = analysis::estimateTempo (std::vector<double> (1000, 3.0), tf);
     check (fixture::same (flat.bpm, 120.0) && ! flat.found, "estimateTempo on a flat curve: 120, not found");
+    // the M7 fix pass (F3): a rising ramp has no peak at any lag (the prototype: 120, not found)
+    std::vector<double> ramp (1000, 0.0);
+    for (std::size_t i = 0; i < ramp.size(); ++i)
+        ramp[i] = 20.0 * static_cast<double> (i) / 1000.0;
+    const analysis::Tempo rising = analysis::estimateTempo (ramp, tf);
+    check (fixture::same (rising.bpm, 120.0) && ! rising.found, fmt ("estimateTempo on a rising ramp (no peak): %g%s", rising.bpm, rising.found ? "" : ", not found"));
 }
