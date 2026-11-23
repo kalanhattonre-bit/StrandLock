@@ -213,11 +213,40 @@ SL_TEST ("engine", fastReadsAliasing)
 }
 
 //==================================================================================================
+namespace
+{
+    /** Fix pass F2 (and T7-3): the renders.json cases that read an octave level, and how often from each (Stats::levelUses:
+        Tape and Lock head runs, Voice and Cloud grains), as runs 44980720214 and 44983293729 printed them on Windows, on
+        Linux and under the sanitizers. Every other case reads none. Pinned, so a level chosen for a read at or below 1.25x
+        (a case that should read none, or more reads in one of these) fails instead of moving out of the bit-for-bit check. */
+    struct LevelCase
+    {
+        const char* name;
+        std::int64_t uses[engine::kMaxOctaveLevels];
+    };
+
+    constexpr LevelCase kLevelCases[] = {
+        { "tape-forward-c5", { 0, 1500, 0 } },
+        { "tape-chain-c3-g3-legato", { 1619, 0, 0 } },
+        { "chase-inside-chain", { 840, 0, 0 } },
+        { "loop-3-passes-133bpm", { 6636, 0, 0 } },
+        { "live-bend-range-7", { 564, 0, 0 } },
+        { "live-poly4-6-keys", { 4072, 0, 0 } },
+        { "voice-formant-up6", { 263, 0, 0 } },
+        { "cloud-tape-switch-2x", { 24, 0, 0 } },
+        { "tape-head-tune-octaves", { 1500, 1500, 0 } },
+        { "strand-demo-2s", { 6, 0, 0 } },
+        { "strand-demo-recipe-6", { 51, 0, 0 } },
+        { "inst-change-macros", { 2997, 0, 0 } },
+        { "raw-snapshot", { 200, 298, 171 } },
+    };
+}
+
 SL_TEST ("engine", fastReadsParity)
 {
     section ("fast reads (9.6): every engine/renders.json case with its sound's octave levels: switched off, bit for bit with no levels at all "
              "(M3's render, which the fixture tests compare with the prototype); switched on, every case that reads at or below 1.25x bit for "
-             "bit with it too");
+             "bit with it too; which cases read a level, and how often from each, as pinned (fix pass F2)");
 
     JsonValue doc;
     if (! fixture::load ("engine/renders.json", doc))
@@ -226,8 +255,8 @@ SL_TEST ("engine", fastReadsParity)
     if (! modelfx::clipsFrom (doc, clips))
         return;
     const JsonValue& cases = doc["cases"];
-    int rendered = 0, offSame = 0, onSame = 0, fastCases = 0, protoBits = 0, protoBitsM3 = 0;
-    std::vector<std::string> problems, fastNames;
+    int rendered = 0, offSame = 0, onSame = 0, fastCases = 0, protoBits = 0, protoBitsM3 = 0, pinnedSeen = 0;
+    std::vector<std::string> problems, fastNames, unpinned;
     render::FixtureOptions levelsOff, levelsOn;
     levelsOff.buildLevels = true;
     levelsOff.levelsOn = false;
@@ -253,6 +282,23 @@ SL_TEST ("engine", fastReadsParity)
         const std::string hash = k["out"]["hash"].asString();
         protoBits += signals::hex8 (rig::hashOf (off.L, off.R)) == hash ? 1 : 0;
         protoBitsM3 += signals::hex8 (rig::hashOf (m3.L, m3.R)) == hash ? 1 : 0;
+        // Fix pass F2: the level reads this case must make (none unless it is in the pinned table).
+        {
+            std::int64_t want[engine::kMaxOctaveLevels] = { 0, 0, 0 };
+            for (const auto& pinned : kLevelCases)
+                if (name == pinned.name)
+                {
+                    ++pinnedSeen;
+                    for (std::size_t L = 0; L < static_cast<std::size_t> (engine::kMaxOctaveLevels); ++L)
+                        want[L] = pinned.uses[L];
+                }
+            bool same = true;
+            for (std::size_t L = 0; L < static_cast<std::size_t> (engine::kMaxOctaveLevels); ++L)
+                same = same && on.last.levelUses[L] == want[L];
+            if (! same)
+                unpinned.push_back (name + " (" + usesText (on.last) + fmt (", pinned %lld / %lld / %lld)", (long long) want[0], (long long) want[1],
+                                                                            (long long) want[2]));
+        }
         if (on.last.levelReads == 0)
         {
             const bool same = sameBits (m3.L, on.L) && sameBits (m3.R, on.R) && m3.stats == on.stats;
@@ -279,12 +325,51 @@ SL_TEST ("engine", fastReadsParity)
     check (onSame == rendered - fastCases && fastCases > 0 && fastCases < rendered,
            fmt ("levels on: the %d cases that read at or below 1.25x are bit for bit with M3's render (%d); %d cases read a level", rendered - fastCases,
                 onSame, fastCases));
+    std::string wrongUses;
+    for (const auto& u : unpinned)
+        wrongUses += (wrongUses.empty() ? "" : ", ") + u;
+    const int pinnedCount = static_cast<int> (sizeof (kLevelCases) / sizeof (kLevelCases[0]));
+    check (unpinned.empty() && pinnedSeen == pinnedCount && fastCases == pinnedCount,
+           fmt ("fix pass F2: the level reads of every case as pinned: the %d pinned cases found (%d), %d cases read a level, the other %d none%s%s",
+                pinnedCount, pinnedSeen, fastCases, rendered - fastCases, wrongUses.empty() ? "" : "; NOT as pinned: ", wrongUses.c_str()));
     note (fmt ("bit for bit with the prototype's own hash: %d cases with the levels switched off, %d with no levels (the counts M3 printed: "
                "22 + 26 on Windows, 13 + 11 on Linux)", protoBits, protoBitsM3));
     std::string names;
     for (const auto& n : fastNames)
         names += (names.empty() ? "" : ", ") + n;
     note ("the cases that read a level (level reads 1 / 2 / 3): " + names);
+}
+
+//==================================================================================================
+SL_TEST ("engine", fastReadsLockLevel)
+{
+    section ("fast reads (fix pass F2): a Lock note's taps read at the rate ratio (the sound's rate over the session's), whatever the note: "
+             "in a 44.1 kHz session a 96 kHz sound reads level 1 (2.18x), a 44.1 kHz sound (1x) and a 48 kHz one (1.09x) read none");
+
+    const double sr = 44100;
+    struct Row
+    {
+        double soundRate;
+        int expect;
+    };
+    for (const Row row : { Row { 96000.0, 1 }, Row { 44100.0, 0 }, Row { 48000.0, 0 } })
+        for (const int key : { 36, 60, 84 })
+        {
+            auto sample = grains::mono (signals::tone (signals::midiHz (45), 1.0, row.soundRate), row.soundRate);
+            engine::addOctaveLevels (*sample);
+            core::Inst inst = grains::instWith (core::Engine::cloud);
+            inst.lock = true;
+            grains::Play play (sr, inst, std::move (sample));
+            play.e->noteOn (key, 1);
+            play.render (static_cast<std::int64_t> (0.5 * sr));
+            const engine::Stats st = play.e->stats();
+            const bool asRule = row.expect == 0 ? st.levelReads == 0
+                                                : st.levelReads > 0 && st.levelUses[static_cast<std::size_t> (row.expect - 1)] == st.levelReads;
+            const double rms = rmsOf (play.L);
+            check (asRule && rms > 0.01,
+                   fmt ("Lock, a %.1f kHz sound, key %d: its taps read at %.4fx, level %d (level reads 1 / 2 / 3: %s); rms %.3f", row.soundRate / 1000,
+                        key, row.soundRate / sr, row.expect, usesText (st).c_str(), rms));
+        }
 }
 
 //==================================================================================================
