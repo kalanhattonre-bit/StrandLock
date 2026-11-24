@@ -6,8 +6,8 @@
 // Rows:
 // - synced 1/8 at 120 bpm: the vibrato period is 0.25 s within 1 % (and 1/3 s at 90 bpm); a Free vibrato at 5.5 Hz
 //   measures 0.1818 s with the same measurement, so a sync that did nothing would fail;
-// - Free is bit for bit with M3: the render's hash equals the one the M7 build (whose vibrato is M3's) printed on this
-//   platform, and Free at 4 Hz is bit for bit synced 1/8 at 120 bpm (the same phase steps);
+// - Free is bit for bit with M3: the render's hash equals the one the M7 build (whose vibrato is M3's) printed, the same
+//   on Windows and Linux; and Free at 4 Hz is bit for bit synced 1/8 at 120 bpm (the same phase steps);
 // - a beatsPerBar change keeps a synced rate's period: "1 bar" at 120 bpm is 2 s in 4/4 and in 3/4, bit for bit;
 // - the host: a clip note while the host plays, a live key while it is stopped, and the Preview clock, all at 90 bpm
 //   through HostSync and MidiRouter as processBlock drives them; and the parameter reaches the engine (choice 0 is Free,
@@ -52,13 +52,10 @@ namespace
     constexpr double kSr = 48000.0;
     constexpr double kPi = 3.141592653589793;
 
-    // The hash of the Free render (freeScenario) that the M7 build printed on each platform, before any M8 change: the
-    // engine's vibrato there is M3's (M7 added octave levels, which this render never reads). Empty: not recorded yet.
-#if defined (_WIN32)
-    constexpr const char* kM3FreeHash = "";
-#else
-    constexpr const char* kM3FreeHash = "";
-#endif
+    // The hash of the Free render (freeScenario) that the M7 build printed before any M8 change (main 8fdd6e4 plus this
+    // test alone, run 45489545875): the engine's vibrato there is M3's (M7 added octave levels, which this render never
+    // reads). Windows, Linux and the Linux sanitizer build all printed 578be5fd.
+    constexpr const char* kM3FreeHash = "578be5fd";
 
     std::vector<float> sine (double hz, double secs)
     {
@@ -282,7 +279,7 @@ SL_TEST ("engine", vibSyncEighthAt120)
 
 SL_TEST ("engine", vibSyncFreeBitForBit)
 {
-    section ("Vibrato Sync: Free is bit for bit with M3 (the M7 build's hash on this platform), and Free at 4 Hz is synced 1/8 at 120 bpm");
+    section ("Vibrato Sync: Free is bit for bit with M3 (the M7 build's hash), and Free at 4 Hz is synced 1/8 at 120 bpm");
 
     const Output freeRender = freeScenario();
     const std::string hash = hashText (freeRender);
@@ -291,13 +288,12 @@ SL_TEST ("engine", vibSyncFreeBitForBit)
         rms += static_cast<double> (v) * v;
     rms = std::sqrt (rms / static_cast<double> (std::max<std::size_t> (1, freeRender.L.size())));
     const std::string recorded = kM3FreeHash;
-    note (fmt ("Free render (Tape, live C3, 0.5 st at 5.5 Hz, 1.5 s): hash %s, rms %.6f; the M7 build printed %s on this platform", hash.c_str(), rms,
-               recorded.empty() ? "(not recorded yet)" : recorded.c_str()));
+    note (fmt ("Free render (Tape, live C3, 0.5 st at 5.5 Hz, 1.5 s): hash %s, rms %.6f; the M7 build's %s", hash.c_str(), rms, recorded.c_str()));
     check (rms > 0.1, fmt ("the Free render sounds (rms %.4f)", rms));
-    if (! recorded.empty())
-        check (hash == recorded, fmt ("Free is bit for bit with M3: hash %s, the M7 build's %s", hash.c_str(), recorded.c_str()));
-    else
-        note ("the M3 hash is not recorded for this platform yet: printed only");
+    check (hash == recorded, fmt ("Free is bit for bit with M3: hash %s, the M7 build's %s", hash.c_str(), recorded.c_str()));
+    // A no-op is not a pass: a vibrato a tenth of a hertz faster is another hash.
+    const std::string nudged = hashText (liveKey (vibInst (core::kVibSyncFree, 5.6), 120.0, 1.5));
+    check (nudged != recorded, fmt ("negative control: Free at 5.6 Hz hashes %s, not the M3 render's", nudged.c_str()));
 
     // The same phase steps: (120 / 60) / 0.5 = 4 Hz exactly, so synced 1/8 at 120 bpm renders Free at 4 Hz bit for bit.
     const Output free4 = liveKey (vibInst (core::kVibSyncFree, 4.0), 120.0, 1.5);

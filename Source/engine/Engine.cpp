@@ -331,8 +331,12 @@ namespace sl::engine
         const double beat = fin (t.beat, std::numeric_limits<double>::quiet_NaN());
         const bool hasBeat = beat == beat;
         const double Lb = C.Lb;
-        // 8.2 #4: a negative beat is never wrapped into the clip (JS: loop ? floor-wrap : max (0, b))
-        auto wrap = [loop, Lb] (double x) { return x < 0 || ! loop ? x : x - Lb * std::floor (x / Lb); };
+        // 8.2 #4: a negative beat is never wrapped into the clip (JS: loop ? floor-wrap : max (0, b)).
+        // F3 (M8): with the tie on the clock keeps the song's own beat, so the loop passes count from bar 1 and a note
+        // held over the loop end from the pass before a Play or a jump is chased there. The clip's beat, the starts and
+        // the sound are the same either way (every rule compares beats modulo the clip); only the pass numbers differ.
+        const bool tie = C.tie;
+        auto wrap = [loop, Lb, tie] (double x) { return x < 0 || ! loop || tie ? x : x - Lb * std::floor (x / Lb); };
         const double rate = sr;
         auto setTempo = [&C, bpm, loop, rate] {
             C.bpm = bpm;
