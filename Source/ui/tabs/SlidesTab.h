@@ -12,6 +12,11 @@
 // sets every selected note's while it moves (shown and played, no undo step) and is one undo step "Slide time (notes)"
 // when let go; Auto puts them back on Slide time, Jump, no slide makes them jump. These go through the selection bar's
 // SelectionTools, as every tool does (7.7 decision 1). Message thread only.
+//
+// M8 W1 (F3, PLUGIN-PLAN 7.10 decision 7): "Hold over the loop end", the clip's tieAcrossLoop. On (every new clip): a note
+// that crosses the end of the clip carries on into the next time round, and the last note can slide into the first.
+// Off: every note stops at the end of the clip, as in the prototype. The plugin has no Bars or Loop control yet, so the
+// switch sits here, with the settings for how notes join. A click is one undo step ("Hold over the loop end on" or "off").
 
 #include "TabPanel.h"
 
@@ -65,7 +70,8 @@ namespace sl::ui
     public:
         SlidesTab (const Theme&, juce::AudioProcessorValueTreeState&, roll::RollView&, StrandLockProcessor&);
 
-        /** Shows the primary note's slide (MainView: after every roll event and on the editor's timer). */
+        /** Shows the primary note's slide and the clip's Hold over the loop end (MainView: after every roll event and on
+            the editor's timer). */
         void sync();
 
         // For the tests.
@@ -74,12 +80,14 @@ namespace sl::ui
         roll::ToolSlider& getNotesSlider() noexcept { return *notesSlider; }
         FlatButton& getAutoButton() noexcept { return *autoButton; }
         FlatButton& getJumpButton() noexcept { return *jumpButton; }
+        FlatButton& getHoldButton() noexcept { return *holdButton; }   // M8 W1: the clip's tieAcrossLoop
 
         /** The slider's text: an em dash with no note selected, "auto", "jump", or "0.5 beats" (sl-ui.js gSelV). */
         juce::String notesText() const;
 
     private:
         void edited();
+        void toggleHold();
 
         roll::RollView& roll;
         StrandLockProcessor& processor;
@@ -88,6 +96,7 @@ namespace sl::ui
         roll::ToolSlider* notesSlider = nullptr;
         FlatButton* autoButton = nullptr;
         FlatButton* jumpButton = nullptr;
+        FlatButton* holdButton = nullptr;
         juce::String shownText;
     };
 }

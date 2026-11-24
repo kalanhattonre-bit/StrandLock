@@ -821,8 +821,8 @@ namespace sl::ui
         roll.refresh();
         syncRollControls();
         strip.refresh();
-        if (soundPanel != nullptr)
-            soundPanel->refresh();   // M7: the Key, Scale and Scale lock follow the INST state
+        if (soundPanel != nullptr)   // M7: the Key, Scale and Scale lock follow the INST state; M8: the vibrato's sync and tempo
+            soundPanel->refresh (s.hasBpm ? s.bpm : 120.0);   // HostSync plays 120 bpm when the host gives no tempo
 
         // Clear all lets go of its first click after 2.5 s
         if (clearArmedAt >= 0.0 && juce::Time::getMillisecondCounterHiRes() - clearArmedAt >= kClearArmMs)

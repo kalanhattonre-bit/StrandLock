@@ -189,6 +189,14 @@ namespace sl::core
     /** SLModel.defaultInst () (and the engine's identical copy), plus vibSync Free. */
     Inst defaultInst() noexcept;
 
+    /** The vibrato's rate in Hz (Vibrato Sync, 8.2 #12): Free plays vibRate (the prototype); a rate plays
+        (bpm / 60) / rateBeats at the tempo the clock runs at, rates in quarter-note beats whatever the clip's
+        beatsPerBar. The engine's tick and the roll's drawing both use this one formula. */
+    inline double vibratoHz (const Inst& inst, double bpm) noexcept
+    {
+        return inst.vibSync == kVibSyncFree ? inst.vibRate : (bpm / 60) / rateBeats (static_cast<RateId> (inst.vibSync));
+    }
+
     /** The engine's own clamps (sl-engine.js normInst), kept apart from the model's normalizeInst: speed
         -16..16, grainLock 1..64, refresh.ms 5..10000, xfadeMs 0..1000, vibRate 0..50, outGain -60..24, and
         so on. A non-finite number takes its default, the Region edges are swapped when end < start,

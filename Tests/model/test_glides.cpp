@@ -73,6 +73,7 @@ SL_TEST ("model", glidesFixture)
             tally.fail (label + ": no clip " + name);
             continue;
         }
+        clip->tieAcrossLoop = false;   // the prototype's clips never tie across the loop (F3 off: the parity setting)
         ++perMode[c["inst"]["glideMode"].asString()];
 
         const core::Inst inst = core::instFromJson (c["inst"]);

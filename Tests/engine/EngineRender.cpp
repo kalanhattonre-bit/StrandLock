@@ -133,10 +133,15 @@ namespace sl::test::render
 
     std::unique_ptr<core::Snapshot> compile (model::Clip clip, int res)
     {
+        return compileTied (std::move (clip), false, res);
+    }
+
+    std::unique_ptr<core::Snapshot> compileTied (model::Clip clip, bool tieAcrossLoop, int res)
+    {
         clip.beatsPerBar = 4;
         clip.offsetBeats = 0;
         clip.loop = true;
-        clip.tieAcrossLoop = false;
+        clip.tieAcrossLoop = tieAcrossLoop;
         return model::compileSnapshot (clip, res);
     }
 
@@ -318,7 +323,7 @@ namespace sl::test::render
         std::optional<model::Clip> clipNow;
         auto setClip = [&] (const model::Clip& clip) {
             clipNow = clip;
-            snaps.push_back (compile (clip, res));
+            snaps.push_back (compileTied (clip, options.tieAcrossLoop, res));
             e->setSnapshot (snaps.back().get(), ++epoch);
         };
         if (c.contains ("clip"))
@@ -336,6 +341,7 @@ namespace sl::test::render
             auto raw = rawSnapshotFromJson (c["snapshot"], why);
             if (raw == nullptr)
                 return false;
+            raw->tieAcrossLoop = options.tieAcrossLoop;   // F3 (M8 W1): its notes hold on over the loop end when on
             snaps.push_back (std::move (raw));
             e->setSnapshot (snaps.back().get(), ++epoch);
         }

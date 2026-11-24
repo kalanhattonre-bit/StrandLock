@@ -131,6 +131,8 @@ namespace
             const auto r = model::applyRecipe (*clip, inst, static_cast<int> (c["recipe"].asNumber()), model::Ids::all());
             clip = r.has_value() ? std::optional<model::Clip> (r->clip) : std::nullopt;
         }
+        if (clip.has_value())
+            clip->tieAcrossLoop = false;   // the prototype's clips never tie across the loop (F3 off: the parity setting)
         return clip;
     }
 

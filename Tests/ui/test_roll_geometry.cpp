@@ -22,6 +22,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 namespace
 {
@@ -41,15 +42,21 @@ namespace
         {
             if (auto it = shared.find (name); it != shared.end())
                 return it->second;
+            // the prototype's clips never tie across the loop (F3 off: the parity setting), so the glides are its own
             model::ClipPtr c;
             if (name.rfind ("preset:", 0) == 0)
             {
                 if (auto p = model::loadClipPreset (name.substr (7)))
+                {
+                    p->tieAcrossLoop = false;
                     c = std::make_shared<const model::Clip> (*p);
+                }
             }
             else if (auto it2 = clips.find (name); it2 != clips.end())
             {
-                c = std::make_shared<const model::Clip> (it2->second);
+                model::Clip parity = it2->second;
+                parity.tieAcrossLoop = false;
+                c = std::make_shared<const model::Clip> (std::move (parity));
             }
             shared[name] = c;
             return c;

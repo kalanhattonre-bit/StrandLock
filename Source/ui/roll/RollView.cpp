@@ -706,7 +706,7 @@ namespace sl::ui::roll
         k.refreshMode = (int) state.inst.refresh.mode;
         k.glideMode = (int) state.inst.glideMode;
         k.glideTime = state.inst.glideTime;
-        k.vibRate = state.inst.vibRate;
+        k.vibRate = core::vibratoHz (state.inst, geo.getBpm());   // M8 W1: the rate the squiggle is drawn at
         k.bpm = geo.getBpm();
         k.bars = state.clip != nullptr ? state.clip->bars : 0;
         k.beatsPerBar = state.clip != nullptr ? state.clip->beatsPerBar : 0;

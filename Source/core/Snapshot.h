@@ -46,15 +46,22 @@ namespace sl::core
         double d = 0.0;               // semitones
         double curve = 0.0;
         std::int32_t toIndex = -1;    // the target note's index in Snapshot::notes
+        bool wraps = false;           // F3 (M8): the target plays in the next loop pass
     };
 
-    /** Where a note sits in its chain (one voice per chain) in one Auto Slide mode. -1 = none. */
+    /** Where a note sits in its chain (one voice per chain) in one Auto Slide mode. -1 = none.
+        F3 (M8): with Snapshot::tieAcrossLoop on a chain can go over the loop end. A next note that "wraps" plays in
+        the next loop pass, a previous note that wraps in the previous one; the engine follows such a step only while
+        the clip loops. A chain that goes round the clip for ever (a whole-loop note joined to its own next start) has
+        no first note: firstIndex is its earliest note, and its links close the loop. */
     struct ChainSnap
     {
         std::int32_t firstIndex = -1;   // the chain's first note (the JS chain.id), an index in Snapshot::notes
         std::int32_t index = 0;         // the note's place in the chain
         std::int32_t prevIndex = -1;
         std::int32_t nextIndex = -1;
+        bool prevWraps = false;
+        bool nextWraps = false;
     };
 
     /** Follow markers: -1 = follow the instrument. */

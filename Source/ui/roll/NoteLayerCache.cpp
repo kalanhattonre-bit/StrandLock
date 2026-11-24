@@ -32,7 +32,7 @@ namespace sl::ui::roll
             k.beatWidth = geo.beatWidth();
             k.rowHeight = geo.rowHeight();
             k.bpm = geo.getBpm();
-            k.vibRate = geo.getInst().vibRate;
+            k.vibRate = core::vibratoHz (geo.getInst(), geo.getBpm());   // M8 W1: the rate the squiggle is drawn at
             k.glideTime = geo.getInst().glideTime;
             k.glideMode = (int) geo.getInst().glideMode;
         }

@@ -140,9 +140,12 @@ namespace sl::engine
                 // control tick releases on the same tick in every loop pass, whatever the float rounding of the beat
                 if (kAbs >= C.kOf (Uend))
                 {
-                    const core::NoteSnap* nx = snapshotNote (snap, rn.chain.nextIndex);
-                    const double Un = nx != nullptr ? nx->s + static_cast<double> (m) * C.Lb : 0;
-                    if (nx != nullptr && nx->s > X.s && Un <= Uend + 4.5 && u < Un + 0.05)
+                    // F3 (M8): a next note that wraps starts in the next loop pass; that step is followed only while
+                    // the clip loops with tieAcrossLoop on (Clock::ties)
+                    const bool wraps = rn.chain.nextWraps;
+                    const core::NoteSnap* nx = wraps && ! C.ties() ? nullptr : snapshotNote (snap, rn.chain.nextIndex);
+                    const double Un = nx != nullptr ? nx->s + static_cast<double> (wraps ? m + 1 : m) * C.Lb : 0;
+                    if (nx != nullptr && (wraps || nx->s > X.s) && Un <= Uend + 4.5 && u < Un + 0.05)
                         bridging = true;
                     else
                         release();
@@ -223,8 +226,9 @@ namespace sl::engine
                     glide = rn.glideD * core::gShape ((tb - st0) / rn.glideLen, std::isnan (rn.glideCurve) ? 0 : rn.glideCurve);
             }
         }
-        // Vibrato Sync (8.2 #12): Free is the prototype's vibRate; a rate plays (bpm / 60) / rateBeats Hz
-        const double vibHz = I.vibSync == core::kVibSyncFree ? I.vibRate : (C.bpm / 60) / core::rateBeats (static_cast<core::RateId> (I.vibSync));
+        // Vibrato Sync (8.2 #12): Free is the prototype's vibRate; a rate plays (bpm / 60) / rateBeats Hz at the clock's
+        // tempo (the host's, or the Preview clock's: HostSync passes it either way)
+        const double vibHz = core::vibratoHz (I, C.bpm);
         vibPh += vibHz * kCtrl / sr;
         vibPh -= std::floor (vibPh);
         const double vib = lv[L_VIB] * std::sin (kTau * vibPh);

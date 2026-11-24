@@ -302,7 +302,11 @@ namespace sl::engine
     {
         const core::NoteSnap& X = snap->notes[static_cast<std::size_t> (e.index)];
         const core::ResolvedNote rn = core::resolve (X, smoother.current());
-        const std::int32_t pid = X.restart ? -1 : rn.chain.prevIndex;
+        // F3 (M8): a previous note that wraps played in the previous loop pass, and its voice is handed over only while
+        // the clip ties (Clock::ties); that voice then plays this pass
+        const bool prevWraps = rn.chain.prevWraps;
+        const std::int32_t pid = X.restart || (prevWraps && ! clock.ties()) ? -1 : rn.chain.prevIndex;
+        const std::int64_t prevPass = prevWraps ? e.m - 1 : e.m;
         auto playsNote = [this] (const Voice& v, std::int32_t index) {
             if (index < 0 || static_cast<std::size_t> (index) >= snap->notes.size())
                 return false;
@@ -320,7 +324,7 @@ namespace sl::engine
             for (int i = 0; i < numVoices; ++i)
             {
                 Voice& v = voiceAt (order[static_cast<std::size_t> (i)]);
-                if (v.kind != VoiceKind::clip || v.released || v.done || v.m != e.m)
+                if (v.kind != VoiceKind::clip || v.released || v.done || v.m != prevPass)
                     continue;
                 if (v.chasing)
                 {
@@ -331,6 +335,7 @@ namespace sl::engine
                 }
                 if (playsNote (v, pid))
                 {
+                    v.m = e.m;   // the same pass, or (F3) the voice came over the loop end into this one
                     v.switchTo (&X, e.U);
                     return;
                 }
@@ -381,36 +386,67 @@ namespace sl::engine
             const double U = X.s + mD * Lb;
             if (! (u < U + eff) || C.kOf (U) >= kNow)
                 continue;
+            // The chain's first note, walking back. F3 (M8): a previous note that wraps played in the previous loop pass.
+            // The walk crosses the loop end once at most, and never to a pass before bar 1, so a chain that goes round
+            // the clip for ever (a whole-loop note joined to its own next start) is replayed from one pass back.
             std::int32_t first = i;
-            double Uf = U;
+            double Uf = U, mF = mD;
+            bool crossed = false;
             for (int g = 0; g < 256; ++g)
             {
                 const core::NoteSnap& F = notes[static_cast<std::size_t> (first)];
-                const std::int32_t pvIndex = core::resolve (F, I).chain.prevIndex;
-                const core::NoteSnap* pv = snapshotNote (snap, pvIndex);
-                if (pv == nullptr || ! (pv->s < F.s))
+                const core::ChainSnap ch = core::resolve (F, I).chain;
+                const core::NoteSnap* pv = snapshotNote (snap, ch.prevIndex);
+                if (pv == nullptr)
                     break;
-                first = pvIndex;
-                Uf = pv->s + mD * Lb;
+                if (ch.prevWraps)
+                {
+                    if (! C.ties() || crossed || mF < 1)
+                        break;
+                    crossed = true;
+                    mF -= 1;
+                }
+                else if (! (pv->s < F.s))
+                {
+                    break;
+                }
+                first = ch.prevIndex;
+                Uf = pv->s + mF * Lb;
             }
+            // ... then forward to the note that has started last by now; it must be this one, in this pass
             std::int32_t cur = first;
+            double mC = mF;
             for (int g = 0; g < 256; ++g)
             {
                 const core::NoteSnap& Cn = notes[static_cast<std::size_t> (cur)];
-                const std::int32_t nxIndex = core::resolve (Cn, I).chain.nextIndex;
-                const core::NoteSnap* nx = snapshotNote (snap, nxIndex);
-                if (nx == nullptr || ! (nx->s > Cn.s) || nx->s + mD * Lb > u)
+                const core::ChainSnap ch = core::resolve (Cn, I).chain;
+                const core::NoteSnap* nx = snapshotNote (snap, ch.nextIndex);
+                if (nx == nullptr)
                     break;
-                cur = nxIndex;
+                double mN = mC;
+                if (ch.nextWraps)
+                {
+                    if (! C.ties())
+                        break;
+                    mN = mC + 1;
+                }
+                else if (! (nx->s > Cn.s))
+                {
+                    break;
+                }
+                if (nx->s + mN * Lb > u)
+                    break;
+                cur = ch.nextIndex;
+                mC = mN;
             }
-            if (cur != i)
+            if (cur != i || mC < mD || mC > mD)
                 continue;
 
             Voice* v = allocVoice();
             if (v == nullptr)
                 return;
             const int slot = static_cast<int> (v - voicePool.get());
-            v->initClip (ctx, source, snap, snapEpoch, first, Uf, toInt64 (mD), C.kOf (Uf), ++serial);
+            v->initClip (ctx, source, snap, snapEpoch, first, Uf, toInt64 (mF), C.kOf (Uf), ++serial);
             if (remaining > 0)
             {
                 std::int64_t ticks = v->chaseBegin (kNow);

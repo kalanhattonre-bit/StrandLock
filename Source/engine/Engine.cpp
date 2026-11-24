@@ -111,6 +111,7 @@ namespace sl::engine
         noteCount = 0;
         notesSearchable = false;
         clock.Lb = 16;
+        clock.tie = false;
         src = nullptr;
         srcEpoch = 0;
         source = VoiceSource::of (nullptr, 0, sr);
@@ -277,6 +278,7 @@ namespace sl::engine
         const double bars = snapshot != nullptr ? static_cast<double> (snapshot->bars) : 4;
         const double bpb = snapshot != nullptr ? static_cast<double> (snapshot->beatsPerBar) : 4;
         clock.Lb = jsMax (1, bars) * jsMax (1, bpb);
+        clock.tie = snapshot != nullptr && snapshot->tieAcrossLoop;   // F3 (M8): notes hold on over the loop end
         // the start list's deferral names notes by index: a new snapshot ends it
         deferActive = false;
 

@@ -60,11 +60,13 @@ namespace sl::test::render
     bool renderFixtureCase (const core::JsonValue& c, const std::map<std::string, model::Clip>& clips, Rendered& out, std::string& why);
 
     /** M7 V4 (the fast-reads rows): the case's sound with its octave levels built, as the SampleManager's worker builds
-        them, and the engine's switch for them. The defaults render as M2 and M3 did: no levels at all. */
+        them, and the engine's switch for them. The defaults render as M2 and M3 did: no levels at all.
+        M8 W1 (F3): tieAcrossLoop on for the case's clips and raw snapshots (off by default: the parity setting). */
     struct FixtureOptions
     {
         bool buildLevels = false;
         bool levelsOn = true;
+        bool tieAcrossLoop = false;
     };
 
     /** The same, with the octave levels as options say. */
@@ -99,6 +101,9 @@ namespace sl::test::render
 
     /** A compiled snapshot of a clip (parity clip settings). */
     std::unique_ptr<core::Snapshot> compile (model::Clip clip, int res = 256);
+
+    /** The same with tieAcrossLoop as given (M8 W1, F3): beatsPerBar 4, offsetBeats 0, loop on. */
+    std::unique_ptr<core::Snapshot> compileTied (model::Clip clip, bool tieAcrossLoop, int res = 256);
 
     /** First sample at or after `from` where |L| or |R| is not 0, -1 when none before `to`. */
     std::int64_t firstSounding (const std::vector<float>& L, const std::vector<float>& R, std::int64_t from, std::int64_t to);

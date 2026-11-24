@@ -29,6 +29,23 @@ namespace sl::model
         return it != index.end() ? &entries[it->second].second : nullptr;
     }
 
+    double loopBeats (const Clip& clip) noexcept
+    {
+        // the engine's Lb: max (1, bars) x max (1, beatsPerBar)
+        return jsMax (1.0, static_cast<double> (clip.bars)) * jsMax (1.0, static_cast<double> (clip.beatsPerBar));
+    }
+
+    double glideEnd (const Note& n, const Clip& clip) noexcept
+    {
+        if (tiesAcrossLoop (clip))
+        {
+            const double Lb = loopBeats (clip);
+            if (n.s >= 0.0 && n.s < Lb)
+                return n.s + jsMin (n.l, Lb);
+        }
+        return n.s + n.l;
+    }
+
     double startSemis (const Note& n)
     {
         return (noteLane (n, core::LaneId::pitch).front().v - 0.5) * 24.0;
@@ -66,16 +83,30 @@ namespace sl::model
             return gc != 0.0 && ! std::isnan (gc) ? gc : 0.0;
         }
 
-        bool contains (const std::vector<const Note*>& list, const Note* n) noexcept
+        /** A candidate target of an automatic glide: the note, whether it is the next pass's (F3), and its start
+            counted from the source's pass (m.s, or m.s plus one loop). The JS candidates are the notes themselves:
+            with the tie off every candidate is m.s, wraps false. */
+        struct Cand
         {
-            return std::find (list.begin(), list.end(), n) != list.end();
+            const Note* m = nullptr;
+            bool wraps = false;
+            double s = 0.0;
+
+            bool operator== (const Cand& o) const noexcept { return m == o.m && wraps == o.wraps; }
+        };
+
+        bool candByP (const Cand& a, const Cand& b) noexcept { return byP (a.m, b.m); }
+
+        bool contains (const std::vector<Cand>& list, const Cand& c) noexcept
+        {
+            return std::find (list.begin(), list.end(), c) != list.end();
         }
 
         struct Info
         {
             const Note* n = nullptr;
             double end = 0.0, s0 = 0.0;
-            std::vector<const Note*> group;
+            std::vector<Cand> group;
         };
 
         std::unordered_map<std::string, const Note*> notesById (const Clip& clip)
@@ -92,6 +123,8 @@ namespace sl::model
     {
         const core::Inst I = core::normalizeInst (inst);
         const auto byId = notesById (clip);
+        const bool tie = tiesAcrossLoop (clip);
+        const double Lb = loopBeats (clip);
         GlideMap out;
         auto glen = [&I] (const Note& n) { return jsMax (0.0, n.glide.has_value() ? *n.glide : I.glideTime); };
 
@@ -103,7 +136,10 @@ namespace sl::model
             if (it == byId.end() || it->second == n.get())
                 continue;
             const Note& m = *it->second;
-            out.set (n->id, Glide { glideD (*n, m), jsMin (glen (*n), n->l * 0.95), curveOf (n->gc), m.id, true });
+            Glide g { glideD (*n, m), jsMin (glen (*n), n->l * 0.95), curveOf (n->gc), m.id, true };
+            // F3: with the tie on, a link to a note that does not start after its source slides into that note's next start
+            g.wraps = tie && ! (m.s > n->s);
+            out.set (n->id, std::move (g));
         }
         if (I.glideMode == core::GlideMode::off)
             return out;
@@ -121,28 +157,39 @@ namespace sl::model
             const Note* n = np.get();
             if (out.contains (n->id))
                 continue;
-            const double end = n->s + n->l, hi = end + reach;
-            std::vector<const Note*> cand;
+            const double end = glideEnd (*n, clip), hi = end + reach;
+            std::vector<Cand> cand;
             for (const NotePtr& mp : clip.notes)
             {
                 const Note* m = mp.get();
                 if (m != n && linkedTo.count (m->id) == 0 && m->s > n->s + 1e-3 && m->s >= end - tol && m->s <= hi
                     && std::abs (m->p - n->p) <= 12.0)
-                    cand.push_back (m);
+                    cand.push_back (Cand { m, false, m->s });
             }
+            // F3: a note inside a clip that ties across the loop is followed by the next pass's notes too, the note itself
+            // among them (a whole-loop note joins its own next start)
+            if (tie && n->s >= 0.0 && n->s < Lb)
+                for (const NotePtr& mp : clip.notes)
+                {
+                    const Note* m = mp.get();
+                    const double s = m->s + Lb;
+                    if (m->s >= 0.0 && m->s < Lb && linkedTo.count (m->id) == 0 && s > n->s + 1e-3 && s >= end - tol && s <= hi
+                        && std::abs (m->p - n->p) <= 12.0)
+                        cand.push_back (Cand { m, true, s });
+                }
             if (cand.empty())
                 continue;
-            double s0 = cand[0]->s;
-            for (const Note* m : cand)
-                s0 = jsMin (s0, m->s);
+            double s0 = cand[0].s;
+            for (const Cand& c : cand)
+                s0 = jsMin (s0, c.s);
             Info a;
             a.n = n;
             a.end = end;
             a.s0 = s0;
-            for (const Note* m : cand)
-                if (m->s <= s0 + 0.05)
-                    a.group.push_back (m);
-            std::stable_sort (a.group.begin(), a.group.end(), byP);
+            for (const Cand& c : cand)
+                if (c.s <= s0 + 0.05)
+                    a.group.push_back (c);
+            std::stable_sort (a.group.begin(), a.group.end(), candByP);
             info.push_back (std::move (a));
         }
 
@@ -163,7 +210,7 @@ namespace sl::model
                 const Info& a = info[i];
                 const Info& b = info[j];
                 if (std::abs (a.end - b.end) < 0.05 && std::abs (a.s0 - b.s0) < 0.05
-                    && std::any_of (a.group.begin(), a.group.end(), [&b] (const Note* m) { return contains (b.group, m); }))
+                    && std::any_of (a.group.begin(), a.group.end(), [&b] (const Cand& m) { return contains (b.group, m); }))
                 {
                     const std::size_t ri = find (i);   // root[find (i)] = find (j), in JavaScript's order
                     const std::size_t rj = find (j);
@@ -194,12 +241,12 @@ namespace sl::model
         {
             std::stable_sort (peers.begin(), peers.end(), [] (const Info* a, const Info* b) { return byP (a->n, b->n); });
             // [...new Set ([].concat (...peers.map (a => a.group)))].sort (byP)
-            std::vector<const Note*> all;
+            std::vector<Cand> all;
             for (const Info* a : peers)
-                for (const Note* m : a->group)
+                for (const Cand& m : a->group)
                     if (! contains (all, m))
                         all.push_back (m);
-            std::stable_sort (all.begin(), all.end(), byP);
+            std::stable_sort (all.begin(), all.end(), candByP);
 
             for (std::size_t r = 0; r < peers.size(); ++r)
             {
@@ -207,41 +254,46 @@ namespace sl::model
                 const Note& n = *a.n;
                 auto nearest = [&a] (double want)
                 {
-                    const Note* x = a.group[0];
+                    const Cand* x = &a.group[0];
                     for (std::size_t k = 1; k < a.group.size(); ++k)
                     {
-                        const Note* y = a.group[k];
-                        if (std::abs (y->p - want) < std::abs (x->p - want))
+                        const Cand* y = &a.group[k];
+                        if (std::abs (y->m->p - want) < std::abs (x->m->p - want))
                             x = y;
                     }
-                    return x;
+                    return *x;
                 };
-                const Note* tgt = nullptr;
+                Cand tgt;
                 if (peers.size() > 1 && all.size() > 1)
                 {
                     const double at = core::jsRound (static_cast<double> (r) * static_cast<double> (all.size() - 1)
                                                      / static_cast<double> (peers.size() - 1));
-                    const Note* ranked = all[static_cast<std::size_t> (at)];
-                    tgt = contains (a.group, ranked) ? ranked : nearest (ranked->p);
+                    const Cand& ranked = all[static_cast<std::size_t> (at)];
+                    tgt = contains (a.group, ranked) ? ranked : nearest (ranked.m->p);
                 }
                 else
                 {
                     tgt = nearest (n.p);
                 }
-                out.set (n.id, Glide { glideD (n, *tgt), jsMin (glen (n), n.l * 0.95), curveOf (n.gc), tgt->id, false });
+                Glide g { glideD (n, *tgt.m), jsMin (glen (n), n.l * 0.95), curveOf (n.gc), tgt.m->id, false };
+                g.wraps = tgt.wraps;
+                out.set (n.id, std::move (g));
             }
         }
         return out;
     }
 
-    Chains buildChains (const Clip& clip, const GlideMap& glides)
+    ChainLinks buildChainLinks (const Clip& clip, const GlideMap& glides)
     {
         const auto byId = notesById (clip);
+        const bool tie = tiesAcrossLoop (clip);
+        const double Lb = loopBeats (clip);
 
         struct In
         {
             const Note* n;
             const Glide* g;
+            bool wraps;
         };
         // incoming: a Map keyed by the target id, in the order the targets first appear
         std::vector<std::pair<std::string, std::vector<In>>> incoming;
@@ -254,21 +306,24 @@ namespace sl::model
                 continue;
             const Note* n = ni->second;
             const Note* m = mi->second;
-            if (m == n || m->sample.restart || ! (m->s > n->s))
+            // F3: a glide into the next pass joins when its target starts after the source there (always, for a note
+            // inside the clip), the source itself included; with the tie off such a glide never joins, as in the JS
+            const bool wraps = tie && g.wraps;
+            if (m->sample.restart || (wraps ? ! (m->s + Lb > n->s) : (m == n || ! (m->s > n->s))))
                 continue;
             const auto it = incomingAt.find (m->id);
             if (it == incomingAt.end())
             {
                 incomingAt.emplace (m->id, incoming.size());
-                incoming.emplace_back (m->id, std::vector<In> { In { n, &g } });
+                incoming.emplace_back (m->id, std::vector<In> { In { n, &g, wraps } });
             }
             else
             {
-                incoming[it->second].second.push_back (In { n, &g });
+                incoming[it->second].second.push_back (In { n, &g, wraps });
             }
         }
 
-        std::unordered_map<std::string, std::string> next, prev;
+        ChainLinks out;
         for (auto& [mid, list] : incoming)
         {
             // (b.g.linked - a.g.linked) || Math.abs (a.g.d) - Math.abs (b.g.d) || timeCmp (a.n, b.n)
@@ -282,11 +337,10 @@ namespace sl::model
                 return k < 0;
             });
             const std::string& src = list[0].n->id;
-            next[src] = mid;
-            prev[mid] = src;
+            out.next[src] = ChainLink { mid, list[0].wraps };
+            out.prev[mid] = ChainLink { src, list[0].wraps };
         }
 
-        Chains chains;
         std::unordered_set<std::string> seen;
         auto walkFrom = [&] (const std::string& head)
         {
@@ -296,19 +350,24 @@ namespace sl::model
             {
                 seen.insert (*id);
                 ch.push_back (*id);
-                const auto it = next.find (*id);
-                id = it != next.end() ? std::optional<std::string> (it->second) : std::nullopt;
+                const auto it = out.next.find (*id);
+                id = it != out.next.end() ? std::optional<std::string> (it->second.id) : std::nullopt;
             }
             return ch;
         };
         const std::vector<NotePtr> ordered = timeOrder (clip.notes);
         for (const NotePtr& n : ordered)
-            if (prev.count (n->id) == 0 && seen.count (n->id) == 0)
-                chains.push_back (walkFrom (n->id));
-        for (const NotePtr& n : ordered)   // cycle guard
+            if (out.prev.count (n->id) == 0 && seen.count (n->id) == 0)
+                out.chains.push_back (walkFrom (n->id));
+        for (const NotePtr& n : ordered)   // cycle guard (F3: a chain that goes round the loop starts at its earliest note)
             if (seen.count (n->id) == 0)
-                chains.push_back (walkFrom (n->id));
-        return chains;
+                out.chains.push_back (walkFrom (n->id));
+        return out;
+    }
+
+    Chains buildChains (const Clip& clip, const GlideMap& glides)
+    {
+        return buildChainLinks (clip, glides).chains;
     }
 
     Chains buildChains (const Clip& clip)

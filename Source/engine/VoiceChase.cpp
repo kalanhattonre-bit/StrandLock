@@ -110,12 +110,21 @@ namespace sl::engine
         const double u = C.uAt (kk);
         for (int guard = 0; guard < 64; ++guard)
         {
-            const core::NoteSnap* nx = chainNext();
-            if (nx == nullptr || ! (nx->s > note->s))
+            if (kind != VoiceKind::clip || snap == nullptr)
                 return;
-            const double Un = nx->s + static_cast<double> (m) * C.Lb;
+            // F3 (M8): a next note that wraps starts in the next loop pass (a step followed only while the clip ties);
+            // the voice then plays that pass
+            const core::ChainSnap ch = resolved().chain;
+            if (ch.nextWraps && ! C.ties())
+                return;
+            const core::NoteSnap* nx = snapshotNote (snap, ch.nextIndex);
+            if (nx == nullptr || ! (ch.nextWraps || nx->s > note->s))
+                return;
+            const std::int64_t pass = ch.nextWraps ? m + 1 : m;
+            const double Un = nx->s + static_cast<double> (pass) * C.Lb;
             if (Un > u)
                 return;
+            m = pass;
             switchTo (nx, Un);
         }
     }

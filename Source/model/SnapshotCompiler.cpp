@@ -129,14 +129,14 @@ namespace sl::model
         const Clip c = normalizeClip (clip);   // the same notes, in the same order
 
         std::array<GlideMap, 3> glides;
-        std::array<Chains, 3> chains;
+        std::array<ChainLinks, 3> chains;
         for (int m = 0; m < 3; ++m)
         {
             core::Inst inst = core::defaultInst();
             inst.glideMode = static_cast<core::GlideMode> (m);
             const auto mi = static_cast<std::size_t> (m);
             glides[mi] = computeGlides (c, inst);
-            chains[mi] = buildChains (c, glides[mi]);
+            chains[mi] = buildChainLinks (c, glides[mi]);
         }
 
         const std::vector<NotePtr> order = timeOrder (c.notes);
@@ -155,12 +155,15 @@ namespace sl::model
             return it != indexOf.end() ? it->second : -1;
         };
 
-        // chainOf for each mode: the chain's first note, the place in it, the neighbours
+        // chainOf for each mode: the chain's first note, the place in it, the neighbours. The neighbours come from the
+        // links, which are the chain's own neighbours (with the tie off always) and also keep the step that closes a
+        // chain going round the loop (F3), with whether each step wraps.
         std::array<std::vector<core::ChainSnap>, 3> chainOf;
         for (std::size_t m = 0; m < 3; ++m)
         {
             chainOf[m].assign (count, core::ChainSnap {});
-            for (const auto& ch : chains[m])
+            const ChainLinks& L = chains[m];
+            for (const auto& ch : L.chains)
                 for (std::size_t i = 0; i < ch.size(); ++i)
                 {
                     const std::int32_t k = at (ch[i]);
@@ -169,8 +172,12 @@ namespace sl::model
                     core::ChainSnap& cs = chainOf[m][static_cast<std::size_t> (k)];
                     cs.firstIndex = at (ch[0]);
                     cs.index = static_cast<std::int32_t> (i);
-                    cs.prevIndex = i > 0 ? at (ch[i - 1]) : -1;
-                    cs.nextIndex = i + 1 < ch.size() ? at (ch[i + 1]) : -1;
+                    const auto pv = L.prev.find (ch[i]);
+                    const auto nx = L.next.find (ch[i]);
+                    cs.prevIndex = pv != L.prev.end() ? at (pv->second.id) : -1;
+                    cs.prevWraps = pv != L.prev.end() && pv->second.wraps;
+                    cs.nextIndex = nx != L.next.end() ? at (nx->second.id) : -1;
+                    cs.nextWraps = nx != L.next.end() && nx->second.wraps;
                 }
         }
 
@@ -223,6 +230,7 @@ namespace sl::model
                     x.glides[m].d = g->d;
                     x.glides[m].curve = g->curve;
                     x.glides[m].toIndex = at (g->toId);
+                    x.glides[m].wraps = g->wraps;   // F3: into the next pass
                 }
                 x.chains[m] = chainOf[m][k];
             }

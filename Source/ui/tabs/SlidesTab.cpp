@@ -1,6 +1,7 @@
 #include "SlidesTab.h"
 
 #include "PluginProcessor.h"
+#include "model/Clip.h"
 #include "core/JsCompat.h"
 #include "params/ParamText.h"
 #include "params/ParameterLayout.h"
@@ -149,7 +150,27 @@ namespace sl::ui
             roll.getTools().slideJump();
             edited();
         });
+
+        // M8 W1 (F3): the clip's tieAcrossLoop, lit while on
+        shortSeparator();
+        holdButton = &button ("Hold over the loop end",
+                              "On: a note that crosses the end of the clip carries on into the next time round, and the last note can "
+                              "slide into the first. Off: every note stops at the end of the clip",
+                              [this] { toggleHold(); });
+        holdButton->setClickingTogglesState (false);
         sync();
+    }
+
+    void SlidesTab::toggleHold()
+    {
+        const auto clip = processor.getDocument().current();
+        if (clip == nullptr)
+            return;
+        model::Clip next = *clip;
+        next.tieAcrossLoop = ! clip->tieAcrossLoop;
+        const std::string label = next.tieAcrossLoop ? "Hold over the loop end on" : "Hold over the loop end off";
+        processor.editClip (label, std::move (next));   // one undo step; the publisher plays the new clip
+        edited();
     }
 
     juce::String SlidesTab::notesText() const
@@ -188,5 +209,9 @@ namespace sl::ui
             shownText = text;
             notesSlider->repaint();
         }
+        const auto clip = processor.getDocument().current();
+        const bool hold = clip != nullptr && clip->tieAcrossLoop;
+        if (holdButton->getToggleState() != hold)
+            holdButton->setToggleState (hold, juce::dontSendNotification);
     }
 }

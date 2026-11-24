@@ -194,7 +194,7 @@ namespace sl::ui::roll
         Key key;
         key.bw = bw;
         key.bpm = bpm;
-        key.vibRate = inst.vibRate;
+        key.vibRate = core::vibratoHz (inst, bpm);   // M8 W1: a synced vibrato draws at its rate at this tempo
         key.hasGlide = g != nullptr;
         if (g != nullptr)
         {
@@ -233,7 +233,7 @@ namespace sl::ui::roll
             }
             G.base[(std::size_t) i] = (float) s;
             const double depth = V.size() == P.size() ? (double) V[(std::size_t) i] : 0.0;
-            G.vib[(std::size_t) i] = (float) (depth * std::sin (2.0 * kPi * inst.vibRate * t * dur));
+            G.vib[(std::size_t) i] = (float) (depth * std::sin (2.0 * kPi * key.vibRate * t * dur));
             const double a = s + (double) G.vib[(std::size_t) i];
             if (a < smin)
                 smin = a;

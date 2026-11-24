@@ -27,6 +27,10 @@ namespace sl::engine
         double freeBeat0 = 0;                   // the free-running beat clock while stopped
         std::int64_t freeK0 = 0;
         double Lb = 16;                         // the clip length in beats: max (1, bars) x max (1, beatsPerBar)
+        bool tie = false;                       // F3 (M8): the snapshot's tieAcrossLoop (setSnapshot)
+
+        /** F3: notes hold on and slide over the loop end while the clip loops with tieAcrossLoop on. */
+        bool ties() const noexcept { return loop && tie; }
 
         /** uAt (k): the unwrapped song beat at sample k. */
         double uAt (std::int64_t k) const noexcept { return anchorBeat + static_cast<double> (k - anchorK) * db; }
@@ -53,7 +57,14 @@ namespace sl::engine
             return anchorK + toInt64 (std::ceil ((U - anchorBeat) / db - 1e-7));
         }
 
-        /** effLen (X): the length a note plays; with loop on it is cut at the clip end (tieAcrossLoop is M8's). */
-        double effLen (const core::NoteSnap& X) const noexcept { return loop ? jsMin (X.l, Lb - X.s) : X.l; }
+        /** effLen (X): the length a note plays; with loop on it is cut at the clip end (the prototype). F3 (M8): with
+            the tie on, a note that starts inside the clip holds on over the loop end into the next pass for its whole
+            length, at most one loop, so it has ended when its own next start comes round. */
+        double effLen (const core::NoteSnap& X) const noexcept
+        {
+            if (tie && loop && X.s >= 0 && X.s < Lb)
+                return jsMin (X.l, Lb);
+            return loop ? jsMin (X.l, Lb - X.s) : X.l;
+        }
     };
 }
