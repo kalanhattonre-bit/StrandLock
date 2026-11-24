@@ -1707,6 +1707,63 @@ part needs them. The model (M1) is not M7's: a need there goes in NOTES-M7.
    stay M0's sliders (the prototype has no knobs for them to copy), and MidiRouter's stop-then-start at a Preview
    hand-over stays as built: no restart flag on `engine::Transport` in v1.
 
+### 7.10 M8: who builds what, and the architect's decisions (2026-11-24)
+
+**Order.** M8 is one chain on branch `m8-live`, each part fast-forwarding main when CI is green: W1 (notes that hold on
+across the loop end, F3: `model::Glides` across the loop, `Clip::tieAcrossLoop`, the engine's `effLen`; and Vibrato
+Sync, `vibSync`) -> W2 (presets and imports: the Sound and Clip preset menus kept separate, U4; user presets
+`.slsound` / `.slclip`; prototype save import by Paste or drop) -> W3 (Rec through the audio-thread queue with
+velocity, bend, the wheels and CC64; the Mod wheels tab with MIDI Learn and Let go) -> W4 (the live template, A4; M7's
+E3 line on the Sample tab; an M8 section in `docs/CUBASE-CHECKLIST.md`). Then review and a fix pass. Each part writes
+its section in `docs/NOTES-M8.md` (W1-W4, Fix) with a Progress list.
+
+**Ownership.** W1 owns the model's glide and loop code for F3 (`model::Glides`, `Clip::tieAcrossLoop`), the engine's
+`effLen` and vibrato rate, `Tests/engine/test_tie_loop.cpp` and `test_vibsync.cpp`. W2 owns `ui/PresetMenus`,
+`state/PrototypeImport.*`, the user preset files, `tools/fixtures/state.js` and `Tests/fixtures/state/**`
+(append-only), `Tests/plugin/test_presets.cpp` and `test_import.cpp`. W3 owns `doc/Recorder.*`, the engine's RecTap,
+`ui/tabs/ModWheelsTab` and `Tests/plugin/test_rec.cpp`. W4 owns the live template and the checklist section. M0-M7
+files where a part needs them. The model (M1) changes only as F3 needs; any other need there goes in NOTES-M8.
+
+**Decisions.**
+1. **A recording pass is the prototype's** (sl-ui.js, "record"): played notes join the clip at once; a pass ends when
+   the loop goes round, on Stop, when Rec is switched off, or just before any other edit, and becomes one undo step
+   "Record (n notes)". A loop pass adds to the notes already there (overdub, section 9 answer 2); there is no Replace.
+   A note still sounding when the loop goes round is written up to the loop end and carries on from the start of the
+   next pass, as in the prototype. At 4096 notes the pass stops adding notes with a toast and is still one undo step.
+2. **Rec reads the audio thread, not a UI timer** (8.2 #10): RecTap pushes note on and off with their sample
+   positions, velocity, bend, both wheels and CC64 into `rt::SpscFifo<RecEvent, 8192>`; the Recorder drains it on the
+   message thread. A full queue drops events, counts them and says so once; the audio thread never waits. Bend writes
+   the pitch lane as 0.5 + bend x bendRange / 24. Wheel and bend curves are simplified with RDP 0.012, as the M8 row
+   says (the prototype uses 0.015: a deviation for 8.2).
+3. **Mod wheels move only the keys played live** (section 9 answer 4). A wheel's target is any of the 10 lanes,
+   the Sample sub-lanes included (8.2 #24). MIDI Learn takes the first other CC after it is armed (1.10). Let go
+   returns a wheel to its rest value (a UI -> audio command, 1.3). Targets and CCs live in INST.
+4. **The live template is built** (A4 is cheap after M6): "Use as live template" on a selected note stores its id in
+   INST `liveTemplateNoteId`; a live key then follows that note's lanes, each curve timed from key-down in the note's
+   own beats at the current tempo and holding its last value after the note's length; the mod wheels act on top.
+   Deleting the note clears the template; Undo, Redo and the project keep it.
+5. **Presets.** Sound presets (8) and Clip presets (12: PROMPT's 6 and 6 added, 8.2 #23) are two separate menus
+   (U4). A sound preset changes no clip byte, a clip preset no parameter. User presets follow section 3
+   (`Documents\StrandLock\Presets\<name>.slsound` and `<name>.slclip`) and show under "My presets" in each menu; a
+   save followed by a load gives the same file byte for byte.
+6. **Prototype import** follows section 3 exactly: v3 and v4 saves, "Paste prototype save" or a dropped `.json` or
+   `.txt` file holding a save; one undo step "Import prototype save"; settings the prototypes never had get the
+   plugin's defaults (beatsPerBar 4, offsetBeats 0, tieAcrossLoop on); it never changes the loaded sound's audio.
+7. **F3.** `tieAcrossLoop` is on for new clips and imports and off for the parity tests; with it off the engine is the
+   prototype's (every `engine/renders.json` case passes). A slide into the next pass is allowed. It is a clip setting
+   with one switch beside the clip's other settings, and one undo step.
+8. **Vibrato Sync.** `vibSync` (parameter 42: Free and 21 rates) sets the vibrato rate from the host tempo (the
+   Preview clock while previewing). Free is bit for bit with M3. Synced rates keep their sound when `beatsPerBar`
+   changes, as the plan's beatsPerBar rule says.
+9. **M7's notes for the architect** (NOTES-M7, Fix, "For the architect"): (a) the Windows CPU figure for fast reads
+   (13.8 to 20 % slower against the 15 % target; the faster-than-real-time gate passes) is accepted and stays printed;
+   (b) reads between 1x and 1.25x of the sound, and above 10x, fold as NOTES-M7 records: accepted for v1, and 8.2 gets
+   the rows at M9; (c) W4 builds the E3 engine suggestion on the Sample tab, showing the strip's suggestion with its
+   button; (d) estimateTempo's halving branch stays without a fixture case; (e) the octave levels' extra second on a
+   10-minute load is accepted; (f) the drag sources wait for Kalan's checklist answers; (g) the plan-text updates
+   NOTES-M7 lists (1.1's sixth analysis file, 1.11's sanitizer groups, 8.2 rows for decision 3 and the input guards)
+   are folded in at M9.
+
 ---
 
 ## 8. Deviations
